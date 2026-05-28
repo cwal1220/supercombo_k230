@@ -22,6 +22,8 @@ set(K230_SYSROOT_LIB_DIR "/usr/lib/riscv64-linux-gnu" CACHE PATH
 set(NNCASE_DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps" CACHE PATH
     "nncase K230 runtime dependency directory")
 
+find_package(OpenCV REQUIRED COMPONENTS core imgproc)
+
 set(PROJECT_WARNINGS -Wall -Wextra)
 set(PROJECT_LOCAL_INCLUDES
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -30,6 +32,7 @@ set(PROJECT_LOCAL_INCLUDES
 set(PROJECT_SYSTEM_INCLUDES
   "${NNCASE_DEPS_DIR}/include"
   "/usr/include/libdrm"
+  ${OpenCV_INCLUDE_DIRS}
 )
 
 set(NNCASE_STATIC_LIBS
@@ -99,6 +102,7 @@ configure_k230_target(supercombo_elf
   ${NNCASE_STATIC_LIBS}
   mmz
   ${K230_SHARED_LIBS}
+  ${OpenCV_LIBS}
 )
 
 add_executable(k230_camerad
@@ -132,6 +136,7 @@ add_executable(k230_overlay
 configure_k230_target(k230_overlay
   mmz
   ${K230_SHARED_LIBS}
+  ${OpenCV_LIBS}
 )
 
 if(SUPERCOMBO_BUILD_BENCHMARKS)

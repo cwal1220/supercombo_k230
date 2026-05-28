@@ -5,7 +5,10 @@ AR ?= ar
 CXXFLAGS ?= -std=c++17 -O3 -DNDEBUG -Wall -Wextra
 CFLAGS ?= -O2 -DNDEBUG -Wall -Wextra
 
-INCLUDES := -Isrc -Iinclude -Ideps/include -I/usr/include/libdrm
+OPENCV_CFLAGS ?= $(shell pkg-config --cflags opencv4 2>/dev/null || echo -I/usr/include/opencv4)
+OPENCV_LIBS ?= $(shell pkg-config --libs-only-L --libs-only-other opencv4 2>/dev/null) -lopencv_imgproc -lopencv_core
+
+INCLUDES := -Isrc -Iinclude -Ideps/include -I/usr/include/libdrm $(OPENCV_CFLAGS)
 LIBDIRS := -L/usr/lib/riscv64-linux-gnu
 STATIC_LIBS := deps/lib/libNncase.Runtime.Native.a deps/lib/libnncase.rt_modules.k230.a deps/lib/libfunctional_k230.a build/libmmz.a
 SHARED_LIBS := /usr/lib/riscv64-linux-gnu/libv4l2-drm.so /usr/lib/riscv64-linux-gnu/libdisplay.so /usr/lib/riscv64-linux-gnu/libdrm.so.2
@@ -87,7 +90,7 @@ build/libmmz.a: build/mmz.o
 	$(AR) rcs $@ $<
 
 supercombo.elf: $(MONOLITH_OBJS) build/libmmz.a
-	$(CXX) $(CXXFLAGS) $(MONOLITH_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group $(STATIC_LIBS) $(SHARED_LIBS) $(LDLIBS) -Wl,--end-group
+	$(CXX) $(CXXFLAGS) $(MONOLITH_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group $(STATIC_LIBS) $(SHARED_LIBS) $(OPENCV_LIBS) $(LDLIBS) -Wl,--end-group
 
 k230_camerad: $(CAMERAD_OBJS) build/libmmz.a
 	$(CXX) $(CXXFLAGS) $(CAMERAD_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group build/libmmz.a $(SHARED_LIBS) $(LDLIBS) -Wl,--end-group
@@ -96,7 +99,7 @@ k230_modeld: $(MODELD_OBJS) build/libmmz.a
 	$(CXX) $(CXXFLAGS) $(MODELD_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group $(STATIC_LIBS) $(SHARED_LIBS) $(LDLIBS) -Wl,--end-group
 
 k230_overlay: $(OVERLAY_OBJS) build/libmmz.a
-	$(CXX) $(CXXFLAGS) $(OVERLAY_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group build/libmmz.a $(SHARED_LIBS) $(LDLIBS) -Wl,--end-group
+	$(CXX) $(CXXFLAGS) $(OVERLAY_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group build/libmmz.a $(SHARED_LIBS) $(OPENCV_LIBS) $(LDLIBS) -Wl,--end-group
 
 clean:
 	rm -rf build supercombo.elf k230_camerad k230_modeld k230_overlay

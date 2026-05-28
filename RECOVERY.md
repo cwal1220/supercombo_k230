@@ -51,6 +51,7 @@ apt-get install -y \
   g++ \
   git \
   libdrm-dev \
+  libopencv-dev \
   make \
   python3
 ```
@@ -59,6 +60,7 @@ Package purpose:
 
 - `g++`, `make`, `cmake`: board-native C/C++ build
 - `libdrm-dev`: DRM headers used by the overlay/display path
+- `libopencv-dev`: OpenCV headers/libraries used by the overlay renderer
 - `curl`, `ca-certificates`: `fetch_nncase_runtime.sh` download support
 - `git`: fresh GitHub restore
 - `python3`: `k230_manager.py`

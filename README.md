@@ -29,6 +29,7 @@ apt-get install -y \
   g++ \
   git \
   libdrm-dev \
+  libopencv-dev \
   make \
   python3
 ```
@@ -37,6 +38,7 @@ Package purpose:
 
 - `g++`, `make`, `cmake`: board-native C/C++ build
 - `libdrm-dev`: DRM headers used by the overlay/display path
+- `libopencv-dev`: OpenCV headers/libraries used by the overlay renderer
 - `curl`, `ca-certificates`: `fetch_nncase_runtime.sh` download support
 - `git`: fresh clone from GitHub
 - `python3`: `k230_manager.py`
@@ -130,8 +132,8 @@ Runtime structure:
     the K230 road-frame projection used by the pre-refactor runtime;
     openpilot-style `view_from_calib` remains available for experiments.
 - `src/overlay_renderer.*`
-  - draws plan/lane/road-edge/lead overlay with the CPU ARGB8888 raster path
-    for both the split DRM overlay process and the monolithic rollback app.
+  - draws plan/lane/road-edge/lead overlay with OpenCV into the CPU ARGB8888
+    buffer used by the split DRM overlay process and monolithic rollback app.
 - `src/lateral_control.*`
   - computes a `LateralTarget` skeleton only; it does not send CAN or steering
     commands.
