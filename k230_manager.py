@@ -1,0 +1,303 @@
+#!/usr/bin/env python3
+import mmap
+import os
+import shlex
+import signal
+import struct
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+
+
+IPC_MAGIC = 0x4B323349
+IPC_VERSION = 1
+HEADER = struct.Struct("<IIIIQQII")
+HEADER_SIZE = HEADER.size
+PROCESS = struct.Struct("<16sIiiIQ")
+MANAGER_STATE_SIZE = 8 + 4 + 4 + PROCESS.size * 4
+DISPLAY_READY_FILE = "/tmp/k230_display_ready"
+START_ORDER = ("k230_overlay", "k230_camerad", "k230_modeld")
+PROCESS_ORDER = ("k230_camerad", "k230_modeld", "k230_overlay")
+
+
+def now_ns() -> int:
+    if hasattr(time, "CLOCK_BOOTTIME"):
+        return time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+    return time.monotonic_ns()
+
+
+def env_enabled(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value != "" and value != "0"
+
+
+class LatestPublisher:
+    def __init__(self, name: str, payload_size: int):
+        path = "/dev/shm/" + name.lstrip("/")
+        self.payload_size = payload_size
+        self.fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o664)
+        os.ftruncate(self.fd, HEADER_SIZE + payload_size)
+        self.map = mmap.mmap(self.fd, HEADER_SIZE + payload_size)
+        self._init_header_if_needed()
+
+    def _read_header(self):
+        self.map.seek(0)
+        return HEADER.unpack(self.map.read(HEADER_SIZE))
+
+    def _write_header(self, seq: int, timestamp_ns: int, payload_size: int):
+        self.map.seek(0)
+        self.map.write(HEADER.pack(
+            IPC_MAGIC,
+            IPC_VERSION,
+            self.payload_size,
+            0,
+            seq,
+            timestamp_ns,
+            payload_size,
+            0,
+        ))
+
+    def _init_header_if_needed(self):
+        try:
+            magic, version, capacity, _, seq, ts, size, _ = self._read_header()
+        except struct.error:
+            magic = version = capacity = seq = ts = size = 0
+        if magic != IPC_MAGIC or version != IPC_VERSION or capacity != self.payload_size:
+            self._write_header(0, 0, 0)
+
+    def publish(self, payload: bytes):
+        if len(payload) > self.payload_size:
+            raise ValueError("payload too large")
+        magic, version, capacity, reserved0, seq, ts, size, reserved1 = self._read_header()
+        if seq & 1:
+            seq += 1
+        self._write_header(seq + 1, ts, size)
+        self.map.seek(HEADER_SIZE)
+        self.map.write(payload)
+        if len(payload) < self.payload_size:
+            self.map.write(b"\x00" * (self.payload_size - len(payload)))
+        self._write_header(seq + 2, now_ns(), len(payload))
+
+    def close(self):
+        self.map.close()
+        os.close(self.fd)
+
+
+@dataclass
+class ProcSpec:
+    name: str
+    cmd: List[str]
+    disabled: bool = False
+    nice: int = 0
+
+
+@dataclass
+class ProcState:
+    spec: ProcSpec
+    proc: Optional[subprocess.Popen] = None
+    restart_count: int = 0
+    last_start_ns: int = 0
+    exit_code: int = 0
+    next_restart_monotonic: float = 0.0
+
+    def running(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+
+def command_from_env(name: str, fallback: List[str]) -> List[str]:
+    value = os.environ.get(name)
+    if value:
+        return shlex.split(value)
+    return fallback
+
+
+def int_from_env(name: str, fallback: int) -> int:
+    value = os.environ.get(name)
+    if value is None or value == "":
+        return fallback
+    try:
+        return int(value)
+    except ValueError:
+        return fallback
+
+
+def wait_for_file(path: str, timeout_ms: int) -> bool:
+    deadline = time.monotonic() + max(0, timeout_ms) / 1000.0
+    while time.monotonic() < deadline:
+        if os.path.exists(path):
+            return True
+        time.sleep(0.02)
+    return os.path.exists(path)
+
+
+def child_setup(nice_adjust: int):
+    os.setsid()
+    if nice_adjust != 0:
+        try:
+            os.nice(nice_adjust)
+        except OSError:
+            pass
+
+
+class Manager:
+    def __init__(self, argv: List[str]):
+        if len(argv) < 2 or len(argv) > 3:
+            raise ValueError(f"Usage: {argv[0] if argv else 'k230_manager.py'} <supercombo.kmodel> [debug_mode]")
+        self.kmodel = argv[1]
+        self.debug = argv[2] if len(argv) >= 3 else "1"
+        self.shutdown = False
+        self.no_restart = env_enabled("K230_NO_RESTART", False)
+        self.manager_state = LatestPublisher("/k230_manager_state", MANAGER_STATE_SIZE)
+        self.procs: Dict[str, ProcState] = {}
+
+        overlay_cmd = command_from_env("K230_OVERLAY_CMD", ["./k230_overlay"])
+        camerad_cmd = command_from_env("K230_CAMERAD_CMD", ["./k230_camerad"])
+        modeld_cmd = command_from_env("K230_MODELD_CMD", ["./k230_modeld", self.kmodel, self.debug])
+
+        specs = [
+            ProcSpec("k230_camerad", camerad_cmd, env_enabled("K230_DISABLE_CAMERA", False),
+                     int_from_env("K230_CAMERAD_NICE", 0)),
+            ProcSpec("k230_modeld", modeld_cmd, env_enabled("K230_DISABLE_MODEL", False),
+                     int_from_env("K230_MODELD_NICE", -5)),
+            ProcSpec("k230_overlay", overlay_cmd, env_enabled("K230_DISABLE_OVERLAY", False),
+                     int_from_env("K230_OVERLAY_NICE", 10)),
+        ]
+        for spec in specs:
+            self.procs[spec.name] = ProcState(spec=spec)
+        self.display_ready_file = os.environ.get("K230_DISPLAY_READY_FILE", DISPLAY_READY_FILE)
+
+    def start_proc(self, state: ProcState):
+        if state.spec.disabled:
+            return
+        state.proc = subprocess.Popen(
+            state.spec.cmd,
+            preexec_fn=lambda nice=state.spec.nice: child_setup(nice),
+        )
+        state.last_start_ns = now_ns()
+        state.exit_code = 0
+        print(f"manager: started {state.spec.name} pid={state.proc.pid} nice={state.spec.nice} "
+              f"cmd={' '.join(state.spec.cmd)}",
+              flush=True)
+
+    def terminate_proc(self, state: ProcState, sig=signal.SIGTERM):
+        if not state.running():
+            return
+        try:
+            os.killpg(os.getpgid(state.proc.pid), sig)
+        except ProcessLookupError:
+            pass
+
+    def publish_state(self):
+        timestamp = now_ns()
+        payload = struct.pack("<QII", timestamp, min(len(self.procs), 4), 0)
+        for name in PROCESS_ORDER:
+            state = self.procs[name]
+            proc_name = name.encode("ascii")[:15].ljust(16, b"\x00")
+            pid = state.proc.pid if state.proc is not None else 0
+            running = 1 if state.running() else 0
+            exit_code = state.exit_code
+            payload += PROCESS.pack(proc_name, running, pid, exit_code,
+                                    state.restart_count, state.last_start_ns)
+        payload += b"\x00" * (MANAGER_STATE_SIZE - len(payload))
+        self.manager_state.publish(payload)
+
+    def handle_signal(self, signum, _frame):
+        print(f"\nmanager: signal {signum}, stopping children", flush=True)
+        self.shutdown = True
+        for state in self.procs.values():
+            self.terminate_proc(state, signal.SIGTERM)
+
+    def run(self) -> int:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, self.handle_signal)
+
+        try:
+            os.unlink(self.display_ready_file)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            print(f"manager: failed to remove display ready file {self.display_ready_file}: {exc}",
+                  flush=True)
+
+        for name in START_ORDER:
+            if (name == "k230_camerad" and
+                    not self.procs[name].spec.disabled and
+                    not self.procs["k230_overlay"].spec.disabled):
+                self.wait_for_display_ready()
+            self.start_proc(self.procs[name])
+            time.sleep(0.3)
+
+        last_publish = 0.0
+        exit_code = 0
+        while not self.shutdown:
+            now = time.monotonic()
+            if now - last_publish >= 1.0:
+                self.publish_state()
+                last_publish = now
+
+            for state in self.procs.values():
+                if state.spec.disabled:
+                    continue
+                if state.proc is None:
+                    continue
+                ret = state.proc.poll()
+                if ret is None:
+                    continue
+                state.exit_code = ret
+                print(f"\nmanager: {state.spec.name} exited code={ret}", flush=True)
+                state.proc = None
+                if self.no_restart:
+                    self.shutdown = True
+                    exit_code = ret if ret != 0 else exit_code
+                else:
+                    state.restart_count += 1
+                    state.next_restart_monotonic = now + 1.0
+
+            for state in self.procs.values():
+                if state.spec.disabled or state.proc is not None or self.shutdown:
+                    continue
+                if not self.no_restart and now >= state.next_restart_monotonic:
+                    self.start_proc(state)
+
+            time.sleep(0.1)
+
+        for state in self.procs.values():
+            self.terminate_proc(state, signal.SIGTERM)
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            if all(not state.running() for state in self.procs.values()):
+                break
+            time.sleep(0.1)
+        for state in self.procs.values():
+            self.terminate_proc(state, signal.SIGKILL)
+        self.publish_state()
+        self.manager_state.close()
+        return exit_code
+
+    def wait_for_display_ready(self):
+        timeout_ms = int_from_env("K230_DISPLAY_READY_TIMEOUT_MS", 7000)
+        print(f"manager: waiting for display ready {self.display_ready_file}",
+              flush=True)
+        if wait_for_file(self.display_ready_file, timeout_ms):
+            print("manager: display ready, starting camera/model pipeline",
+                  flush=True)
+        else:
+            print(f"manager: display ready timeout after {timeout_ms}ms, "
+                  "starting camera/model pipeline anyway",
+                  flush=True)
+
+
+def main(argv: List[str]) -> int:
+    try:
+        return Manager(argv).run()
+    except Exception as exc:
+        print(f"manager error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

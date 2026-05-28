@@ -1,0 +1,102 @@
+CXX ?= g++
+CC ?= gcc
+AR ?= ar
+
+CXXFLAGS ?= -std=c++17 -O3 -DNDEBUG -Wall -Wextra
+CFLAGS ?= -O2 -DNDEBUG -Wall -Wextra
+
+INCLUDES := -Isrc -Iinclude -Ideps/include -I/usr/include/libdrm
+LIBDIRS := -L/usr/lib/riscv64-linux-gnu
+STATIC_LIBS := deps/lib/libNncase.Runtime.Native.a deps/lib/libnncase.rt_modules.k230.a deps/lib/libfunctional_k230.a build/libmmz.a
+SHARED_LIBS := /usr/lib/riscv64-linux-gnu/libv4l2-drm.so /usr/lib/riscv64-linux-gnu/libdisplay.so /usr/lib/riscv64-linux-gnu/libdrm.so.2
+LDLIBS := -pthread -latomic -ldl
+
+CORE_OBJS := build/app_config.o \
+	build/model_output.o \
+	build/projection.o \
+	build/calibration_service.o \
+	build/input_source.o \
+	build/lateral_control.o \
+	build/k230_ipc.o \
+	build/supercombo_model.o \
+	build/online_calibrator.o \
+	build/ai_base.o
+
+MONOLITH_OBJS := build/main.o \
+	build/app_config.o \
+	build/model_output.o \
+	build/projection.o \
+	build/overlay_renderer.o \
+	build/calibration_service.o \
+	build/input_source.o \
+	build/lateral_control.o \
+	build/supercombo_runtime.o \
+	build/supercombo_model.o \
+	build/online_calibrator.o \
+	build/ai_base.o
+
+CAMERAD_OBJS := build/k230_camerad.o \
+	build/app_config.o \
+	build/input_source.o \
+	build/model_output.o \
+	build/projection.o \
+	build/k230_ipc.o
+
+MODELD_OBJS := build/k230_modeld.o \
+	build/app_config.o \
+	build/model_output.o \
+	build/projection.o \
+	build/calibration_service.o \
+	build/input_source.o \
+	build/lateral_control.o \
+	build/k230_ipc.o \
+	build/supercombo_model.o \
+	build/online_calibrator.o \
+	build/ai_base.o
+
+OVERLAY_OBJS := build/k230_overlay.o \
+	build/app_config.o \
+	build/model_output.o \
+	build/projection.o \
+	build/overlay_renderer.o \
+	build/k230_ipc.o
+
+.PHONY: all clean
+
+all: supercombo.elf k230_camerad k230_modeld k230_overlay
+
+check-parser: build/check_model_output_parser
+	./build/check_model_output_parser $(RAW_DUMP)
+
+build:
+	mkdir -p build
+
+build/mmz.o: src/mmz.c include/mmz.h | build
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
+build/%.o: src/%.cc | build
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+build/check_model_output_parser.o: check_model_output_parser.cc | build
+	$(CXX) $(CXXFLAGS) -Isrc -c $< -o $@
+
+build/check_model_output_parser: build/check_model_output_parser.o build/model_output.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/libmmz.a: build/mmz.o
+	$(AR) rcs $@ $<
+
+supercombo.elf: $(MONOLITH_OBJS) build/libmmz.a
+	$(CXX) $(CXXFLAGS) $(MONOLITH_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group $(STATIC_LIBS) $(SHARED_LIBS) $(LDLIBS) -Wl,--end-group
+
+k230_camerad: $(CAMERAD_OBJS) build/libmmz.a
+	$(CXX) $(CXXFLAGS) $(CAMERAD_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group build/libmmz.a $(SHARED_LIBS) $(LDLIBS) -Wl,--end-group
+
+k230_modeld: $(MODELD_OBJS) build/libmmz.a
+	$(CXX) $(CXXFLAGS) $(MODELD_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group $(STATIC_LIBS) $(SHARED_LIBS) $(LDLIBS) -Wl,--end-group
+
+k230_overlay: $(OVERLAY_OBJS) build/libmmz.a
+	$(CXX) $(CXXFLAGS) $(OVERLAY_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group build/libmmz.a $(SHARED_LIBS) $(LDLIBS) -Wl,--end-group
+
+clean:
+	rm -rf build supercombo.elf k230_camerad k230_modeld k230_overlay

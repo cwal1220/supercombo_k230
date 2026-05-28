@@ -1,0 +1,16 @@
+.cache/
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+supercombo.elf
+k230_camerad
+k230_modeld
+k230_overlay
+__pycache__/
+*.pyc
+*.raw
+*.scnv12
+*.mp4
+models/*.onnx
