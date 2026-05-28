@@ -69,7 +69,6 @@ struct ParsedModelOutput {
 class ModelOutputParser {
 public:
     static ParsedModelOutput parse(const std::vector<float> &raw);
-    static void maybe_log_pose(const ParsedModelOutput &output, bool enabled);
 
     static float x_idx(int i);
     static float sigmoid(float x);

@@ -1,7 +1,6 @@
 #include "lateral_control.h"
 
 #include <cmath>
-#include <cstdio>
 
 namespace {
 
@@ -11,11 +10,6 @@ bool finite_point(const ModelPoint &point)
 }
 
 } // namespace
-
-LateralControlDraft::LateralControlDraft(const AppConfig &config)
-    : log_enabled_(config.log_control)
-{
-}
 
 LateralTarget LateralControlDraft::update(const ParsedPlan &plan, const ProjectionState &projection)
 {
@@ -48,21 +42,6 @@ LateralTarget LateralControlDraft::update(const ParsedPlan &plan, const Projecti
     target.target_y = point.y;
     target.heading = std::atan2(dy, std::fabs(dx) > 0.001f ? dx : 0.001f);
     target.curvature = 2.0f * point.y / (point.x * point.x + point.y * point.y);
-
-    if (log_enabled_) {
-        const auto now = std::chrono::steady_clock::now();
-        const bool first = last_log_.time_since_epoch().count() == 0;
-        if (first || now - last_log_ >= std::chrono::seconds(1)) {
-            last_log_ = now;
-            std::fprintf(stderr,
-                         "\ncontrol target valid=%d lookahead=%.2f y=%.3f heading=%.4f curvature=%.5f\n",
-                         target.valid ? 1 : 0,
-                         target.lookahead_x,
-                         target.target_y,
-                         target.heading,
-                         target.curvature);
-        }
-    }
 
     return target;
 }

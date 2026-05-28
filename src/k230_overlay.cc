@@ -12,9 +12,7 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 
@@ -35,27 +33,13 @@ uint64_t timeval_us(const timeval &tv)
     return static_cast<uint64_t>(tv.tv_sec) * 1000000ULL + tv.tv_usec;
 }
 
-int env_int(const char *name, int default_value, int min_value, int max_value)
-{
-    const char *value = std::getenv(name);
-    if (!value || value[0] == '\0') return default_value;
-    char *end = nullptr;
-    const long parsed = std::strtol(value, &end, 10);
-    if (end == value) return default_value;
-    return std::max(min_value, std::min(max_value, static_cast<int>(parsed)));
-}
-
-bool env_bool(const char *name, bool default_value)
-{
-    const char *value = std::getenv(name);
-    if (!value) return default_value;
-    return value[0] != '\0' && std::strcmp(value, "0") != 0;
-}
+constexpr const char *kDisplayReadyPath = "/tmp/k230_display_ready";
+constexpr int kPreviewVideoDevice = 1;
+constexpr unsigned kDisplayReadyPreviewFrames = 30;
 
 const char *display_ready_path()
 {
-    const char *path = std::getenv("K230_DISPLAY_READY_FILE");
-    return path && path[0] != '\0' ? path : "/tmp/k230_display_ready";
+    return kDisplayReadyPath;
 }
 
 struct StageStats {
@@ -86,10 +70,7 @@ class K230OverlayDisplay {
 public:
     explicit K230OverlayDisplay(const AppConfig &config)
         : config_(config),
-          overlay_(config),
-          video_device_(env_int("K230_OVERLAY_VIDEO_DEVICE", 1, 0, 16)),
-          profile_(env_bool("K230_OVERLAY_PROFILE", false)),
-          display_ready_preview_frames_(env_int("K230_DISPLAY_READY_PREVIEW_FRAMES", 30, 0, 300))
+          profile_(config.profile)
     {
         default_projection_ = make_projection_state(config.projection_mode,
                                                     config.manual_roll,
@@ -142,13 +123,9 @@ public:
                      display_->width, display_->height, video_device_,
                      context.width, context.height, static_cast<int>(context.drm_rotation),
                      projection_mode_name(config_.projection_mode));
-        if (display_ready_preview_frames_ == 0) {
-            publish_display_ready();
-        } else {
-            std::fprintf(stderr,
-                         "k230_overlay: waiting %u displayed preview frames before ready\n",
-                         display_ready_preview_frames_);
-        }
+        std::fprintf(stderr,
+                     "k230_overlay: waiting %u displayed preview frames before ready\n",
+                     kDisplayReadyPreviewFrames);
 
         gettimeofday(&fps_tv_, nullptr);
         g_app = this;
@@ -173,7 +150,7 @@ private:
         if (displayed && overlay_buffer_) {
             if (!ready_file_written_) {
                 ++startup_preview_frames_;
-                if (startup_preview_frames_ >= display_ready_preview_frames_)
+                if (startup_preview_frames_ >= kDisplayReadyPreviewFrames)
                     publish_display_ready();
             }
 
@@ -292,9 +269,8 @@ private:
 
     AppConfig config_;
     OverlayRenderer overlay_;
-    int video_device_ = 1;
+    int video_device_ = kPreviewVideoDevice;
     bool profile_ = false;
-    unsigned display_ready_preview_frames_ = 30;
 
     K230LatestChannel model_state_sub_;
 

@@ -8,12 +8,17 @@ Use the `iddwelu223` model. This is the graph where `Elu_223` is kept on the
 native K230 path by inserting a mathematically identity depthwise 1x1 Conv before
 that ELU.
 
-Required artifacts:
+Required runtime artifact:
 
 - `models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel`
 
-The matching ONNX is not part of the runtime repository because it is larger
-than GitHub's normal file-size limit.
+The original ONNX is available in the openpilot fork:
+
+- [supercombo.onnx](https://github.com/cwal1220/openpilot_c2/blob/master/selfdrive/modeld/models/supercombo.onnx)
+
+The rewritten ONNX is an intermediate generated artifact and is intentionally
+not tracked in this repository. See `model_tools/` for the rewrite/compile
+scripts and exact reproduction commands.
 
 ## What must be preserved
 
@@ -34,12 +39,33 @@ Important files inside `deps/`:
 
 ## Board prerequisites
 
-On a freshly flashed board:
+On a freshly flashed board, install the packages needed to clone, build, and run
+the split runtime:
 
 ```sh
 apt-get update
-apt-get install -y g++ cmake make libdrm-dev curl
+apt-get install -y \
+  ca-certificates \
+  cmake \
+  curl \
+  g++ \
+  git \
+  libdrm-dev \
+  make \
+  python3
 ```
+
+Package purpose:
+
+- `g++`, `make`, `cmake`: board-native C/C++ build
+- `libdrm-dev`: DRM headers used by the overlay/display path
+- `curl`, `ca-certificates`: `fetch_nncase_runtime.sh` download support
+- `git`: fresh GitHub restore
+- `python3`: `k230_manager.py`
+
+If the bundle is restored by copying files from the host with `scp`, `git` is
+not required for compilation itself. It is only required for a fresh repository
+checkout.
 
 The flashed image must already include:
 
@@ -149,19 +175,15 @@ SUPERCOMBO_MAX_FRAMES=20 \
 
 Replay mode does not open the camera or display. It feeds the same
 `run_frame_nv12()` path used by live capture, so it is useful for validating
-model execution, pose logging, raw dumps, and online calibration from stored
-segments.
+model execution and online calibration from stored segments.
 
-The app asks the K230 V4L2 path for `NV12 512x256` on the AI stream by default
-through `v4l2_drm_context.crop_size`, then performs the final `NV12 -> YUV6
-float` layout conversion on CPU. The default crop rectangle is the full sensor
-image, `1920x1080+0+0`. `SUPERCOMBO_NV12_CROP_X`,
-`SUPERCOMBO_NV12_CROP_Y`, `SUPERCOMBO_NV12_CROP_WIDTH`, and
-`SUPERCOMBO_NV12_CROP_HEIGHT` can override the crop rectangle for tuning.
-`SUPERCOMBO_NV12_WIDTH` and `SUPERCOMBO_NV12_HEIGHT` can override the output
-size for experiments. In the split runtime, `k230_overlay` owns the
-`/dev/video1` preview path, publishes display readiness after preview frames are
-displayed, and the manager starts `k230_camerad` after that barrier.
+The app asks the K230 V4L2 path for fixed `NV12 512x256` on the AI stream,
+using the full sensor crop `1920x1080+0+0`, then performs the final
+`NV12 -> YUV6 float` layout conversion on CPU. In the split runtime,
+`k230_overlay` owns the `/dev/video1` preview path, publishes
+`/tmp/k230_display_ready` after 30 displayed preview frames, and the manager
+starts `k230_camerad` after that barrier. The manager times out after 7000 ms
+and then starts the camera/model pipeline anyway.
 
 Overlay projection can be adjusted without rebuilding:
 
@@ -170,7 +192,6 @@ SUPERCOMBO_CALIB_PITCH_DEG=1.0 SUPERCOMBO_CALIB_YAW_DEG=-0.5 \
   ./supercombo.elf models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel 0
 ```
 
-`SUPERCOMBO_LOG_POSE=1` prints the supercombo pose head every 30 inferred frames.
 The pose-based online calibrator is enabled by default and only affects overlay
 projection after it reaches `validBlocks >= 5`. Set `SUPERCOMBO_LOG_CALIB=1` to
 print accepted/rejected sample counts, status, rpy, and spread. Set
@@ -182,12 +203,16 @@ calibration is not applied to the overlay.
 The overlay projection defaults to the legacy K230 road-frame projection used by
 the pre-refactor runtime. Set `SUPERCOMBO_PROJECTION_MODE=openpilot` to compare
 against the openpilot `view_from_calib` rotation.
-`SUPERCOMBO_LOG_CONTROL=1` prints a draft lateral target from the best plan; it
-is only diagnostic and does not send steering or CAN commands.
 
-The front-vehicle marker is enabled by default. Set `SUPERCOMBO_DRAW_LEAD=0` to
-hide it, or adjust `SUPERCOMBO_LEAD_PROB_THRESHOLD` if the marker appears too
-often or too rarely.
+The front-vehicle marker is enabled by default with probability threshold `0.5`.
+
+Standalone benchmark and diagnostic utilities live in `benchmarks/` and are not
+built by default:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSUPERCOMBO_BUILD_BENCHMARKS=ON
+cmake --build build -j2
+```
 
 Use the app crop path only; standalone `v4l2-ctl` / `v4l2-drm` crop tests can
 leave the camera device in a bad state.

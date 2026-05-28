@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 
 project(supercombo_k230 LANGUAGES C CXX)
 
+option(SUPERCOMBO_BUILD_BENCHMARKS "Build standalone benchmark/diagnostic utilities" OFF)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -132,13 +134,30 @@ configure_k230_target(k230_overlay
   ${K230_SHARED_LIBS}
 )
 
-add_executable(check_model_output_parser
-  check_model_output_parser.cc
-  src/model_output.cc
-)
-target_include_directories(check_model_output_parser PRIVATE ${PROJECT_LOCAL_INCLUDES})
-target_include_directories(check_model_output_parser SYSTEM PRIVATE ${PROJECT_SYSTEM_INCLUDES})
-target_compile_options(check_model_output_parser PRIVATE ${PROJECT_WARNINGS})
+if(SUPERCOMBO_BUILD_BENCHMARKS)
+  add_executable(check_model_output_parser
+    benchmarks/check_model_output_parser.cc
+    src/model_output.cc
+  )
+  target_include_directories(check_model_output_parser PRIVATE ${PROJECT_LOCAL_INCLUDES})
+  target_include_directories(check_model_output_parser SYSTEM PRIVATE ${PROJECT_SYSTEM_INCLUDES})
+  target_compile_options(check_model_output_parser PRIVATE ${PROJECT_WARNINGS})
+
+  add_executable(bench_nv12_to_yuv6 benchmarks/bench_nv12_to_yuv6.cc)
+  target_compile_options(bench_nv12_to_yuv6 PRIVATE ${PROJECT_WARNINGS})
+
+  add_executable(bench_capture_nv12 benchmarks/bench_capture_nv12.cc)
+  configure_k230_target(bench_capture_nv12 mmz ${K230_SHARED_LIBS})
+
+  add_executable(bench_ai2d_resize benchmarks/bench_ai2d_resize.cc)
+  configure_k230_target(bench_ai2d_resize ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
+
+  add_executable(sequence_runner benchmarks/sequence_runner.cc)
+  configure_k230_target(sequence_runner ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
+
+  add_executable(probe_drm_planes benchmarks/probe_drm_planes.cc)
+  configure_k230_target(probe_drm_planes mmz ${K230_SHARED_LIBS})
+endif()
 
 install(TARGETS supercombo_elf k230_camerad k230_modeld k230_overlay
   RUNTIME DESTINATION .

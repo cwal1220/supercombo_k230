@@ -104,16 +104,12 @@ void draw_points(uint8_t *img, int stride, int width, int height,
 
 } // namespace
 
-OverlayRenderer::OverlayRenderer(const AppConfig &config)
-    : draw_lead_(config.draw_lead),
-      lead_prob_threshold_(config.lead_prob_threshold),
-      lead_time_idx_(config.lead_time_idx)
-{
-}
-
 void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &output,
                            const ProjectionState &projection) const
 {
+    constexpr float kLeadProbabilityThreshold = 0.5f;
+    constexpr int kLeadTimeIndex = 0;
+
     const int width = static_cast<int>(buffer->width);
     const int height = static_cast<int>(buffer->height);
     const int stride = static_cast<int>(buffer->stride);
@@ -140,7 +136,7 @@ void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &outp
         }
 
         ParsedLeadPoint lead;
-        if (draw_lead_ && output.leads.primary(lead_time_idx_, lead_prob_threshold_, &lead)) {
+        if (output.leads.primary(kLeadTimeIndex, kLeadProbabilityThreshold, &lead)) {
             int px = 0;
             int py = 0;
             if (project_point(projection, lead.x, lead.y, kModelHeight, width, height, &px, &py)) {

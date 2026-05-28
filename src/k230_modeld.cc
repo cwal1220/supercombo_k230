@@ -14,9 +14,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdint>
-#include <cstring>
 #include <stdexcept>
-#include <string>
 #include <vector>
 
 namespace {
@@ -38,60 +36,6 @@ uint64_t steady_ns()
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
 }
-
-class RawDumpWriter {
-public:
-    explicit RawDumpWriter(const std::string &path)
-    {
-        if (!path.empty())
-            file_ = std::fopen(path.c_str(), "wb+");
-        if (!file_ && !path.empty())
-            std::perror("fopen SUPERCOMBO_DUMP_RAW");
-    }
-
-    ~RawDumpWriter()
-    {
-        close();
-    }
-
-    void write(const std::vector<float> &raw)
-    {
-        if (!file_) return;
-        if (!header_written_) {
-            raw_size_ = static_cast<uint32_t>(raw.size());
-            const char magic[8] = {'S', 'C', 'O', 'D', 'M', 'P', '1', '\0'};
-            std::fwrite(magic, 1, sizeof(magic), file_);
-            std::fwrite(&raw_size_, sizeof(raw_size_), 1, file_);
-            std::fwrite(&frame_count_, sizeof(frame_count_), 1, file_);
-            header_written_ = true;
-        }
-        if (raw.size() != raw_size_) {
-            std::fprintf(stderr, "raw dump size mismatch: first=%u current=%zu\n",
-                         raw_size_, raw.size());
-            return;
-        }
-        std::fwrite(raw.data(), sizeof(float), raw.size(), file_);
-        ++frame_count_;
-    }
-
-    void close()
-    {
-        if (!file_) return;
-        if (header_written_) {
-            std::fflush(file_);
-            std::fseek(file_, 8 + static_cast<long>(sizeof(raw_size_)), SEEK_SET);
-            std::fwrite(&frame_count_, sizeof(frame_count_), 1, file_);
-        }
-        std::fclose(file_);
-        file_ = nullptr;
-    }
-
-private:
-    FILE *file_ = nullptr;
-    bool header_written_ = false;
-    uint32_t raw_size_ = 0;
-    uint32_t frame_count_ = 0;
-};
 
 bool publish_output(K230LatestChannel &model_pub, const ParsedModelOutput &parsed,
                     CalibrationService &calibration, LateralControlDraft &lateral_control,
@@ -118,8 +62,7 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
 
     SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode);
     CalibrationService calibration(config);
-    LateralControlDraft lateral_control(config);
-    RawDumpWriter raw_dump(config.raw_dump_path);
+    LateralControlDraft lateral_control;
 
     Nv12Frame frame;
     std::vector<float> raw;
@@ -142,8 +85,6 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
                 std::fprintf(stderr, "\nmodeld: publish modelState failed\n");
                 ++errors;
             }
-            raw_dump.write(raw);
-            ModelOutputParser::maybe_log_pose(parsed, config.log_pose);
             ++processed;
         } else {
             ++errors;
@@ -188,8 +129,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub)
 
     SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode);
     CalibrationService calibration(config);
-    LateralControlDraft lateral_control(config);
-    RawDumpWriter raw_dump(config.raw_dump_path);
+    LateralControlDraft lateral_control;
     std::vector<float> raw;
     uint64_t last_frame_seq = 0;
     unsigned processed = 0;
@@ -242,8 +182,6 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub)
                 std::fprintf(stderr, "\nmodeld: publish modelState failed\n");
                 ++errors;
             }
-            raw_dump.write(raw);
-            ModelOutputParser::maybe_log_pose(parsed, config.log_pose);
             ++processed;
         } else {
             ++errors;

@@ -1,11 +1,8 @@
 #ifndef LATERAL_CONTROL_H
 #define LATERAL_CONTROL_H
 
-#include "app_config.h"
 #include "model_output.h"
 #include "projection.h"
-
-#include <chrono>
 
 struct LateralTarget {
     bool valid = false;
@@ -17,13 +14,9 @@ struct LateralTarget {
 
 class LateralControlDraft {
 public:
-    explicit LateralControlDraft(const AppConfig &config);
+    LateralControlDraft() = default;
 
     LateralTarget update(const ParsedPlan &plan, const ProjectionState &projection);
-
-private:
-    bool log_enabled_ = false;
-    std::chrono::steady_clock::time_point last_log_{};
 };
 
 #endif

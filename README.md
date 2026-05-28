@@ -4,19 +4,47 @@ This is the final live app path for the K230 target. It uses the `supercombo`
 kmodel generated from the ONNX graph where `Elu_223` is kept native by inserting
 an identity depthwise 1x1 Conv before it.
 
-Final model artifacts:
+Final runtime artifact:
 
 - `models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel`
 
-The matching ONNX is intentionally not stored in this repository because it is
-larger than GitHub's normal file-size limit. Recreate or archive it separately
-when model conversion work is needed.
+The original model is available in the openpilot fork:
+
+- [supercombo.onnx](https://github.com/cwal1220/openpilot_c2/blob/master/selfdrive/modeld/models/supercombo.onnx)
+
+The rewritten ONNX is an intermediate generated artifact and is intentionally
+not tracked in this repository. See `model_tools/` for the rewrite/compile
+scripts and exact reproduction commands.
 
 Board prerequisites:
 
-- `g++`, `cmake`, `make`
-- `libdrm-dev`
-- runtime libraries already present on the flashed image:
+For a freshly flashed board, install the build/runtime helper packages first:
+
+```sh
+apt-get update
+apt-get install -y \
+  ca-certificates \
+  cmake \
+  curl \
+  g++ \
+  git \
+  libdrm-dev \
+  make \
+  python3
+```
+
+Package purpose:
+
+- `g++`, `make`, `cmake`: board-native C/C++ build
+- `libdrm-dev`: DRM headers used by the overlay/display path
+- `curl`, `ca-certificates`: `fetch_nncase_runtime.sh` download support
+- `git`: fresh clone from GitHub
+- `python3`: `k230_manager.py`
+
+If the directory is copied to the board with all files already present, `git` is
+not needed for building. It is only needed for a fresh repository checkout.
+
+The flashed image must already include these runtime libraries/devices:
   - `libdisplay.so`
   - `libv4l2-drm.so`
   - `libdrm.so.2`
@@ -88,7 +116,7 @@ Runtime structure:
 - `src/main.cc`
   - app bootstrap only: config load, signal handling, live/replay dispatch.
 - `src/app_config.*`
-  - parses all `SUPERCOMBO_*` environment options once at startup.
+  - parses the small runtime option set once at startup.
 - `src/input_source.*`
   - normalizes live `/dev/video2 NV12` and `SCNV12R1` replay files to
     `Nv12Frame`.
@@ -105,8 +133,8 @@ Runtime structure:
   - draws plan/lane/road-edge/lead overlay with the CPU ARGB8888 raster path
     for both the split DRM overlay process and the monolithic rollback app.
 - `src/lateral_control.*`
-  - computes a diagnostic `LateralTarget` skeleton only; it does not send CAN or
-    steering commands.
+  - computes a `LateralTarget` skeleton only; it does not send CAN or steering
+    commands.
 - `src/supercombo_runtime.*`
   - owns the live/replay pipeline and thread coordination.
 - `src/k230_ipc.*`
@@ -122,8 +150,8 @@ Runtime structure:
 Useful runtime options:
 
 - `SUPERCOMBO_PROFILE=1`
-  - prints per-frame pipeline averages for preprocessing, tensor input, nncase
-    run, and output handling.
+  - prints model pipeline averages. `k230_overlay` also uses this for overlay
+    draw/present timing.
 - `SUPERCOMBO_CALIB_ROLL_DEG`, `SUPERCOMBO_CALIB_PITCH_DEG`,
   `SUPERCOMBO_CALIB_YAW_DEG`
   - overrides the overlay projection calibration in degrees. Defaults are all
@@ -139,55 +167,33 @@ Useful runtime options:
 - `SUPERCOMBO_LOG_CALIB=1`
   - prints the online calibrator status, accepted/rejected sample counts,
     valid block count, rpy, and spread.
-- `SUPERCOMBO_LOG_POSE=1`
-  - prints the supercombo pose head every 30 inferred frames.
-- `SUPERCOMBO_LOG_CONTROL=1`
-  - prints the draft lateral target derived from the best plan. It does not send
-    CAN or steering commands.
-- `SUPERCOMBO_DRAW_LEAD=0`
-  - disables the front-vehicle marker. By default the app draws a small white
-    triangle/red dot at the primary supercombo lead position.
-- `SUPERCOMBO_LEAD_PROB_THRESHOLD`
-  - minimum lead probability for drawing the front-vehicle marker. Default is
-    `0.5`.
 - `SUPERCOMBO_REPLAY_NV12=/path/to/replay.scnv12`
   - runs headless from a preconverted `512x256 NV12` replay file instead of
-    opening the camera and display. This is for validating inference,
-    raw-output dumps, pose logging, and online calibration from collected logs.
+    opening the camera and display. This is for validating inference and online
+    calibration from collected logs.
   - also works with `k230_modeld` directly for split-runtime parser/model tests.
 - `SUPERCOMBO_MAX_FRAMES=N`
   - stops after `N` inferred frames. This is mainly useful with replay mode.
-- `SUPERCOMBO_AI_START_PREVIEW_FRAMES=N`
-  - monolithic `supercombo.elf` rollback option only. The split runtime does
-    its startup barrier with `K230_DISPLAY_READY_PREVIEW_FRAMES`.
-- `SUPERCOMBO_NV12_CROP_X/Y/WIDTH/HEIGHT`
-  - overrides the `/dev/video2` crop rectangle for tuning.
-- `SUPERCOMBO_NV12_WIDTH` and `SUPERCOMBO_NV12_HEIGHT`
-  - override the capture size for experiments.
-- `K230_OVERLAY_CMD`
-  - manager-only override for the display overlay process. Keep the default
-    `./k230_overlay` for onroad preview.
-- `K230_OVERLAY_VIDEO_DEVICE=1`
-  - selects the preview video device. Default is `/dev/video1`.
-- `K230_DISPLAY_READY_FILE=/tmp/k230_display_ready`
-  - changes the file path used by the display-ready barrier.
-- `K230_DISPLAY_READY_PREVIEW_FRAMES=30`
-  - number of displayed preview frames required before `k230_overlay` publishes
-    the ready file.
-- `K230_DISPLAY_READY_TIMEOUT_MS=7000`
-  - maximum time the manager waits for display readiness before starting the
-    camera/model pipeline anyway.
-- `K230_OVERLAY_PROFILE=1`
-  - prints average display-stage times for ARGB overlay drawing and DRM present.
-- `K230_CAMERAD_NICE`, `K230_MODELD_NICE`, `K230_OVERLAY_NICE`
-  - manager child niceness adjustments. Defaults are `0`, `-5`, and `10`,
-    respectively, so model inference has priority over display overlay work.
-- `K230_CAMERAD_CMD`, `K230_MODELD_CMD`
-  - manager-only command overrides for experiments.
-- `K230_NO_RESTART=1`
-  - makes the manager exit when a child exits instead of restarting it.
-- `K230_DISABLE_OVERLAY=1`, `K230_DISABLE_CAMERA=1`, `K230_DISABLE_MODEL=1`
-  - manager-only switches for isolated process tests.
+
+Fixed production defaults:
+
+- AI capture is fixed at `/dev/video2`, `NV12 512x256`, full sensor crop
+  `1920x1080+0+0`.
+- Preview is fixed at `/dev/video1`; the manager waits for
+  `/tmp/k230_display_ready` before opening the AI stream.
+- The ready barrier waits for 30 displayed preview frames and times out after
+  7000 ms.
+- Child process priorities are fixed as `camerad=0`, `modeld=-5`,
+  `overlay=10`.
+- The front-vehicle marker is always enabled with probability threshold `0.5`.
+
+Benchmark and diagnostic utilities live under `benchmarks/` and are not built
+by default. Build them explicitly with:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSUPERCOMBO_BUILD_BENCHMARKS=ON
+cmake --build build -j2
+```
 
 Create a replay file on the host from collected openpilot logs:
 

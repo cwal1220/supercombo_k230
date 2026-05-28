@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import mmap
 import os
-import shlex
 import signal
 import struct
 import subprocess
@@ -18,6 +17,7 @@ HEADER_SIZE = HEADER.size
 PROCESS = struct.Struct("<16sIiiIQ")
 MANAGER_STATE_SIZE = 8 + 4 + 4 + PROCESS.size * 4
 DISPLAY_READY_FILE = "/tmp/k230_display_ready"
+DISPLAY_READY_TIMEOUT_MS = 7000
 START_ORDER = ("k230_overlay", "k230_camerad", "k230_modeld")
 PROCESS_ORDER = ("k230_camerad", "k230_modeld", "k230_overlay")
 
@@ -26,13 +26,6 @@ def now_ns() -> int:
     if hasattr(time, "CLOCK_BOOTTIME"):
         return time.clock_gettime_ns(time.CLOCK_BOOTTIME)
     return time.monotonic_ns()
-
-
-def env_enabled(name: str, default: bool = False) -> bool:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return value != "" and value != "0"
 
 
 class LatestPublisher:
@@ -91,7 +84,6 @@ class LatestPublisher:
 class ProcSpec:
     name: str
     cmd: List[str]
-    disabled: bool = False
     nice: int = 0
 
 
@@ -106,23 +98,6 @@ class ProcState:
 
     def running(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
-
-
-def command_from_env(name: str, fallback: List[str]) -> List[str]:
-    value = os.environ.get(name)
-    if value:
-        return shlex.split(value)
-    return fallback
-
-
-def int_from_env(name: str, fallback: int) -> int:
-    value = os.environ.get(name)
-    if value is None or value == "":
-        return fallback
-    try:
-        return int(value)
-    except ValueError:
-        return fallback
 
 
 def wait_for_file(path: str, timeout_ms: int) -> bool:
@@ -150,29 +125,19 @@ class Manager:
         self.kmodel = argv[1]
         self.debug = argv[2] if len(argv) >= 3 else "1"
         self.shutdown = False
-        self.no_restart = env_enabled("K230_NO_RESTART", False)
         self.manager_state = LatestPublisher("/k230_manager_state", MANAGER_STATE_SIZE)
         self.procs: Dict[str, ProcState] = {}
 
-        overlay_cmd = command_from_env("K230_OVERLAY_CMD", ["./k230_overlay"])
-        camerad_cmd = command_from_env("K230_CAMERAD_CMD", ["./k230_camerad"])
-        modeld_cmd = command_from_env("K230_MODELD_CMD", ["./k230_modeld", self.kmodel, self.debug])
-
         specs = [
-            ProcSpec("k230_camerad", camerad_cmd, env_enabled("K230_DISABLE_CAMERA", False),
-                     int_from_env("K230_CAMERAD_NICE", 0)),
-            ProcSpec("k230_modeld", modeld_cmd, env_enabled("K230_DISABLE_MODEL", False),
-                     int_from_env("K230_MODELD_NICE", -5)),
-            ProcSpec("k230_overlay", overlay_cmd, env_enabled("K230_DISABLE_OVERLAY", False),
-                     int_from_env("K230_OVERLAY_NICE", 10)),
+            ProcSpec("k230_camerad", ["./k230_camerad"], 0),
+            ProcSpec("k230_modeld", ["./k230_modeld", self.kmodel, self.debug], -5),
+            ProcSpec("k230_overlay", ["./k230_overlay"], 10),
         ]
         for spec in specs:
             self.procs[spec.name] = ProcState(spec=spec)
-        self.display_ready_file = os.environ.get("K230_DISPLAY_READY_FILE", DISPLAY_READY_FILE)
+        self.display_ready_file = DISPLAY_READY_FILE
 
     def start_proc(self, state: ProcState):
-        if state.spec.disabled:
-            return
         state.proc = subprocess.Popen(
             state.spec.cmd,
             preexec_fn=lambda nice=state.spec.nice: child_setup(nice),
@@ -224,9 +189,7 @@ class Manager:
                   flush=True)
 
         for name in START_ORDER:
-            if (name == "k230_camerad" and
-                    not self.procs[name].spec.disabled and
-                    not self.procs["k230_overlay"].spec.disabled):
+            if name == "k230_camerad":
                 self.wait_for_display_ready()
             self.start_proc(self.procs[name])
             time.sleep(0.3)
@@ -240,8 +203,6 @@ class Manager:
                 last_publish = now
 
             for state in self.procs.values():
-                if state.spec.disabled:
-                    continue
                 if state.proc is None:
                     continue
                 ret = state.proc.poll()
@@ -250,17 +211,14 @@ class Manager:
                 state.exit_code = ret
                 print(f"\nmanager: {state.spec.name} exited code={ret}", flush=True)
                 state.proc = None
-                if self.no_restart:
-                    self.shutdown = True
-                    exit_code = ret if ret != 0 else exit_code
-                else:
-                    state.restart_count += 1
-                    state.next_restart_monotonic = now + 1.0
+                exit_code = ret if ret != 0 else exit_code
+                state.restart_count += 1
+                state.next_restart_monotonic = now + 1.0
 
             for state in self.procs.values():
-                if state.spec.disabled or state.proc is not None or self.shutdown:
+                if state.proc is not None or self.shutdown:
                     continue
-                if not self.no_restart and now >= state.next_restart_monotonic:
+                if now >= state.next_restart_monotonic:
                     self.start_proc(state)
 
             time.sleep(0.1)
@@ -279,14 +237,13 @@ class Manager:
         return exit_code
 
     def wait_for_display_ready(self):
-        timeout_ms = int_from_env("K230_DISPLAY_READY_TIMEOUT_MS", 7000)
         print(f"manager: waiting for display ready {self.display_ready_file}",
               flush=True)
-        if wait_for_file(self.display_ready_file, timeout_ms):
+        if wait_for_file(self.display_ready_file, DISPLAY_READY_TIMEOUT_MS):
             print("manager: display ready, starting camera/model pipeline",
                   flush=True)
         else:
-            print(f"manager: display ready timeout after {timeout_ms}ms, "
+            print(f"manager: display ready timeout after {DISPLAY_READY_TIMEOUT_MS}ms, "
                   "starting camera/model pipeline anyway",
                   flush=True)
 

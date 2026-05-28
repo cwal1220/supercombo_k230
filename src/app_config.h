@@ -21,11 +21,9 @@ struct AppConfig {
     unsigned nv12_crop_y = 0;
     unsigned nv12_crop_width = SENSOR_WIDTH;
     unsigned nv12_crop_height = SENSOR_HEIGHT;
-    unsigned ai_start_preview_frames = 30;
     unsigned max_frames = 0;
 
     std::string replay_nv12_path;
-    std::string raw_dump_path;
 
     bool calibration_auto = true;
     bool manual_calibration = false;
@@ -33,14 +31,9 @@ struct AppConfig {
     float manual_pitch = 0.0f;
     float manual_yaw = 0.0f;
     bool log_calibration = false;
-    bool log_pose = false;
-    bool log_control = false;
     bool profile = false;
 
     ProjectionMode projection_mode = ProjectionMode::Legacy;
-    bool draw_lead = true;
-    float lead_prob_threshold = 0.5f;
-    int lead_time_idx = 0;
 
     static AppConfig from_env(int argc, char *argv[]);
     static AppConfig from_env_defaults(const char *program_name);

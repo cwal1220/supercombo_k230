@@ -1,6 +1,5 @@
 #include "app_config.h"
 
-#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
@@ -94,18 +93,9 @@ AppConfig AppConfig::from_env_defaults(const char *program_name)
     AppConfig config;
     config.program_name = program_name ? program_name : "supercombo.elf";
 
-    config.nv12_width = env_unsigned("SUPERCOMBO_NV12_WIDTH", config.nv12_width);
-    config.nv12_height = env_unsigned("SUPERCOMBO_NV12_HEIGHT", config.nv12_height);
-    config.nv12_crop_x = env_unsigned("SUPERCOMBO_NV12_CROP_X", config.nv12_crop_x);
-    config.nv12_crop_y = env_unsigned("SUPERCOMBO_NV12_CROP_Y", config.nv12_crop_y);
-    config.nv12_crop_width = env_unsigned("SUPERCOMBO_NV12_CROP_WIDTH", config.nv12_crop_width);
-    config.nv12_crop_height = env_unsigned("SUPERCOMBO_NV12_CROP_HEIGHT", config.nv12_crop_height);
-    config.ai_start_preview_frames = std::max(1u, env_unsigned("SUPERCOMBO_AI_START_PREVIEW_FRAMES",
-                                                              config.ai_start_preview_frames));
     config.max_frames = env_unsigned("SUPERCOMBO_MAX_FRAMES", 0);
 
     config.replay_nv12_path = env_string("SUPERCOMBO_REPLAY_NV12");
-    config.raw_dump_path = env_string("SUPERCOMBO_DUMP_RAW");
 
     config.manual_calibration = env_present("SUPERCOMBO_CALIB_ROLL_DEG") ||
         env_present("SUPERCOMBO_CALIB_PITCH_DEG") ||
@@ -115,14 +105,9 @@ AppConfig AppConfig::from_env_defaults(const char *program_name)
     config.manual_pitch = deg_to_rad(env_float("SUPERCOMBO_CALIB_PITCH_DEG", 0.0f));
     config.manual_yaw = deg_to_rad(env_float("SUPERCOMBO_CALIB_YAW_DEG", 0.0f));
     config.log_calibration = env_enabled("SUPERCOMBO_LOG_CALIB");
-    config.log_pose = env_enabled("SUPERCOMBO_LOG_POSE");
-    config.log_control = env_enabled("SUPERCOMBO_LOG_CONTROL");
     config.profile = env_enabled("SUPERCOMBO_PROFILE");
 
     config.projection_mode = env_projection_mode();
-    config.draw_lead = env_enabled_default("SUPERCOMBO_DRAW_LEAD", true);
-    config.lead_prob_threshold = env_float("SUPERCOMBO_LEAD_PROB_THRESHOLD", config.lead_prob_threshold);
-    config.lead_time_idx = static_cast<int>(std::min(2u, env_unsigned("SUPERCOMBO_LEAD_TIME_IDX", 0)));
 
     return config;
 }

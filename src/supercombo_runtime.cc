@@ -29,59 +29,6 @@ namespace {
 
 SupercomboRuntime *g_runtime = nullptr;
 
-class RawDumpWriter {
-public:
-    explicit RawDumpWriter(const std::string &path)
-    {
-        if (!path.empty())
-            file_ = std::fopen(path.c_str(), "wb+");
-        if (!file_ && !path.empty())
-            std::perror("fopen SUPERCOMBO_DUMP_RAW");
-    }
-
-    ~RawDumpWriter()
-    {
-        close();
-    }
-
-    void write(const std::vector<float> &raw)
-    {
-        if (!file_) return;
-        if (!header_written_) {
-            raw_size_ = static_cast<uint32_t>(raw.size());
-            const char magic[8] = {'S', 'C', 'O', 'D', 'M', 'P', '1', '\0'};
-            std::fwrite(magic, 1, sizeof(magic), file_);
-            std::fwrite(&raw_size_, sizeof(raw_size_), 1, file_);
-            std::fwrite(&frame_count_, sizeof(frame_count_), 1, file_);
-            header_written_ = true;
-        }
-        if (raw.size() != raw_size_) {
-            std::fprintf(stderr, "raw dump size mismatch: first=%u current=%zu\n", raw_size_, raw.size());
-            return;
-        }
-        std::fwrite(raw.data(), sizeof(float), raw.size(), file_);
-        ++frame_count_;
-    }
-
-    void close()
-    {
-        if (!file_) return;
-        if (header_written_) {
-            std::fflush(file_);
-            std::fseek(file_, 8 + static_cast<long>(sizeof(raw_size_)), SEEK_SET);
-            std::fwrite(&frame_count_, sizeof(frame_count_), 1, file_);
-        }
-        std::fclose(file_);
-        file_ = nullptr;
-    }
-
-private:
-    FILE *file_ = nullptr;
-    bool header_written_ = false;
-    uint32_t raw_size_ = 0;
-    uint32_t frame_count_ = 0;
-};
-
 int frame_handler_bridge(v4l2_drm_context *context, bool displayed)
 {
     return g_runtime ? g_runtime->frame_handler(context, displayed) : 'q';
@@ -91,9 +38,7 @@ int frame_handler_bridge(v4l2_drm_context *context, bool displayed)
 
 SupercomboRuntime::SupercomboRuntime(const AppConfig &config)
     : config_(config),
-      overlay_(config_),
-      calibration_(config_),
-      lateral_control_(config_)
+      calibration_(config_)
 {
     latest_projection_ = calibration_.projection();
 }
@@ -135,7 +80,6 @@ int SupercomboRuntime::run_replay()
         std::fprintf(stderr, "replay mode=headless camera=off display=off\n");
 
         SupercomboModel model(config_.kmodel_path.c_str(), config_.debug_mode);
-        RawDumpWriter raw_dump(config_.raw_dump_path);
         std::vector<float> raw;
         unsigned processed = 0;
         unsigned errors = 0;
@@ -151,8 +95,6 @@ int SupercomboRuntime::run_replay()
                 calibration_.update(parsed);
                 const ProjectionState projection = calibration_.projection();
                 lateral_control_.update(parsed.plan, projection);
-                ModelOutputParser::maybe_log_pose(parsed, config_.log_pose);
-                raw_dump.write(raw);
                 ++processed;
             } else {
                 ++errors;
@@ -197,7 +139,6 @@ void SupercomboRuntime::ai_thread_proc()
     try {
         LiveNv12Source source(config_, kd_mpi_get_vvcam_video00() + 1);
         SupercomboModel model(config_.kmodel_path.c_str(), config_.debug_mode);
-        RawDumpWriter raw_dump(config_.raw_dump_path);
         Nv12Frame frame;
         std::vector<float> raw;
         unsigned processed_frames = 0;
@@ -220,8 +161,6 @@ void SupercomboRuntime::ai_thread_proc()
                     latest_output_ = parsed;
                     latest_projection_ = projection;
                 }
-                raw_dump.write(raw);
-                ModelOutputParser::maybe_log_pose(parsed, config_.log_pose);
                 ++kpu_frame_count_;
                 ++processed_frames;
                 if (config_.max_frames > 0 && processed_frames >= config_.max_frames) {
@@ -244,7 +183,8 @@ int SupercomboRuntime::frame_handler(v4l2_drm_context *context, bool displayed)
 
     if (displayed && !display_ready_) {
         ++startup_display_frames_;
-        if (startup_display_frames_ >= config_.ai_start_preview_frames) {
+        constexpr unsigned kAiStartPreviewFrames = 30;
+        if (startup_display_frames_ >= kAiStartPreviewFrames) {
             std::fprintf(stderr, "display preview ready after %u frames; starting AI stream\n",
                          startup_display_frames_);
             mark_display_ready_once();

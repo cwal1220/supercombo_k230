@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 
 namespace {
 
@@ -145,23 +144,4 @@ ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
     }
 
     return output;
-}
-
-void ModelOutputParser::maybe_log_pose(const ParsedModelOutput &output, bool enabled)
-{
-    static unsigned frame_count = 0;
-    if (!enabled || !output.has_pose) return;
-
-    ++frame_count;
-    if (frame_count % 30 != 0) return;
-
-    const PoseObservation &pose = output.pose;
-    std::fprintf(stderr,
-                 "\npose[%u] trans=(%.3f %.3f %.3f) rot=(%.4f %.4f %.4f) "
-                 "trans_std=(%.3f %.3f %.3f) rot_std=(%.4f %.4f %.4f)\n",
-                 frame_count,
-                 pose.trans[0], pose.trans[1], pose.trans[2],
-                 pose.rot[0], pose.rot[1], pose.rot[2],
-                 pose.trans_std[0], pose.trans_std[1], pose.trans_std[2],
-                 pose.rot_std[0], pose.rot_std[1], pose.rot_std[2]);
 }

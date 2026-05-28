@@ -77,7 +77,7 @@ build/mmz.o: src/mmz.c include/mmz.h | build
 build/%.o: src/%.cc | build
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-build/check_model_output_parser.o: check_model_output_parser.cc | build
+build/check_model_output_parser.o: benchmarks/check_model_output_parser.cc | build
 	$(CXX) $(CXXFLAGS) -Isrc -c $< -o $@
 
 build/check_model_output_parser: build/check_model_output_parser.o build/model_output.o
