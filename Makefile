@@ -7,8 +7,11 @@ CFLAGS ?= -O2 -DNDEBUG -Wall -Wextra
 
 OPENCV_CFLAGS ?= $(shell pkg-config --cflags opencv4 2>/dev/null || echo -I/usr/include/opencv4)
 OPENCV_LIBS ?= $(shell pkg-config --libs-only-L --libs-only-other opencv4 2>/dev/null) -lopencv_imgproc -lopencv_core
+LIBUSB_CFLAGS ?= $(shell pkg-config --cflags libusb-1.0 2>/dev/null || echo -I/usr/include/libusb-1.0)
+LIBUSB_LIBS ?= $(shell pkg-config --libs libusb-1.0 2>/dev/null || echo -lusb-1.0)
 
 INCLUDES := -Isrc -Iinclude -Ideps/include -I/usr/include/libdrm $(OPENCV_CFLAGS)
+PANDA_INCLUDES := $(INCLUDES) $(LIBUSB_CFLAGS)
 LIBDIRS := -L/usr/lib/riscv64-linux-gnu
 STATIC_LIBS := deps/lib/libNncase.Runtime.Native.a deps/lib/libnncase.rt_modules.k230.a deps/lib/libfunctional_k230.a build/libmmz.a
 SHARED_LIBS := /usr/lib/riscv64-linux-gnu/libv4l2-drm.so /usr/lib/riscv64-linux-gnu/libdisplay.so /usr/lib/riscv64-linux-gnu/libdrm.so.2
@@ -64,6 +67,13 @@ OVERLAY_OBJS := build/k230_overlay.o \
 	build/overlay_renderer.o \
 	build/k230_ipc.o
 
+PANDAD_OBJS := build/k230_pandad.o \
+	build/panda_client.o \
+	build/k230_ipc.o \
+	build/model_output.o \
+	build/projection.o \
+	build/lateral_control.o
+
 .PHONY: all clean
 
 all: supercombo.elf k230_camerad k230_modeld k230_overlay
@@ -79,6 +89,12 @@ build/mmz.o: src/mmz.c include/mmz.h | build
 
 build/%.o: src/%.cc | build
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+build/panda_client.o: src/panda_client.cc src/panda_client.h | build
+	$(CXX) $(CXXFLAGS) $(PANDA_INCLUDES) -c $< -o $@
+
+build/k230_pandad.o: src/k230_pandad.cc src/panda_client.h | build
+	$(CXX) $(CXXFLAGS) $(PANDA_INCLUDES) -c $< -o $@
 
 build/check_model_output_parser.o: benchmarks/check_model_output_parser.cc | build
 	$(CXX) $(CXXFLAGS) -Isrc -c $< -o $@
@@ -101,5 +117,8 @@ k230_modeld: $(MODELD_OBJS) build/libmmz.a
 k230_overlay: $(OVERLAY_OBJS) build/libmmz.a
 	$(CXX) $(CXXFLAGS) $(OVERLAY_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group build/libmmz.a $(SHARED_LIBS) $(OPENCV_LIBS) $(LDLIBS) -Wl,--end-group
 
+k230_pandad: $(PANDAD_OBJS)
+	$(CXX) $(CXXFLAGS) $(PANDAD_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group $(LIBUSB_LIBS) $(LDLIBS) -Wl,--end-group
+
 clean:
-	rm -rf build supercombo.elf k230_camerad k230_modeld k230_overlay
+	rm -rf build supercombo.elf k230_camerad k230_modeld k230_overlay k230_pandad

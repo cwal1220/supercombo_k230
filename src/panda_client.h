@@ -1,0 +1,88 @@
+#ifndef PANDA_CLIENT_H
+#define PANDA_CLIENT_H
+
+#include <libusb.h>
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+constexpr uint16_t kPandaSafetySilent = 0;
+constexpr uint16_t kPandaSafetyElm327 = 3;
+constexpr uint16_t kPandaSafetyHyundai = 8;
+constexpr uint16_t kPandaSafetyAllOutput = 17;
+constexpr uint16_t kPandaSafetyNoOutput = 19;
+constexpr uint16_t kPandaSafetyHyundaiCommunity = 24;
+
+struct PandaCanFrame {
+    uint32_t address = 0;
+    uint8_t bus = 0;
+    uint8_t data_len = 0;
+    uint8_t data[64] = {};
+    bool returned = false;
+    bool rejected = false;
+};
+
+struct PandaHealth {
+    uint32_t uptime = 0;
+    uint32_t voltage = 0;
+    uint32_t current = 0;
+    uint32_t can_rx_errs = 0;
+    uint32_t can_send_errs = 0;
+    uint32_t can_fwd_errs = 0;
+    uint32_t gmlan_send_errs = 0;
+    uint32_t faults = 0;
+    uint8_t ignition_line = 0;
+    uint8_t ignition_can = 0;
+    uint8_t controls_allowed = 0;
+    uint8_t gas_interceptor_detected = 0;
+    uint8_t car_harness_status = 0;
+    uint8_t usb_power_mode = 0;
+    uint8_t safety_mode = 0;
+    uint16_t safety_param = 0;
+    uint8_t fault_status = 0;
+    uint8_t power_save_enabled = 0;
+    uint8_t heartbeat_lost = 0;
+    uint16_t alternative_experience = 0;
+    uint32_t blocked_msg_cnt = 0;
+    float interrupt_load = 0.0f;
+};
+
+class PandaClient {
+public:
+    PandaClient() = default;
+    ~PandaClient();
+
+    bool connect(const std::string &serial = "");
+    void close();
+    bool connected() const { return dev_handle_ != nullptr; }
+    bool comms_healthy() const { return comms_healthy_; }
+    const std::string &usb_serial() const { return usb_serial_; }
+    uint8_t hw_type() const { return hw_type_; }
+
+    bool set_safety_model(uint16_t safety_model, uint16_t safety_param);
+    bool send_heartbeat(bool engaged);
+    bool get_health(PandaHealth *health);
+    bool receive(std::vector<PandaCanFrame> *frames, int timeout_ms = 10);
+    bool send(const std::vector<PandaCanFrame> &frames);
+
+private:
+    bool control_write(uint8_t request, uint16_t value, uint16_t index, unsigned timeout_ms = 1000);
+    bool control_read(uint8_t request, uint16_t value, uint16_t index,
+                      void *data, uint16_t length, unsigned timeout_ms = 1000);
+    int bulk_read(uint8_t endpoint, uint8_t *data, int length, unsigned timeout_ms);
+    int bulk_write(uint8_t endpoint, const uint8_t *data, int length, unsigned timeout_ms);
+    void mark_usb_error(int err, const char *where);
+    bool unpack_can_buffer(const uint8_t *data, int size, std::vector<PandaCanFrame> *frames);
+    bool pack_can_buffer(const std::vector<PandaCanFrame> &frames, std::vector<uint8_t> *out);
+
+    libusb_context *ctx_ = nullptr;
+    libusb_device_handle *dev_handle_ = nullptr;
+    std::string usb_serial_;
+    uint8_t hw_type_ = 0;
+    bool comms_healthy_ = true;
+    std::vector<uint8_t> recv_buf_;
+};
+
+#endif

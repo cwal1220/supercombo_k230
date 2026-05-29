@@ -29,6 +29,7 @@ apt-get install -y \
   g++ \
   git \
   libdrm-dev \
+  libusb-1.0-0-dev \
   libopencv-dev \
   make \
   python3
@@ -38,6 +39,7 @@ Package purpose:
 
 - `g++`, `make`, `cmake`: board-native C/C++ build
 - `libdrm-dev`: DRM headers used by the overlay/display path
+- `libusb-1.0-0-dev`: optional panda USB/CAN bridge build
 - `libopencv-dev`: OpenCV headers/libraries used by the overlay renderer
 - `curl`, `ca-certificates`: `fetch_nncase_runtime.sh` download support
 - `git`: fresh clone from GitHub
@@ -60,6 +62,51 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j2
 ./k230_manager.py models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel 0
 ```
+
+Build the optional panda bridge when `libusb-1.0-0-dev` is installed:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSUPERCOMBO_BUILD_PANDA=ON
+cmake --build build -j2
+```
+
+Mac Docker cross-build:
+
+The repository can also be cross-built from macOS with the local Docker image
+`supercombo-k230-toolchain:24.04`. First fetch the nncase runtime deps and copy
+the K230 headers/libraries into the ignored local sysroot:
+
+```sh
+cd /Users/chan/Documents/supercombo_k230
+./fetch_nncase_runtime.sh
+K230_RSYNC_RSH="sshpass -p '<password>' ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no" \
+  scripts/sync_k230_sysroot.sh root@192.168.219.115
+```
+
+Then configure once and build. The build command below is intentionally the
+same command used during the current validation:
+
+```sh
+scripts/configure_mac_rv64.sh
+
+docker run --rm --platform linux/arm64/v8 \
+  -v "$PWD":/work \
+  -w /work \
+  supercombo-k230-toolchain:24.04 \
+  bash -lc 'cmake --build build-mac-rv64 -j$(nproc)'
+```
+
+Upload the rebuilt runtime files to the board:
+
+```sh
+K230_RSYNC_RSH="sshpass -p '<password>' ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no" \
+  scripts/upload_to_board.sh root@192.168.219.115
+```
+
+`deps/k230_sysroot/` and `build-mac-rv64/` are local generated directories and
+are not tracked. The sysroot sync script also points OpenCV `core/imgproc`
+development symlinks at the board's `*.so.410` libraries, avoiding the broken
+`libopencv_*.so.4.6.0 -> lapack/blas` dependency path seen on the flashed image.
 
 The historical Makefile is still kept as a rollback build path:
 
@@ -101,6 +148,19 @@ minimal passive overlay subscriber:
   - subscribes to latest `roadAiFrame`, reads the shared frame slot, runs
     nncase, parses supercombo output, updates calibration/control diagnostics,
     and publishes compact `modelState`
+- `k230_pandad` (optional)
+  - enabled with `K230_ENABLE_PANDA=1` when built with
+    `-DSUPERCOMBO_BUILD_PANDA=ON`
+  - connects to panda over `libusb`, publishes compact panda health and CAN
+    receive batches, and can relay raw `sendcan` batches
+  - defaults to shadow mode: `K230_PANDA_TX=0`, so no CAN frames are transmitted
+- `k230_controlsd.py` (optional shadow controller)
+  - enabled with `K230_ENABLE_CONTROL=1`
+  - imports the existing openpilot Hyundai controller from `K230_OPENPILOT_PATH`
+    and forces `CAR.K7_HEV_YG`
+  - reads `modelState` and panda CAN batches, then publishes generated raw
+    `sendcan` batches for `k230_pandad`
+  - does not transmit by itself; actual TX still requires `K230_PANDA_TX=1`
 
 Large AI frames are never sent through the small-message IPC. `k230_overlay`
 does not consume the shared AI frame ring for display; preview stays on the
@@ -148,6 +208,9 @@ Runtime structure:
 - `k230_manager.py`
   - minimal supervisor and heartbeat publisher. It is intentionally not a full
     openpilot manager clone.
+- `src/panda_client.*`, `src/k230_pandad.cc`
+  - optional panda USB bridge. It does not generate KIA/Hyundai control CAN;
+    that logic is intentionally left to the existing openpilot controller path.
 
 Useful runtime options:
 
@@ -176,6 +239,42 @@ Useful runtime options:
   - also works with `k230_modeld` directly for split-runtime parser/model tests.
 - `SUPERCOMBO_MAX_FRAMES=N`
   - stops after `N` inferred frames. This is mainly useful with replay mode.
+- `K230_ENABLE_PANDA=1`
+  - manager also starts `k230_pandad`. The binary must have been built with
+    `-DSUPERCOMBO_BUILD_PANDA=ON`.
+- `K230_ENABLE_CONTROL=1`
+  - manager starts `k230_pandad` and `k230_controlsd.py`.
+  - `k230_controlsd.py` requires an openpilot checkout with built Python
+    dependencies (`cereal`, `opendbc`) and uses `K230_OPENPILOT_PATH` to find it.
+- `K230_PANDA_SAFETY=nooutput|silent|hyundai|hyundaiCommunity|allOutput`
+  - panda safety mode for `k230_pandad`. Default is `nooutput`.
+  - collected KIA K7 YG HEV logs from the current openpilot fork report
+    `safety=hyundaiCommunity:0`, `sccBus=-1`, `mdpsBus=1`, and `sasBus=1`.
+    Use `K230_PANDA_SAFETY=hyundaiCommunity` for shadow/TX experiments unless
+    a newer fingerprint proves otherwise.
+- `K230_PANDA_TX=1`
+  - allows `k230_pandad` to relay raw `/dev/shm/k230_sendcan` batches to panda.
+    Default is `0`; shadow mode blocks transmission.
+- `K230_PANDA_ENGAGED=1`
+  - sends panda heartbeat as engaged, only meaningful with `K230_PANDA_TX=1`.
+    Default is disengaged.
+- `K230_CONTROLD_ENABLED=0|1`
+  - controls whether the shadow openpilot controller marks `CarControl` as
+    enabled. Default is `1`, but TX is still blocked unless `K230_PANDA_TX=1`.
+- `K230_CONTROLD_CURVATURE_GAIN=4.0`
+  - temporary gain from K230 model curvature to normalized openpilot steering
+    actuator. This is only the bridge input; Hyundai CAN formatting and limits
+    remain handled by openpilot's existing controller.
+- `K230_CONTROLD_FINGERPRINT_SEC=2.0`
+  - maximum time to collect CAN addresses before initializing the openpilot
+    Hyundai interface.
+- `K230_CONTROLD_FINGERPRINT_MIN_ADDRS=20`
+  - initialize early once enough CAN addresses have been observed.
+- `K230_IPC_DIR=/dev/shm`
+  - Python-only IPC base directory. Keep the default on K230; use `/tmp/...`
+    for local Mac/Linux replay tests.
+- `K230_OPENPILOT_PATH=/path/to/openpilot_c2`
+  - openpilot checkout used by `k230_controlsd.py`.
 
 Fixed production defaults:
 

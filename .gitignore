@@ -1,5 +1,8 @@
 .cache/
+.DS_Store
 build/
+build-mac-rv64/
+deps/k230_sysroot/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
@@ -8,6 +11,7 @@ supercombo.elf
 k230_camerad
 k230_modeld
 k230_overlay
+k230_pandad
 __pycache__/
 *.pyc
 *.raw

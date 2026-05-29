@@ -15,7 +15,8 @@ IPC_VERSION = 1
 HEADER = struct.Struct("<IIIIQQII")
 HEADER_SIZE = HEADER.size
 PROCESS = struct.Struct("<16sIiiIQ")
-MANAGER_STATE_SIZE = 8 + 4 + 4 + PROCESS.size * 4
+MAX_PROCESSES = 6
+MANAGER_STATE_SIZE = 8 + 4 + 4 + PROCESS.size * MAX_PROCESSES
 DISPLAY_READY_FILE = "/tmp/k230_display_ready"
 DISPLAY_READY_TIMEOUT_MS = 7000
 START_ORDER = ("k230_overlay", "k230_camerad", "k230_modeld")
@@ -26,6 +27,13 @@ def now_ns() -> int:
     if hasattr(time, "CLOCK_BOOTTIME"):
         return time.clock_gettime_ns(time.CLOCK_BOOTTIME)
     return time.monotonic_ns()
+
+
+def env_enabled(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value not in ("0", "false", "False", "FALSE")
 
 
 class LatestPublisher:
@@ -128,16 +136,28 @@ class Manager:
         self.manager_state = LatestPublisher("/k230_manager_state", MANAGER_STATE_SIZE)
         self.procs: Dict[str, ProcState] = {}
 
+        self.start_order = list(START_ORDER)
+        self.process_order = list(PROCESS_ORDER)
         specs = [
             ProcSpec("k230_camerad", ["./k230_camerad"], 0),
             ProcSpec("k230_modeld", ["./k230_modeld", self.kmodel, self.debug], -5),
             ProcSpec("k230_overlay", ["./k230_overlay"], 10),
         ]
+        if env_enabled("K230_ENABLE_PANDA") or env_enabled("K230_ENABLE_CONTROL"):
+            specs.append(ProcSpec("k230_pandad", ["./k230_pandad"], -2))
+            self.start_order.append("k230_pandad")
+            self.process_order.append("k230_pandad")
+        if env_enabled("K230_ENABLE_CONTROL"):
+            specs.append(ProcSpec("k230_controlsd", ["./k230_controlsd.py"], -3))
+            self.start_order.append("k230_controlsd")
+            self.process_order.append("k230_controlsd")
         for spec in specs:
             self.procs[spec.name] = ProcState(spec=spec)
         self.display_ready_file = DISPLAY_READY_FILE
 
     def start_proc(self, state: ProcState):
+        if not os.path.exists(state.spec.cmd[0]):
+            raise FileNotFoundError(f"{state.spec.cmd[0]} not found")
         state.proc = subprocess.Popen(
             state.spec.cmd,
             preexec_fn=lambda nice=state.spec.nice: child_setup(nice),
@@ -158,8 +178,8 @@ class Manager:
 
     def publish_state(self):
         timestamp = now_ns()
-        payload = struct.pack("<QII", timestamp, min(len(self.procs), 4), 0)
-        for name in PROCESS_ORDER:
+        payload = struct.pack("<QII", timestamp, min(len(self.procs), MAX_PROCESSES), 0)
+        for name in self.process_order[:MAX_PROCESSES]:
             state = self.procs[name]
             proc_name = name.encode("ascii")[:15].ljust(16, b"\x00")
             pid = state.proc.pid if state.proc is not None else 0
@@ -188,7 +208,7 @@ class Manager:
             print(f"manager: failed to remove display ready file {self.display_ready_file}: {exc}",
                   flush=True)
 
-        for name in START_ORDER:
+        for name in self.start_order:
             if name == "k230_camerad":
                 self.wait_for_display_ready()
             self.start_proc(self.procs[name])

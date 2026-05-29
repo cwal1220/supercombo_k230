@@ -3,6 +3,7 @@
 
 #include "lateral_control.h"
 #include "model_output.h"
+#include "online_calibrator.h"
 #include "projection.h"
 
 #include <atomic>
@@ -14,13 +15,18 @@ constexpr uint32_t kK230IpcMagic = 0x4b323349;
 constexpr uint32_t kK230IpcVersion = 1;
 constexpr uint32_t kK230FrameRingMagic = 0x4b465249;
 constexpr unsigned kK230FrameSlots = 4;
+constexpr unsigned kK230MaxProcesses = 6;
 constexpr unsigned kK230AiWidth = 512;
 constexpr unsigned kK230AiHeight = 256;
 constexpr unsigned kK230AiFrameBytes = kK230AiWidth * kK230AiHeight * 3 / 2;
 constexpr char kK230RoadAiFrameTopic[] = "/k230_road_ai_frame";
 constexpr char kK230ModelStateTopic[] = "/k230_model_state";
 constexpr char kK230ManagerStateTopic[] = "/k230_manager_state";
+constexpr char kK230CanTopic[] = "/k230_can";
+constexpr char kK230SendCanTopic[] = "/k230_sendcan";
+constexpr char kK230PandaStateTopic[] = "/k230_panda_state";
 constexpr char kK230RoadAiFrameRing[] = "/k230_road_ai";
+constexpr unsigned kK230CanBatchMaxFrames = 256;
 
 uint64_t k230_now_ns();
 
@@ -131,7 +137,45 @@ struct K230ManagerState {
     uint64_t timestamp_ns = 0;
     uint32_t process_count = 0;
     uint32_t reserved = 0;
-    K230ProcessState processes[4] = {};
+    K230ProcessState processes[kK230MaxProcesses] = {};
+};
+
+struct K230CanFrame {
+    uint32_t address = 0;
+    uint32_t src = 0;
+    uint32_t bus_time = 0;
+    uint32_t data_len = 0;
+    uint32_t flags = 0;
+    uint8_t data[64] = {};
+};
+
+struct K230CanBatch {
+    uint64_t timestamp_ns = 0;
+    uint32_t valid = 0;
+    uint32_t count = 0;
+    uint32_t dropped = 0;
+    uint32_t reserved = 0;
+    K230CanFrame frames[kK230CanBatchMaxFrames] = {};
+};
+
+struct K230PandaState {
+    uint64_t timestamp_ns = 0;
+    uint32_t connected = 0;
+    uint32_t comms_healthy = 0;
+    uint32_t tx_enabled = 0;
+    uint32_t controls_allowed = 0;
+    uint32_t ignition_line = 0;
+    uint32_t ignition_can = 0;
+    uint32_t safety_mode = 0;
+    uint32_t safety_param = 0;
+    uint32_t panda_type = 0;
+    uint32_t can_rx_errs = 0;
+    uint32_t can_send_errs = 0;
+    uint32_t blocked_msg_cnt = 0;
+    uint32_t faults = 0;
+    uint32_t fault_status = 0;
+    uint32_t voltage = 0;
+    uint32_t current = 0;
 };
 
 class K230LatestChannel {
