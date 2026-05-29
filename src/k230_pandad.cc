@@ -153,6 +153,7 @@ int main()
         const bool log_can = env_enabled("K230_PANDA_LOG_CAN", false);
         const char *serial_env = std::getenv("K230_PANDA_SERIAL");
         const std::string serial = serial_env ? serial_env : "";
+        const uint16_t idle_us = env_u16("K230_PANDA_IDLE_US", 5000);
         uint16_t default_safety_param = 0;
         const uint16_t safety_model = parse_safety_model("K230_PANDA_SAFETY", &default_safety_param);
         const uint16_t safety_param = env_u16("K230_PANDA_SAFETY_PARAM", default_safety_param);
@@ -193,8 +194,11 @@ int main()
             }
 
             std::vector<PandaCanFrame> frames;
+            bool had_rx = false;
+            bool had_sendcan = false;
             if (panda.receive(&frames, 10)) {
                 if (!frames.empty()) {
+                    had_rx = true;
                     K230CanBatch batch;
                     fill_can_batch(&batch, frames);
                     if (!can_pub.publish(&batch, sizeof(batch))) ++errors;
@@ -217,6 +221,7 @@ int main()
             if (sendcan_sub.read(&send_batch, sizeof(send_batch), &send_seq) &&
                 send_seq != last_sendcan_seq) {
                 last_sendcan_seq = send_seq;
+                had_sendcan = true;
                 const std::vector<PandaCanFrame> tx = frames_from_batch(send_batch);
                 if (tx_enabled) {
                     if (panda.send(tx)) {
@@ -242,15 +247,22 @@ int main()
                 PandaHealth health;
                 const bool got_health = panda.get_health(&health);
                 std::fprintf(stderr,
-                             "k230_pandad: rx=%u tx=%u blocked=%u errors=%u controls=%u safety=%u:%u ign=%u/%u\n",
+                             "k230_pandad: rx=%u tx=%u blocked=%u errors=%u controls=%u "
+                             "safety=%u:%u ign=%u/%u voltage=%umV current=%umA faults=0x%x\n",
                              rx_frames, tx_frames, tx_blocked, errors,
                              got_health ? health.controls_allowed : 0,
                              got_health ? health.safety_mode : 0,
                              got_health ? health.safety_param : 0,
                              got_health ? health.ignition_line : 0,
-                             got_health ? health.ignition_can : 0);
+                             got_health ? health.ignition_can : 0,
+                             got_health ? health.voltage : 0,
+                             got_health ? health.current : 0,
+                             got_health ? health.faults : 0);
                 rx_frames = tx_frames = tx_blocked = errors = 0;
                 last_log_ns = now;
+            }
+            if (!had_rx && !had_sendcan && idle_us > 0) {
+                usleep(idle_us);
             }
         }
 

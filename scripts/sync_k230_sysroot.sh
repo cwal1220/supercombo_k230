@@ -43,6 +43,7 @@ for pattern in \
   "/lib/riscv64-linux-gnu/libmd.so*" \
   "/lib/riscv64-linux-gnu/libgfortran.so*" \
   "/lib/riscv64-linux-gnu/libgomp.so*" \
+  "/lib/riscv64-linux-gnu/libcap.so*" \
   "/lib/riscv64-linux-gnu/libudev.so*"; do
   rsync_remote "$pattern" "$SYSROOT/lib/riscv64-linux-gnu/" || true
 done

@@ -258,6 +258,10 @@ Useful runtime options:
 - `K230_PANDA_ENGAGED=1`
   - sends panda heartbeat as engaged, only meaningful with `K230_PANDA_TX=1`.
     Default is disengaged.
+- `K230_PANDA_IDLE_US=5000`
+  - sleep time used by `k230_pandad` when panda returns no CAN frames and no
+    pending `sendcan` batch exists. This keeps USB-only or parked shadow runs
+    from stealing scheduler time from `k230_modeld`.
 - `K230_CONTROLD_ENABLED=0|1`
   - controls whether the shadow openpilot controller marks `CarControl` as
     enabled. Default is `1`, but TX is still blocked unless `K230_PANDA_TX=1`.
@@ -285,7 +289,7 @@ Fixed production defaults:
 - The ready barrier waits for 30 displayed preview frames and times out after
   7000 ms.
 - Child process priorities are fixed as `camerad=0`, `modeld=-5`,
-  `overlay=10`.
+  `overlay=10`, optional `pandad=10`, optional `controlsd=5`.
 - The front-vehicle marker is always enabled with probability threshold `0.5`.
 
 Benchmark and diagnostic utilities live under `benchmarks/` and are not built

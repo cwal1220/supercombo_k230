@@ -144,11 +144,11 @@ class Manager:
             ProcSpec("k230_overlay", ["./k230_overlay"], 10),
         ]
         if env_enabled("K230_ENABLE_PANDA") or env_enabled("K230_ENABLE_CONTROL"):
-            specs.append(ProcSpec("k230_pandad", ["./k230_pandad"], -2))
+            specs.append(ProcSpec("k230_pandad", ["./k230_pandad"], 10))
             self.start_order.append("k230_pandad")
             self.process_order.append("k230_pandad")
         if env_enabled("K230_ENABLE_CONTROL"):
-            specs.append(ProcSpec("k230_controlsd", ["./k230_controlsd.py"], -3))
+            specs.append(ProcSpec("k230_controlsd", ["./k230_controlsd.py"], 5))
             self.start_order.append("k230_controlsd")
             self.process_order.append("k230_controlsd")
         for spec in specs:

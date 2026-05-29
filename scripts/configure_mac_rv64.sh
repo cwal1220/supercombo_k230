@@ -22,4 +22,5 @@ docker run --rm --platform linux/arm64/v8 \
       -DCMAKE_CXX_COMPILER=riscv64-linux-gnu-g++ \
       -DSUPERCOMBO_BUILD_PANDA=ON \
       -DK230_SYSROOT_LIB_DIR=/work/deps/k230_sysroot/usr/lib/riscv64-linux-gnu \
+      -DK230_SYSROOT_BASE_LIB_DIR=/work/deps/k230_sysroot/lib/riscv64-linux-gnu \
       -DOpenCV_DIR=/work/deps/k230_sysroot/usr/lib/riscv64-linux-gnu/cmake/opencv4"

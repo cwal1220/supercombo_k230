@@ -17,6 +17,13 @@
 - It publishes received CAN batches to `/dev/shm/k230_can`.
 - It creates `/dev/shm/k230_sendcan`, but CAN transmission is blocked by default.
 - Default safety mode is `nooutput`.
+- With only USB connected and no vehicle harness, expected health is
+  approximately `voltage=5V`, `ignition_line=0`, `ignition_can=0`, and
+  `rx=0`. This confirms panda USB communication only; it does not validate
+  vehicle CAN wiring.
+- Empty-CAN polling sleeps by default with `K230_PANDA_IDLE_US=5000`, and the
+  manager starts `k230_pandad` at low priority so shadow mode does not steal
+  modeld scheduler time.
 - The collected K7 YG HEV logs from this fork report:
   - `sccBus=-1`
   - `mdpsBus=1`

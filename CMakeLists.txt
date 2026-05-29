@@ -20,6 +20,8 @@ endforeach()
 
 set(K230_SYSROOT_LIB_DIR "/usr/lib/riscv64-linux-gnu" CACHE PATH
     "K230 system library directory")
+set(K230_SYSROOT_BASE_LIB_DIR "/lib/riscv64-linux-gnu" CACHE PATH
+    "K230 base system library directory")
 set(NNCASE_DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps" CACHE PATH
     "nncase K230 runtime dependency directory")
 
@@ -76,8 +78,11 @@ function(configure_k230_target target)
   target_include_directories(${target} PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_include_directories(${target} SYSTEM PRIVATE ${PROJECT_SYSTEM_INCLUDES})
   target_compile_options(${target} PRIVATE ${PROJECT_WARNINGS})
-  target_link_directories(${target} PRIVATE ${K230_SYSROOT_LIB_DIR})
-  target_link_options(${target} PRIVATE "-Wl,-rpath-link,${K230_SYSROOT_LIB_DIR}")
+  target_link_directories(${target} PRIVATE ${K230_SYSROOT_LIB_DIR} ${K230_SYSROOT_BASE_LIB_DIR})
+  target_link_options(${target} PRIVATE
+    "-Wl,-rpath-link,${K230_SYSROOT_LIB_DIR}"
+    "-Wl,-rpath-link,${K230_SYSROOT_BASE_LIB_DIR}"
+  )
   target_link_libraries(${target} PRIVATE
     -Wl,--start-group
     ${ARGN}
