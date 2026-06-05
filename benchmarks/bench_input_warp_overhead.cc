@@ -113,7 +113,6 @@ int main(int argc, char **argv)
     fill_nv12(nv12);
 
     AppConfig identity_config;
-    identity_config.input_warp_enabled = true;
     ModelInputTransform identity_warp(identity_config);
 
     AppConfig pitch_config = identity_config;

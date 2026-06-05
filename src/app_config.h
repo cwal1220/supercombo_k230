@@ -34,7 +34,6 @@ struct AppConfig {
     bool log_calibration = false;
     bool profile = false;
 
-    bool input_warp_enabled = false;
     float input_warp_fx = 910.0f;
     float input_warp_fy = 910.0f;
     float input_warp_cx = 256.0f;

@@ -11,7 +11,6 @@ class ModelInputTransform
 public:
     explicit ModelInputTransform(const AppConfig &config);
 
-    bool enabled() const { return enabled_; }
     void nv12_to_yuv6_warped(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &out);
 
 private:
@@ -35,7 +34,6 @@ private:
     static uint8_t sample_luma(const uint8_t *base, const BilinearSample &sample);
     static uint8_t sample_chroma(const uint8_t *base, const BilinearSample &sample, int channel);
 
-    bool enabled_ = false;
     bool map_valid_ = false;
     int map_src_w_ = 0;
     int map_src_h_ = 0;

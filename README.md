@@ -172,9 +172,10 @@ The model path captures the AI stream as `NV12 512x256` through `/dev/video2`
 crop/resize, prepares the YUV6 recurrent inputs, runs nncase runtime directly,
 and publishes compact `modelState`. The overlay display process uses
 `/dev/video1` for preview and `/dev/video2` remains dedicated to the AI stream.
-By default the model input preparation keeps the existing direct `NV12 -> YUV6`
-path. A calibrated homography input-warp experiment is available behind
-`SUPERCOMBO_INPUT_WARP=1`.
+The model input preparation always uses the calibrated homography
+`NV12 -> YUV6` path. With default intrinsics and zero rpy it is
+identity-equivalent to the previous direct packer, but the same path can apply
+manual calibration without changing the camera/display pipeline.
 
 Runtime structure:
 
@@ -189,7 +190,7 @@ Runtime structure:
   - owns the supercombo raw-output layout and exposes parsed plan, lanes, road
     edges, leads, and pose.
 - `src/model_input_transform.*`
-  - optional direct `NV12 -> calibrated warped YUV6` input transform. It fuses
+  - direct `NV12 -> calibrated warped YUV6` input transform. It fuses
     homography sampling and openpilot-compatible YUV6 packing without creating
     an intermediate RGB or warped image buffer.
 - `src/calibration_service.*`
@@ -239,10 +240,6 @@ Useful runtime options:
 - `SUPERCOMBO_LOG_CALIB=1`
   - prints the online calibrator status, accepted/rejected sample counts,
     valid block count, rpy, and spread.
-- `SUPERCOMBO_INPUT_WARP=1`
-  - enables the experimental calibrated homography model-input path. The source
-    is still the shared `512x256 NV12` AI frame, not the original full camera
-    frame. With default intrinsics and zero rpy this is identity-equivalent.
 - `SUPERCOMBO_INPUT_WARP_ROLL_DEG`, `SUPERCOMBO_INPUT_WARP_PITCH_DEG`,
   `SUPERCOMBO_INPUT_WARP_YAW_DEG`
   - optional model-input warp calibration in degrees. If unset, the input warp

@@ -113,7 +113,6 @@ AppConfig AppConfig::from_env_defaults(const char *program_name)
     config.log_calibration = env_enabled("SUPERCOMBO_LOG_CALIB");
     config.profile = env_enabled("SUPERCOMBO_PROFILE");
 
-    config.input_warp_enabled = env_enabled("SUPERCOMBO_INPUT_WARP");
     config.input_warp_fx = env_float("SUPERCOMBO_INPUT_WARP_FX", config.input_warp_fx);
     config.input_warp_fy = env_float("SUPERCOMBO_INPUT_WARP_FY", config.input_warp_fy);
     config.input_warp_cx = env_float("SUPERCOMBO_INPUT_WARP_CX", config.input_warp_cx);

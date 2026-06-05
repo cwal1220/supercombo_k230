@@ -82,8 +82,7 @@ void transform_scale_buffer(const float *in, float scale, float *out)
 } // namespace
 
 ModelInputTransform::ModelInputTransform(const AppConfig &config)
-    : enabled_(config.input_warp_enabled),
-      fx_(config.input_warp_fx),
+    : fx_(config.input_warp_fx),
       fy_(config.input_warp_fy),
       cx_(config.input_warp_cx),
       cy_(config.input_warp_cy),
