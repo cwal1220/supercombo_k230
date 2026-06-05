@@ -13,6 +13,8 @@ cmake --build build -j2
 Available utilities:
 
 - `bench_nv12_to_yuv6`: CPU `NV12 512x256 -> YUV6 float` conversion timing.
+- `bench_input_warp_overhead`: compares direct YUV6 packing with the optional
+  calibrated homography `NV12 -> YUV6` input-warp path.
 - `bench_capture_nv12`: `/dev/video2` `NV12 512x256` capture timing.
 - `bench_ai2d_resize`: K230 AI2D crop/resize timing experiment.
 - `sequence_runner`: run a prebuilt tensor sequence through a kmodel and dump

@@ -183,6 +183,14 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
   add_executable(bench_nv12_to_yuv6 benchmarks/bench_nv12_to_yuv6.cc)
   target_compile_options(bench_nv12_to_yuv6 PRIVATE ${PROJECT_WARNINGS})
 
+  add_executable(bench_input_warp_overhead
+    benchmarks/bench_input_warp_overhead.cc
+    src/app_config.cc
+    src/model_input_transform.cc
+  )
+  target_include_directories(bench_input_warp_overhead PRIVATE ${PROJECT_LOCAL_INCLUDES})
+  target_compile_options(bench_input_warp_overhead PRIVATE ${PROJECT_WARNINGS})
+
   add_executable(bench_capture_nv12 benchmarks/bench_capture_nv12.cc)
   configure_k230_target(bench_capture_nv12 mmz ${K230_SHARED_LIBS})
 
