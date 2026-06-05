@@ -1,5 +1,7 @@
 #include "panda_client.h"
 
+#include "panda_can_codec.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -13,24 +15,7 @@ constexpr uint8_t kUsbRequestIn = LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDO
 constexpr uint8_t kCanRxEndpoint = 0x81;
 constexpr uint8_t kCanTxEndpoint = 3;
 constexpr int kRecvSize = 0x4000;
-constexpr int kUsbPacketMaxSize = 0x40;
-constexpr int kCanPacketHeadSize = 5;
 constexpr int kUsbTxSoftLimit = 0x100;
-
-constexpr uint8_t kDlcToLen[16] = {
-    0, 1, 2, 3, 4, 5, 6, 7,
-    8, 12, 16, 20, 24, 32, 48, 64,
-};
-
-struct __attribute__((packed)) UsbCanHeader {
-    uint8_t reserved : 1;
-    uint8_t bus : 3;
-    uint8_t data_len_code : 4;
-    uint8_t rejected : 1;
-    uint8_t returned : 1;
-    uint8_t extended : 1;
-    uint32_t addr : 29;
-};
 
 struct __attribute__((packed)) PandaHealthPacket {
     uint32_t uptime_pkt;
@@ -56,25 +41,6 @@ struct __attribute__((packed)) PandaHealthPacket {
     uint32_t blocked_msg_cnt_pkt;
     float interrupt_load;
 };
-
-uint8_t len_to_dlc(uint8_t len)
-{
-    if (len <= 8) return len;
-    for (uint8_t dlc = 9; dlc < 16; ++dlc) {
-        if (len <= kDlcToLen[dlc]) return dlc;
-    }
-    return 15;
-}
-
-void append_packet_bytes(std::vector<uint8_t> *dest, const uint8_t *src, size_t size)
-{
-    for (size_t i = 0; i < size; ++i) {
-        if ((dest->size() % kUsbPacketMaxSize) == 0) {
-            dest->push_back(static_cast<uint8_t>(dest->size() / kUsbPacketMaxSize));
-        }
-        dest->push_back(src[i]);
-    }
-}
 
 } // namespace
 
@@ -286,6 +252,7 @@ bool PandaClient::receive(std::vector<PandaCanFrame> *frames, int timeout_ms)
 
 bool PandaClient::send(const std::vector<PandaCanFrame> &frames)
 {
+    if (frames.empty()) return true;
     std::vector<uint8_t> packed;
     if (!pack_can_buffer(frames, &packed)) return false;
     for (size_t pos = 0; pos < packed.size();) {
@@ -299,55 +266,21 @@ bool PandaClient::send(const std::vector<PandaCanFrame> &frames)
 
 bool PandaClient::unpack_can_buffer(const uint8_t *data, int size, std::vector<PandaCanFrame> *frames)
 {
-    recv_buf_.clear();
-    for (int i = 0; i < size; i += kUsbPacketMaxSize) {
-        if (data[i] != static_cast<uint8_t>(i / kUsbPacketMaxSize)) {
-            std::fprintf(stderr, "panda: malformed CAN USB packet\n");
-            comms_healthy_ = false;
-            return false;
-        }
-        const int chunk_len = std::min(kUsbPacketMaxSize, size - i);
-        recv_buf_.insert(recv_buf_.end(), &data[i + 1], &data[i + chunk_len]);
-    }
-
-    size_t pos = 0;
-    while (pos + kCanPacketHeadSize <= recv_buf_.size()) {
-        UsbCanHeader header {};
-        std::memcpy(&header, recv_buf_.data() + pos, kCanPacketHeadSize);
-        const uint8_t data_len = kDlcToLen[header.data_len_code & 0xf];
-        if (pos + kCanPacketHeadSize + data_len > recv_buf_.size()) {
-            std::fprintf(stderr, "panda: truncated CAN packet\n");
-            comms_healthy_ = false;
-            return false;
-        }
-
-        PandaCanFrame frame;
-        frame.address = header.addr;
-        frame.bus = header.bus;
-        frame.data_len = data_len;
-        frame.rejected = header.rejected != 0;
-        frame.returned = header.returned != 0;
-        std::memcpy(frame.data, recv_buf_.data() + pos + kCanPacketHeadSize, data_len);
-        frames->push_back(frame);
-        pos += kCanPacketHeadSize + data_len;
+    std::string error;
+    if (!panda_can_unpack_buffer(data, size, &recv_buf_, frames, &error)) {
+        std::fprintf(stderr, "panda: %s\n", error.c_str());
+        comms_healthy_ = false;
+        return false;
     }
     return true;
 }
 
 bool PandaClient::pack_can_buffer(const std::vector<PandaCanFrame> &frames, std::vector<uint8_t> *out)
 {
-    if (!out) return false;
-    out->clear();
-    for (const PandaCanFrame &frame : frames) {
-        if (frame.data_len > sizeof(frame.data)) return false;
-        const uint8_t dlc = len_to_dlc(frame.data_len);
-        UsbCanHeader header {};
-        header.addr = frame.address;
-        header.extended = frame.address >= 0x800 ? 1 : 0;
-        header.data_len_code = dlc;
-        header.bus = frame.bus & 0x7;
-        append_packet_bytes(out, reinterpret_cast<const uint8_t *>(&header), kCanPacketHeadSize);
-        append_packet_bytes(out, frame.data, kDlcToLen[dlc]);
+    std::string error;
+    if (!panda_can_pack_buffer(frames, out, &error)) {
+        std::fprintf(stderr, "panda: %s\n", error.c_str());
+        return false;
     }
-    return !out->empty();
+    return true;
 }

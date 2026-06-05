@@ -122,6 +122,23 @@ Observed result on Mac with a Python 3.11 openpilot build:
   fixes. Exact `send_batches` can vary slightly with controller startup timing
   during replay.
 
+Payload/codec validation:
+
+```sh
+python3 benchmarks/check_k230_can_payload.py
+c++ -std=c++17 -Wall -Wextra -Isrc \
+  benchmarks/check_panda_can_codec.cc src/panda_can_codec.cc \
+  -o /tmp/check_panda_can_codec && /tmp/check_panda_can_codec
+```
+
+- The openpilot CAN tuple order is kept as `(address, busTime, dat, src)`.
+- The panda USB CAN header is generated with the same byte layout as
+  `panda/python/__init__.py::pack_can_buffer`.
+- `k230_pandad` rejects TX frames with invalid bus, invalid 29-bit address,
+  invalid DLC length, or RX-only returned/rejected flags.
+- RX returned/rejected flags are mapped back to openpilot `src + 128` and
+  `src + 192` semantics before entering `CarState`/fingerprinting.
+
 ## Stage 3: controlled TX enable
 
 - Enable real transmission only with all explicit gates set:

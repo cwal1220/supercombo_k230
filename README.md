@@ -366,6 +366,14 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSUPERCOMBO_BUILD_BENCHMARKS=ON
 cmake --build build -j2
 ```
 
+CAN/panda payload checks can be run on a host before connecting the car:
+
+```sh
+python3 benchmarks/check_k230_can_payload.py
+cmake --build build --target check_panda_can_codec -j2
+./check_panda_can_codec
+```
+
 Create a replay file on the host from collected openpilot logs:
 
 ```sh

@@ -21,6 +21,9 @@ CAN_FRAME = struct.Struct("<IIIII64s")
 CAN_BATCH_HEADER = struct.Struct("<QIIII")
 CAN_BATCH_MAX_FRAMES = 256
 CAN_BATCH_SIZE = CAN_BATCH_HEADER.size + CAN_FRAME.size * CAN_BATCH_MAX_FRAMES
+CAN_DLC_LENGTHS = frozenset((0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64))
+CAN_MAX_ADDRESS = 0x1FFFFFFF
+CAN_MAX_TX_BUS = 3
 PANDA_STATE = struct.Struct("<Q" + "I" * 16)
 TRAJECTORY_SIZE = 33
 CONTROL_N = 17
@@ -621,20 +624,43 @@ def decode_can_batch(payload: bytes) -> List[CanFrame]:
     frames: List[CanFrame] = []
     offset = CAN_BATCH_HEADER.size
     for _ in range(min(count, CAN_BATCH_MAX_FRAMES)):
-        address, src, _bus_time, data_len, _flags, raw = CAN_FRAME.unpack_from(payload, offset)
+        if offset + CAN_FRAME.size > len(payload):
+            break
+        address, src, _bus_time, data_len, flags, raw = CAN_FRAME.unpack_from(payload, offset)
         offset += CAN_FRAME.size
-        if data_len <= len(raw):
-            frames.append(CanFrame(address=address, src=src, dat=raw[:data_len]))
+        if address > CAN_MAX_ADDRESS or src > 7 or data_len not in CAN_DLC_LENGTHS:
+            continue
+        # Match panda/openpilot receive semantics: TX echo/reject frames are
+        # published on src + 128 / src + 192 so CarState/fingerprint ignores them.
+        op_src = src
+        if flags & 0x1:
+            op_src += 128
+        if flags & 0x2:
+            op_src += 192
+        frames.append(CanFrame(address=address, src=op_src, dat=raw[:data_len]))
     return frames
 
 
 def encode_can_batch(frames: Iterable[CanFrame]) -> bytes:
-    frame_list = list(frames)[:CAN_BATCH_MAX_FRAMES]
+    frame_list: List[CanFrame] = []
+    dropped = 0
+    for frame in frames:
+        dat = bytes(frame.dat)
+        if (frame.address < 0 or frame.address > CAN_MAX_ADDRESS or
+                frame.src < 0 or frame.src > CAN_MAX_TX_BUS or
+                len(dat) not in CAN_DLC_LENGTHS):
+            dropped += 1
+            continue
+        if len(frame_list) >= CAN_BATCH_MAX_FRAMES:
+            dropped += 1
+            continue
+        frame_list.append(CanFrame(address=frame.address, src=frame.src, dat=dat))
+
     payload = bytearray(CAN_BATCH_SIZE)
-    CAN_BATCH_HEADER.pack_into(payload, 0, now_ns(), 1, len(frame_list), 0, 0)
+    CAN_BATCH_HEADER.pack_into(payload, 0, now_ns(), 1, len(frame_list), dropped, 0)
     offset = CAN_BATCH_HEADER.size
     for frame in frame_list:
-        dat = bytes(frame.dat[:64])
+        dat = bytes(frame.dat)
         CAN_FRAME.pack_into(payload, offset, frame.address, frame.src, 0, len(dat), 0,
                             dat.ljust(64, b"\x00"))
         offset += CAN_FRAME.size
@@ -857,7 +883,9 @@ class OpenpilotHyundaiController:
             address = int(msg[0])
             dat = bytes(msg[2])
             bus = int(msg[3])
-            if not (0 <= bus < 4 and 0 <= address <= 0x1FFFFFFF and len(dat) <= 64):
+            if not (0 <= bus <= CAN_MAX_TX_BUS and
+                    0 <= address <= CAN_MAX_ADDRESS and
+                    len(dat) in CAN_DLC_LENGTHS):
                 continue
             out.append(CanFrame(address=address, src=bus, dat=dat))
         return out

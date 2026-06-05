@@ -167,6 +167,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     add_executable(k230_pandad
       src/k230_pandad.cc
       src/panda_client.cc
+      src/panda_can_codec.cc
       src/k230_ipc.cc
       src/model_output.cc
       src/projection.cc
@@ -187,6 +188,13 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
 
   add_executable(bench_nv12_to_yuv6 benchmarks/bench_nv12_to_yuv6.cc)
   target_compile_options(bench_nv12_to_yuv6 PRIVATE ${PROJECT_WARNINGS})
+
+  add_executable(check_panda_can_codec
+    benchmarks/check_panda_can_codec.cc
+    src/panda_can_codec.cc
+  )
+  target_include_directories(check_panda_can_codec PRIVATE ${PROJECT_LOCAL_INCLUDES})
+  target_compile_options(check_panda_can_codec PRIVATE ${PROJECT_WARNINGS})
 
   add_executable(bench_input_warp_overhead
     benchmarks/bench_input_warp_overhead.cc

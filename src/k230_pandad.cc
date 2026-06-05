@@ -1,4 +1,5 @@
 #include "k230_ipc.h"
+#include "panda_can_codec.h"
 #include "panda_client.h"
 
 #include <signal.h>
@@ -80,14 +81,19 @@ void fill_can_batch(K230CanBatch *batch, const std::vector<PandaCanFrame> &frame
 std::vector<PandaCanFrame> frames_from_batch(const K230CanBatch &batch)
 {
     std::vector<PandaCanFrame> frames;
+    if (!batch.valid) return frames;
     const uint32_t count = std::min<uint32_t>(batch.count, kK230CanBatchMaxFrames);
     frames.reserve(count);
     for (uint32_t i = 0; i < count; ++i) {
         const K230CanFrame &src = batch.frames[i];
-        if (src.data_len > sizeof(src.data)) continue;
+        if (src.flags != 0) continue;
+        if (src.address > kPandaCanMaxAddress) continue;
+        if (src.src > kPandaCanMaxTxBus) continue;
+        if (src.data_len > kPandaCanMaxDataLen) continue;
+        if (!panda_can_is_valid_data_len(static_cast<uint8_t>(src.data_len))) continue;
         PandaCanFrame frame;
         frame.address = src.address;
-        frame.bus = static_cast<uint8_t>(src.src & 0x7);
+        frame.bus = static_cast<uint8_t>(src.src);
         frame.data_len = static_cast<uint8_t>(src.data_len);
         std::memcpy(frame.data, src.data, frame.data_len);
         frames.push_back(frame);

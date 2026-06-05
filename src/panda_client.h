@@ -1,6 +1,8 @@
 #ifndef PANDA_CLIENT_H
 #define PANDA_CLIENT_H
 
+#include "panda_can_frame.h"
+
 #include <libusb.h>
 
 #include <cstddef>
@@ -14,15 +16,6 @@ constexpr uint16_t kPandaSafetyHyundai = 8;
 constexpr uint16_t kPandaSafetyAllOutput = 17;
 constexpr uint16_t kPandaSafetyNoOutput = 19;
 constexpr uint16_t kPandaSafetyHyundaiCommunity = 24;
-
-struct PandaCanFrame {
-    uint32_t address = 0;
-    uint8_t bus = 0;
-    uint8_t data_len = 0;
-    uint8_t data[64] = {};
-    bool returned = false;
-    bool rejected = false;
-};
 
 struct PandaHealth {
     uint32_t uptime = 0;
