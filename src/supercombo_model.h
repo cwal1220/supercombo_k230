@@ -2,6 +2,8 @@
 #define SUPERCOMBO_MODEL_H
 
 #include "ai_base.h"
+#include "app_config.h"
+#include "model_input_transform.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -10,7 +12,7 @@
 class SupercomboModel : public AIBase
 {
 public:
-    SupercomboModel(const char *kmodel_file, int debug_mode);
+    SupercomboModel(const char *kmodel_file, int debug_mode, const AppConfig &config);
 
     bool run_frame_nv12(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &raw_output);
     void reset_state();
@@ -30,6 +32,7 @@ private:
     size_t shape_count(size_t index) const;
 
     std::vector<runtime_tensor> input_tensors_;
+    ModelInputTransform input_transform_;
     std::vector<float> prev_yuv_;
     std::vector<float> current_yuv_;
     std::vector<float> input_imgs_;

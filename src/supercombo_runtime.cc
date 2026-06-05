@@ -79,7 +79,7 @@ int SupercomboRuntime::run_replay()
                      source.frame_count(), config_.replay_nv12_path.c_str(), target_frames);
         std::fprintf(stderr, "replay mode=headless camera=off display=off\n");
 
-        SupercomboModel model(config_.kmodel_path.c_str(), config_.debug_mode);
+        SupercomboModel model(config_.kmodel_path.c_str(), config_.debug_mode, config_);
         std::vector<float> raw;
         unsigned processed = 0;
         unsigned errors = 0;
@@ -138,7 +138,7 @@ void SupercomboRuntime::ai_thread_proc()
 
     try {
         LiveNv12Source source(config_, kd_mpi_get_vvcam_video00() + 1);
-        SupercomboModel model(config_.kmodel_path.c_str(), config_.debug_mode);
+        SupercomboModel model(config_.kmodel_path.c_str(), config_.debug_mode, config_);
         Nv12Frame frame;
         std::vector<float> raw;
         unsigned processed_frames = 0;

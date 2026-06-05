@@ -24,6 +24,7 @@ CORE_OBJS := build/app_config.o \
 	build/input_source.o \
 	build/lateral_control.o \
 	build/k230_ipc.o \
+	build/model_input_transform.o \
 	build/supercombo_model.o \
 	build/online_calibrator.o \
 	build/ai_base.o
@@ -37,6 +38,7 @@ MONOLITH_OBJS := build/main.o \
 	build/input_source.o \
 	build/lateral_control.o \
 	build/supercombo_runtime.o \
+	build/model_input_transform.o \
 	build/supercombo_model.o \
 	build/online_calibrator.o \
 	build/ai_base.o
@@ -56,6 +58,7 @@ MODELD_OBJS := build/k230_modeld.o \
 	build/input_source.o \
 	build/lateral_control.o \
 	build/k230_ipc.o \
+	build/model_input_transform.o \
 	build/supercombo_model.o \
 	build/online_calibrator.o \
 	build/ai_base.o

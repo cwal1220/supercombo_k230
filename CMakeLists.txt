@@ -105,6 +105,7 @@ set(MODEL_SOURCES
   src/input_source.cc
   src/k230_ipc.cc
   src/lateral_control.cc
+  src/model_input_transform.cc
   src/online_calibrator.cc
   src/supercombo_model.cc
 )

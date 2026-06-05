@@ -60,7 +60,7 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
     std::fprintf(stderr, "modeld replay input format=NV12 frames=%u file=%s target=%u\n",
                  source.frame_count(), config.replay_nv12_path.c_str(), target_frames);
 
-    SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode);
+    SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode, config);
     CalibrationService calibration(config);
     LateralControlDraft lateral_control;
 
@@ -127,7 +127,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub)
     }
     if (!frame_ring.valid()) return 1;
 
-    SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode);
+    SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode, config);
     CalibrationService calibration(config);
     LateralControlDraft lateral_control;
     std::vector<float> raw;

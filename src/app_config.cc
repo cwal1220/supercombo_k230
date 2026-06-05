@@ -61,6 +61,12 @@ float env_float(const char *name, float default_value)
     return end == value ? default_value : parsed;
 }
 
+float env_float_prefer(const char *primary, const char *fallback, float default_value)
+{
+    if (env_present(primary)) return env_float(primary, default_value);
+    return env_float(fallback, default_value);
+}
+
 float deg_to_rad(float deg)
 {
     return deg * kPi / 180.0f;
@@ -106,6 +112,16 @@ AppConfig AppConfig::from_env_defaults(const char *program_name)
     config.manual_yaw = deg_to_rad(env_float("SUPERCOMBO_CALIB_YAW_DEG", 0.0f));
     config.log_calibration = env_enabled("SUPERCOMBO_LOG_CALIB");
     config.profile = env_enabled("SUPERCOMBO_PROFILE");
+
+    config.input_warp_enabled = env_enabled("SUPERCOMBO_INPUT_WARP");
+    config.input_warp_fx = env_float("SUPERCOMBO_INPUT_WARP_FX", config.input_warp_fx);
+    config.input_warp_fy = env_float("SUPERCOMBO_INPUT_WARP_FY", config.input_warp_fy);
+    config.input_warp_cx = env_float("SUPERCOMBO_INPUT_WARP_CX", config.input_warp_cx);
+    config.input_warp_cy = env_float("SUPERCOMBO_INPUT_WARP_CY", config.input_warp_cy);
+    config.input_warp_height = env_float("SUPERCOMBO_INPUT_WARP_HEIGHT", config.input_warp_height);
+    config.input_warp_roll = deg_to_rad(env_float_prefer("SUPERCOMBO_INPUT_WARP_ROLL_DEG", "SUPERCOMBO_CALIB_ROLL_DEG", 0.0f));
+    config.input_warp_pitch = deg_to_rad(env_float_prefer("SUPERCOMBO_INPUT_WARP_PITCH_DEG", "SUPERCOMBO_CALIB_PITCH_DEG", 0.0f));
+    config.input_warp_yaw = deg_to_rad(env_float_prefer("SUPERCOMBO_INPUT_WARP_YAW_DEG", "SUPERCOMBO_CALIB_YAW_DEG", 0.0f));
 
     config.projection_mode = env_projection_mode();
 

@@ -77,8 +77,9 @@ ProfileStats &profile_stats()
 
 } // namespace
 
-SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode)
+SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const AppConfig &config)
     : AIBase(kmodel_file, "Supercombo", debug_mode),
+      input_transform_(config),
       prev_yuv_(kYuv6Floats, 0.0f),
       current_yuv_(kYuv6Floats, 0.0f),
       input_imgs_(kInputImageFloats, 0.0f),
@@ -101,7 +102,11 @@ bool SupercomboModel::run_frame_nv12(const uint8_t *nv12, int src_w, int src_h, 
 {
     const bool profile = profile_enabled();
     const uint64_t t0 = profile ? now_ns() : 0;
-    nv12_to_yuv6(nv12, src_w, src_h, current_yuv_);
+    if (input_transform_.enabled()) {
+        input_transform_.nv12_to_yuv6_warped(nv12, src_w, src_h, current_yuv_);
+    } else {
+        nv12_to_yuv6(nv12, src_w, src_h, current_yuv_);
+    }
     const uint64_t t1 = profile ? now_ns() : 0;
     return run_current_yuv6(raw_output, profile, t0, t1);
 }

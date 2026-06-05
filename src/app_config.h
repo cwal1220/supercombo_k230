@@ -1,9 +1,10 @@
 #ifndef APP_CONFIG_H
 #define APP_CONFIG_H
 
-#include "setting.h"
-
 #include <string>
+
+constexpr unsigned kDefaultSensorWidth = 1920;
+constexpr unsigned kDefaultSensorHeight = 1080;
 
 enum class ProjectionMode {
     Openpilot = 0,
@@ -19,8 +20,8 @@ struct AppConfig {
     unsigned nv12_height = 256;
     unsigned nv12_crop_x = 0;
     unsigned nv12_crop_y = 0;
-    unsigned nv12_crop_width = SENSOR_WIDTH;
-    unsigned nv12_crop_height = SENSOR_HEIGHT;
+    unsigned nv12_crop_width = kDefaultSensorWidth;
+    unsigned nv12_crop_height = kDefaultSensorHeight;
     unsigned max_frames = 0;
 
     std::string replay_nv12_path;
@@ -32,6 +33,16 @@ struct AppConfig {
     float manual_yaw = 0.0f;
     bool log_calibration = false;
     bool profile = false;
+
+    bool input_warp_enabled = false;
+    float input_warp_fx = 910.0f;
+    float input_warp_fy = 910.0f;
+    float input_warp_cx = 256.0f;
+    float input_warp_cy = 47.6f;
+    float input_warp_height = 1.22f;
+    float input_warp_roll = 0.0f;
+    float input_warp_pitch = 0.0f;
+    float input_warp_yaw = 0.0f;
 
     ProjectionMode projection_mode = ProjectionMode::Legacy;
 

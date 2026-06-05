@@ -172,6 +172,9 @@ The model path captures the AI stream as `NV12 512x256` through `/dev/video2`
 crop/resize, prepares the YUV6 recurrent inputs, runs nncase runtime directly,
 and publishes compact `modelState`. The overlay display process uses
 `/dev/video1` for preview and `/dev/video2` remains dedicated to the AI stream.
+By default the model input preparation keeps the existing direct `NV12 -> YUV6`
+path. A calibrated homography input-warp experiment is available behind
+`SUPERCOMBO_INPUT_WARP=1`.
 
 Runtime structure:
 
@@ -185,6 +188,10 @@ Runtime structure:
 - `src/model_output.*`
   - owns the supercombo raw-output layout and exposes parsed plan, lanes, road
     edges, leads, and pose.
+- `src/model_input_transform.*`
+  - optional direct `NV12 -> calibrated warped YUV6` input transform. It fuses
+    homography sampling and openpilot-compatible YUV6 packing without creating
+    an intermediate RGB or warped image buffer.
 - `src/calibration_service.*`
   - wraps pose-based online calibration, manual override, and projection policy.
 - `src/projection.*`
@@ -232,6 +239,20 @@ Useful runtime options:
 - `SUPERCOMBO_LOG_CALIB=1`
   - prints the online calibrator status, accepted/rejected sample counts,
     valid block count, rpy, and spread.
+- `SUPERCOMBO_INPUT_WARP=1`
+  - enables the experimental calibrated homography model-input path. The source
+    is still the shared `512x256 NV12` AI frame, not the original full camera
+    frame. With default intrinsics and zero rpy this is identity-equivalent.
+- `SUPERCOMBO_INPUT_WARP_ROLL_DEG`, `SUPERCOMBO_INPUT_WARP_PITCH_DEG`,
+  `SUPERCOMBO_INPUT_WARP_YAW_DEG`
+  - optional model-input warp calibration in degrees. If unset, the input warp
+    reuses `SUPERCOMBO_CALIB_*` values; online pose calibration is not fed back
+    into model input.
+- `SUPERCOMBO_INPUT_WARP_FX`, `SUPERCOMBO_INPUT_WARP_FY`,
+  `SUPERCOMBO_INPUT_WARP_CX`, `SUPERCOMBO_INPUT_WARP_CY`
+  - optional camera intrinsics for the `512x256` source frame. Defaults are
+    medmodel-compatible values `(910, 910, 256, 47.6)` so zero calibration keeps
+    the input warp at identity.
 - `SUPERCOMBO_REPLAY_NV12=/path/to/replay.scnv12`
   - runs headless from a preconverted `512x256 NV12` replay file instead of
     opening the camera and display. This is for validating inference and online
