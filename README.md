@@ -158,8 +158,10 @@ minimal passive overlay subscriber:
   - enabled with `K230_ENABLE_CONTROL=1`
   - imports the existing openpilot Hyundai controller from `K230_OPENPILOT_PATH`
     and forces `CAR.K7_HEV_YG`
-  - reads `modelState` and panda CAN batches, then publishes generated raw
-    `sendcan` batches for `k230_pandad`
+  - reads compact lateral plan data from `modelState`, runs openpilot's
+    `VehicleModel`, `get_lag_adjusted_curvature`, selected `LatControl*`, and
+    Hyundai `CarController`, then publishes generated raw `sendcan` batches for
+    `k230_pandad`
   - does not transmit by itself; actual TX still requires `K230_PANDA_TX=1`
 
 Large AI frames are never sent through the small-message IPC. `k230_overlay`
@@ -262,6 +264,10 @@ Runtime structure:
 - `src/panda_client.*`, `src/k230_pandad.cc`
   - optional panda USB bridge. It does not generate KIA/Hyundai control CAN;
     that logic is intentionally left to the existing openpilot controller path.
+- `k230_controlsd.py`
+  - optional shadow control bridge. It uses the openpilot Hyundai interface and
+    lateral controller modules directly; the K230 C++ side only publishes the
+    compact lateral plan input needed by that controller path.
 
 Useful runtime options:
 
@@ -327,10 +333,6 @@ Useful runtime options:
 - `K230_CONTROLD_ENABLED=0|1`
   - controls whether the shadow openpilot controller marks `CarControl` as
     enabled. Default is `1`, but TX is still blocked unless `K230_PANDA_TX=1`.
-- `K230_CONTROLD_CURVATURE_GAIN=4.0`
-  - temporary gain from K230 model curvature to normalized openpilot steering
-    actuator. This is only the bridge input; Hyundai CAN formatting and limits
-    remain handled by openpilot's existing controller.
 - `K230_CONTROLD_FINGERPRINT_SEC=2.0`
   - maximum time to collect CAN addresses before initializing the openpilot
     Hyundai interface.

@@ -21,7 +21,9 @@ CAN_BATCH_HEADER = struct.Struct("<QIIII")
 CAN_BATCH_MAX_FRAMES = 256
 CAN_BATCH_SIZE = CAN_BATCH_HEADER.size + CAN_FRAME.size * CAN_BATCH_MAX_FRAMES
 PANDA_STATE = struct.Struct("<Q" + "I" * 16)
+CONTROL_N = 17
 LATERAL_TARGET = struct.Struct("<Iffff")
+LATERAL_PLAN = struct.Struct("<II" + "f" * (CONTROL_N * 4 + 1) + "I")
 
 CAN_TOPIC = "/k230_can"
 SENDCAN_TOPIC = "/k230_sendcan"
@@ -46,12 +48,23 @@ PARAM_DEFAULTS = {
     "CruiseStatemodeSelInit": "0",
     "CurvDecelOption": "0",
     "DepartChimeAtResume": "0",
+    "DesiredCurvatureLimit": "10",
     "E2ELong": "0",
     "FCA11Message": "0",
     "FingerprintTwoSet": "0",
     "JoystickDebugMode": "0",
     "JustDoGearD": "0",
+    "LaneWidth": "37",
     "LdwsCarFix": "0",
+    "LateralControlMethod": "3",
+    "LeftCurvOffsetAdj": "0",
+    "LeftEdgeOffset": "0",
+    "LqrKi": "16",
+    "PathOffsetAdj": "0",
+    "PidKd": "150",
+    "PidKf": "7",
+    "PidKi": "40",
+    "PidKp": "25",
     "NoSmartMDPS": "0",
     "OCurvSpeedC": "30,60,90",
     "OCurvSpeedT": "30,60,90",
@@ -82,16 +95,23 @@ PARAM_DEFAULTS = {
     "RoadList": "\n",
     "RoutineDriveOn": "0",
     "RoutineDriveOption": "000",
+    "Scale": "1500",
     "SafetyCamDecelDistGain": "0",
     "SetSpeedFive": "0",
     "SpeedLimitDecelOff": "1",
+    "SpdLaneWidthSet": "2.8,3.5",
+    "SpdLaneWidthSpd": "0,31",
     "StandstillResumeAlt": "0",
     "SteerDeltaDownAdj": "7",
     "SteerDeltaDownBaseAdj": "7",
     "SteerDeltaUpAdj": "3",
     "SteerDeltaUpBaseAdj": "3",
+    "SteerActuatorDelayAdj": "36",
+    "SteerLimitTimerAdj": "100",
     "SteerMaxAdj": "384",
     "SteerMaxBaseAdj": "384",
+    "SteerRatioAdj": "1550",
+    "SteerRatioMaxAdj": "1750",
     "SteerThreshold": "150",
     "SteerWarningFix": "0",
     "StockNaviSpeedEnabled": "0",
@@ -99,6 +119,15 @@ PARAM_DEFAULTS = {
     "StoppingDist": "0",
     "StoppingDistAdj": "0",
     "UseStockDecelOnSS": "0",
+    "TimeConstant": "14",
+    "TireStiffnessFactorAdj": "85",
+    "TorqueAngDeadZone": "10",
+    "TorqueFriction": "65",
+    "TorqueKf": "10",
+    "TorqueKi": "1",
+    "TorqueKp": "10",
+    "TorqueMaxLatAccel": "27",
+    "TorqueUseAngle": "1",
     "UFCModeEnabled": "0",
     "UseRadarTrack": "0",
     "UserSpecificFeature": "0",
@@ -382,6 +411,27 @@ class LateralTarget:
     curvature: float = 0.0
 
 
+@dataclass
+class LateralPlan:
+    valid: bool = False
+    mpc_solution_valid: bool = False
+    psis: List[float] = None
+    curvatures: List[float] = None
+    curvature_rates: List[float] = None
+    d_path_points: List[float] = None
+    output_scale: float = 0.0
+
+    def __post_init__(self):
+        if self.psis is None:
+            self.psis = [0.0] * CONTROL_N
+        if self.curvatures is None:
+            self.curvatures = [0.0] * CONTROL_N
+        if self.curvature_rates is None:
+            self.curvature_rates = [0.0] * CONTROL_N
+        if self.d_path_points is None:
+            self.d_path_points = [0.0] * CONTROL_N
+
+
 def decode_can_batch(payload: bytes) -> List[CanFrame]:
     if len(payload) < CAN_BATCH_HEADER.size:
         return []
@@ -420,6 +470,35 @@ def decode_lateral_target(payload: bytes) -> LateralTarget:
                          target_y=target_y, heading=heading, curvature=curvature)
 
 
+def decode_model_control(payload: bytes) -> Tuple[LateralTarget, LateralPlan]:
+    if len(payload) >= LATERAL_TARGET.size + LATERAL_PLAN.size:
+        target_offset = len(payload) - LATERAL_PLAN.size - LATERAL_TARGET.size
+        plan_offset = len(payload) - LATERAL_PLAN.size
+        valid, lookahead_x, target_y, heading, curvature = LATERAL_TARGET.unpack_from(payload, target_offset)
+        unpacked = LATERAL_PLAN.unpack_from(payload, plan_offset)
+        plan_valid = bool(unpacked[0])
+        mpc_solution_valid = bool(unpacked[1])
+        values = list(unpacked[2:2 + CONTROL_N * 4 + 1])
+        psis = values[0:CONTROL_N]
+        curvatures = values[CONTROL_N:CONTROL_N * 2]
+        curvature_rates = values[CONTROL_N * 2:CONTROL_N * 3]
+        d_path_points = values[CONTROL_N * 3:CONTROL_N * 4]
+        output_scale = values[CONTROL_N * 4]
+        return (
+            LateralTarget(valid=bool(valid), lookahead_x=lookahead_x,
+                          target_y=target_y, heading=heading, curvature=curvature),
+            LateralPlan(valid=plan_valid, mpc_solution_valid=mpc_solution_valid,
+                        psis=psis, curvatures=curvatures,
+                        curvature_rates=curvature_rates,
+                        d_path_points=d_path_points, output_scale=output_scale),
+        )
+
+    target = decode_lateral_target(payload)
+    return target, LateralPlan(valid=target.valid, mpc_solution_valid=target.valid,
+                               curvatures=[target.curvature] * CONTROL_N,
+                               d_path_points=[target.target_y] * CONTROL_N)
+
+
 def add_openpilot_to_path():
     candidates = [
         os.environ.get("K230_OPENPILOT_PATH", ""),
@@ -447,17 +526,48 @@ class OpenpilotHyundaiController:
         from selfdrive.car.hyundai.carstate import CarState
         from selfdrive.car.hyundai.interface import CarInterface
         from selfdrive.car.hyundai.values import CAR
+        from selfdrive.controls.lib.drive_helpers import get_lag_adjusted_curvature
+        from selfdrive.controls.lib.latcontrol_angle import LatControlAngle
+        from selfdrive.controls.lib.latcontrol_atom import LatControlATOM
+        from selfdrive.controls.lib.latcontrol_indi import LatControlINDI
+        from selfdrive.controls.lib.latcontrol_lqr import LatControlLQR
+        from selfdrive.controls.lib.latcontrol_pid import LatControlPID
+        from selfdrive.controls.lib.latcontrol_torque import LatControlTorque
+        from selfdrive.controls.lib.vehicle_model import VehicleModel
 
         self.car = car
         self.log = log
+        self.get_lag_adjusted_curvature = get_lag_adjusted_curvature
         self.CI_cls = CarInterface
         self.candidate = CAR.K7_HEV_YG
         self.fingerprint = fingerprint if fingerprint is not None else gen_empty_fingerprint()
         self.CP = CarInterface.get_params(self.candidate, self.fingerprint)
         self.CI = CarInterface(self.CP, CarController, CarState)
         self.enabled = env_enabled("K230_CONTROLD_ENABLED", True)
-        self.steer_gain = env_float("K230_CONTROLD_CURVATURE_GAIN", 4.0)
-        self.last_actuators = None
+        self.VM = VehicleModel(self.CP)
+        self.LaC = self.make_lateral_controller({
+            "angle": LatControlAngle,
+            "pid": LatControlPID,
+            "indi": LatControlINDI,
+            "lqr": LatControlLQR,
+            "torque": LatControlTorque,
+            "atom": LatControlATOM,
+        })
+        self.live_parameters = DummyMessage(stiffnessFactor=1.0,
+                                            steerRatio=max(float(self.CP.steerRatio), 0.1),
+                                            angleOffsetDeg=0.0,
+                                            angleOffsetAverageDeg=0.0,
+                                            roll=0.0)
+        self.live_location_kalman = DummyMessage(
+            angularVelocityCalibrated=DummyMessage(value=[0.0, 0.0, 0.0]))
+        self.last_actuators = self.car.CarControl.Actuators.new_message()
+
+    def make_lateral_controller(self, controller_classes):
+        which = self.CP.lateralTuning.which()
+        controller_cls = controller_classes.get(which)
+        if controller_cls is None:
+            raise RuntimeError(f"unsupported lateral tuning: {which}")
+        return controller_cls(self.CP, self.CI)
 
     def can_strings(self, frames: List[CanFrame]) -> List[bytes]:
         if not frames:
@@ -472,20 +582,31 @@ class OpenpilotHyundaiController:
             can[i].dat = frame.dat
         return [msg.to_bytes()]
 
-    def steer_from_target(self, target: LateralTarget) -> float:
-        if not target.valid:
-            return 0.0
-        steer = -target.curvature * self.steer_gain
-        return max(-1.0, min(1.0, steer))
-
-    def update(self, frames: List[CanFrame], target: LateralTarget) -> List[CanFrame]:
+    def update(self, frames: List[CanFrame], target: LateralTarget, plan: LateralPlan) -> List[CanFrame]:
         can_strings = self.can_strings(frames)
         cc = self.car.CarControl.new_message()
         car_state = self.CI.update(cc, can_strings)
 
         cc.enabled = bool(self.enabled)
-        cc.active = bool(self.enabled and target.valid and car_state.cruiseState.enabled)
-        cc.actuators.steer = self.steer_from_target(target)
+        cc.active = bool(self.enabled and target.valid and plan.valid and
+                         plan.mpc_solution_valid and car_state.cruiseState.enabled)
+
+        stiffness_factor = max(float(self.live_parameters.stiffnessFactor), 0.1)
+        steer_ratio = max(float(self.live_parameters.steerRatio), 0.1)
+        self.VM.update_params(stiffness_factor, steer_ratio)
+
+        desired_curvature, desired_curvature_rate = self.get_lag_adjusted_curvature(
+            self.CP, car_state.vEgo, plan.psis, plan.curvatures, plan.curvature_rates)
+        lat_active = bool(cc.active and
+                          not car_state.steerFaultPermanent and
+                          not (car_state.vEgo < self.CP.minSteerSpeed))
+        steer, steering_angle_deg, _lac_log = self.LaC.update(
+            lat_active, car_state, self.CP, self.VM, self.live_parameters,
+            self.last_actuators, desired_curvature, desired_curvature_rate,
+            self.live_location_kalman)
+
+        cc.actuators.steer = steer
+        cc.actuators.steeringAngleDeg = steering_angle_deg
         cc.actuators.accel = 0.0
         cc.hudControl.leftLaneVisible = True
         cc.hudControl.rightLaneVisible = True
@@ -563,6 +684,7 @@ def main() -> int:
         last_can_seq = 0
         last_model_seq = 0
         target = LateralTarget()
+        lateral_plan = LateralPlan()
         frames_in = 0
         frames_out = 0
         errors = 0
@@ -571,7 +693,7 @@ def main() -> int:
         while not stop:
             last_model_seq, model_payload = model_sub.read_new(last_model_seq, 0)
             if model_payload:
-                target = decode_lateral_target(model_payload)
+                target, lateral_plan = decode_model_control(model_payload)
 
             last_can_seq, can_payload = can_sub.read_new(last_can_seq, 1000)
             if not can_payload:
@@ -589,14 +711,15 @@ def main() -> int:
                     safety = controller.CP.safetyConfigs[0]
                     print(f"k230_controlsd: openpilot={controller.openpilot_path} "
                           f"candidate={controller.candidate} enabled={int(controller.enabled)} "
-                          f"gain={controller.steer_gain} sccBus={controller.CP.sccBus} "
+                          f"latTune={controller.CP.lateralTuning.which()} "
+                          f"sccBus={controller.CP.sccBus} "
                           f"mdpsBus={controller.CP.mdpsBus} sasBus={controller.CP.sasBus} "
                           f"safety={safety.safetyModel}:{safety.safetyParam} "
                           f"fingerprint_addrs={fingerprint_addr_count(fingerprint)}", flush=True)
                 continue
 
             try:
-                out_frames = controller.update(frames, target)
+                out_frames = controller.update(frames, target, lateral_plan)
                 if out_frames:
                     sendcan_pub.publish(encode_can_batch(out_frames))
                     frames_out += len(out_frames)
@@ -617,6 +740,7 @@ def main() -> int:
                         controls_allowed = unpacked[4]
                 print(f"k230_controlsd: can_in={frames_in} sendcan={frames_out} "
                       f"errors={errors} lateral={int(target.valid)} "
+                      f"lat_plan={int(lateral_plan.valid)} "
                       f"controls_allowed={controls_allowed} "
                       f"fingerprint_addrs={fingerprint_addr_count(fingerprint)}", flush=True)
                 frames_in = frames_out = errors = 0

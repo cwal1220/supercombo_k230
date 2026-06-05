@@ -23,6 +23,9 @@ struct ParsedPlan {
     int best_index = 0;
     float probability = 0.0f;
     std::array<ModelPoint, kTrajectorySize> points{};
+    std::array<ModelPoint, kTrajectorySize> position_stds{};
+    std::array<ModelPoint, kTrajectorySize> orientations{};
+    std::array<ModelPoint, kTrajectorySize> orientation_rates{};
 };
 
 struct ParsedLaneLine {

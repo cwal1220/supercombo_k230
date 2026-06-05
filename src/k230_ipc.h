@@ -105,6 +105,17 @@ struct K230LateralTargetState {
     float curvature = 0.0f;
 };
 
+struct K230LateralPlanState {
+    uint32_t valid = 0;
+    uint32_t mpc_solution_valid = 0;
+    float psis[kLateralControlN] = {};
+    float curvatures[kLateralControlN] = {};
+    float curvature_rates[kLateralControlN] = {};
+    float d_path_points[kLateralControlN] = {};
+    float output_scale = 0.0f;
+    uint32_t reserved = 0;
+};
+
 struct K230ModelState {
     uint64_t frame_id = 0;
     uint64_t capture_timestamp_ns = 0;
@@ -122,6 +133,7 @@ struct K230ModelState {
     K230PoseState pose;
     K230CalibrationState calibration;
     K230LateralTargetState lateral_target;
+    K230LateralPlanState lateral_plan;
 };
 
 struct K230ProcessState {

@@ -76,11 +76,29 @@ ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
     output.plan.best_index = best_plan;
     output.plan.probability = sigmoid(best_prob);
     const int plan_base = best_plan * kPlanStride;
+    const int plan_std_base = plan_base + kTrajectorySize * 15;
     for (int i = 0; i < kTrajectorySize; ++i) {
+        const int mean_base = plan_base + i * 15;
+        const int std_base = plan_std_base + i * 15;
         output.plan.points[i] = {
-            raw[plan_base + i * 15 + 0],
-            raw[plan_base + i * 15 + 1],
-            raw[plan_base + i * 15 + 2],
+            raw[mean_base + 0],
+            raw[mean_base + 1],
+            raw[mean_base + 2],
+        };
+        output.plan.position_stds[i] = {
+            std::exp(raw[std_base + 0]),
+            std::exp(raw[std_base + 1]),
+            std::exp(raw[std_base + 2]),
+        };
+        output.plan.orientations[i] = {
+            raw[mean_base + 9],
+            raw[mean_base + 10],
+            raw[mean_base + 11],
+        };
+        output.plan.orientation_rates[i] = {
+            raw[mean_base + 12],
+            raw[mean_base + 13],
+            raw[mean_base + 14],
         };
     }
 
