@@ -158,10 +158,11 @@ minimal passive overlay subscriber:
   - enabled with `K230_ENABLE_CONTROL=1`
   - imports the existing openpilot Hyundai controller from `K230_OPENPILOT_PATH`
     and forces `CAR.K7_HEV_YG`
-  - reads compact lateral plan data from `modelState`, runs openpilot's
-    `VehicleModel`, `get_lag_adjusted_curvature`, selected `LatControl*`, and
-    Hyundai `CarController`, then publishes generated raw `sendcan` batches for
-    `k230_pandad`
+  - reconstructs an openpilot-style `modelV2` snapshot from `modelState`, runs
+    openpilot's original `LateralPlanner`/lateral MPC, then feeds the resulting
+    `lateralPlan` into openpilot's `VehicleModel`, `get_lag_adjusted_curvature`,
+    selected `LatControl*`, and Hyundai `CarController`
+  - publishes generated raw `sendcan` batches for `k230_pandad`
   - does not transmit by itself; actual TX still requires `K230_PANDA_TX=1`
 
 Large AI frames are never sent through the small-message IPC. `k230_overlay`
@@ -265,9 +266,10 @@ Runtime structure:
   - optional panda USB bridge. It does not generate KIA/Hyundai control CAN;
     that logic is intentionally left to the existing openpilot controller path.
 - `k230_controlsd.py`
-  - optional shadow control bridge. It uses the openpilot Hyundai interface and
-    lateral controller modules directly; the K230 C++ side only publishes the
-    compact lateral plan input needed by that controller path.
+  - optional shadow control bridge. It uses the openpilot Hyundai interface,
+    `LateralPlanner`, lateral MPC, and lateral controller modules directly. The
+    K230 C++ side publishes the compact model fields needed to rebuild the same
+    `modelV2` planner input without passing the full raw tensor.
 
 Useful runtime options:
 

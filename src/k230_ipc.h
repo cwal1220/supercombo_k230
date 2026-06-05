@@ -125,10 +125,17 @@ struct K230ModelState {
     uint32_t projection_mode = static_cast<uint32_t>(ProjectionMode::Legacy);
     int32_t best_plan = 0;
     float plan_probability = 0.0f;
+    float model_t[kTrajectorySize] = {};
+    float lane_t[kTrajectorySize] = {};
     K230IpcPoint plan[kTrajectorySize] = {};
+    K230IpcPoint plan_position_stds[kTrajectorySize] = {};
+    K230IpcPoint plan_orientations[kTrajectorySize] = {};
     K230IpcPoint lanes[4][kTrajectorySize] = {};
     float lane_probabilities[4] = {};
+    float lane_stds[4] = {};
     K230IpcPoint road_edges[2][kTrajectorySize] = {};
+    float road_edge_stds[2] = {};
+    float desire_state[kDesireLen] = {};
     K230LeadState lead;
     K230PoseState pose;
     K230CalibrationState calibration;

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -27,12 +28,34 @@ void sleep_ms(int ms)
     usleep(static_cast<useconds_t>(ms) * 1000);
 }
 
+float model_t_idx(int i)
+{
+    const double t = static_cast<double>(i) / static_cast<double>(kTrajectorySize - 1);
+    return static_cast<float>(10.0 * t * t);
+}
+
+double model_t_idx_double(int i)
+{
+    const double t = static_cast<double>(i) / static_cast<double>(kTrajectorySize - 1);
+    return 10.0 * t * t;
+}
+
+double model_x_idx_double(int i)
+{
+    const double t = static_cast<double>(i) / static_cast<double>(kTrajectorySize - 1);
+    return 192.0 * t * t;
+}
+
 } // namespace
 
 uint64_t k230_now_ns()
 {
     timespec ts{};
+#ifdef CLOCK_BOOTTIME
     clock_gettime(CLOCK_BOOTTIME, &ts);
+#else
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+#endif
     return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL + ts.tv_nsec;
 }
 
@@ -239,7 +262,18 @@ void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parse
     state.plan_probability = parsed.plan.probability;
 
     for (int i = 0; i < kTrajectorySize; ++i) {
+        state.model_t[i] = model_t_idx(i);
         state.plan[i] = {parsed.plan.points[i].x, parsed.plan.points[i].y, parsed.plan.points[i].z};
+        state.plan_position_stds[i] = {
+            parsed.plan.position_stds[i].x,
+            parsed.plan.position_stds[i].y,
+            parsed.plan.position_stds[i].z,
+        };
+        state.plan_orientations[i] = {
+            parsed.plan.orientations[i].x,
+            parsed.plan.orientations[i].y,
+            parsed.plan.orientations[i].z,
+        };
         for (int lane = 0; lane < 4; ++lane) {
             state.lanes[lane][i] = {
                 parsed.lanes[lane].points[i].x,
@@ -255,8 +289,34 @@ void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parse
             };
         }
     }
-    for (int lane = 0; lane < 4; ++lane)
+    std::fill_n(state.lane_t, kTrajectorySize, NAN);
+    state.lane_t[0] = 0.0f;
+    for (int xidx = 1, tidx = 0; xidx < kTrajectorySize; ++xidx) {
+        for (int next_tid = tidx + 1;
+             next_tid < kTrajectorySize && parsed.plan.points[next_tid].x < model_x_idx_double(xidx);
+             ++next_tid) {
+            ++tidx;
+        }
+        if (tidx == kTrajectorySize - 1) {
+            state.lane_t[xidx] = model_t_idx(kTrajectorySize - 1);
+            break;
+        }
+
+        const float current_x = parsed.plan.points[tidx].x;
+        const float next_x = parsed.plan.points[tidx + 1].x;
+        const float p = static_cast<float>(
+            (model_x_idx_double(xidx) - current_x) / (next_x - current_x));
+        state.lane_t[xidx] = static_cast<float>(
+            p * model_t_idx_double(tidx + 1) + (1.0f - p) * model_t_idx_double(tidx));
+    }
+    for (int lane = 0; lane < 4; ++lane) {
         state.lane_probabilities[lane] = parsed.lanes[lane].probability;
+        state.lane_stds[lane] = parsed.lanes[lane].std;
+    }
+    for (int edge = 0; edge < 2; ++edge)
+        state.road_edge_stds[edge] = parsed.road_edges[edge].std;
+    for (int i = 0; i < kDesireLen; ++i)
+        state.desire_state[i] = parsed.meta.desire_state[i];
 
     ParsedLeadPoint lead;
     float lead_prob = 0.0f;
@@ -313,9 +373,20 @@ ParsedModelOutput k230_parsed_from_model_state(const K230ModelState &state)
     parsed.plan.probability = state.plan_probability;
     for (int i = 0; i < kTrajectorySize; ++i) {
         parsed.plan.points[i] = {state.plan[i].x, state.plan[i].y, state.plan[i].z};
+        parsed.plan.position_stds[i] = {
+            state.plan_position_stds[i].x,
+            state.plan_position_stds[i].y,
+            state.plan_position_stds[i].z,
+        };
+        parsed.plan.orientations[i] = {
+            state.plan_orientations[i].x,
+            state.plan_orientations[i].y,
+            state.plan_orientations[i].z,
+        };
         for (int lane = 0; lane < 4; ++lane) {
             parsed.lanes[lane].valid = parsed.valid;
             parsed.lanes[lane].probability = state.lane_probabilities[lane];
+            parsed.lanes[lane].std = state.lane_stds[lane];
             parsed.lanes[lane].points[i] = {
                 state.lanes[lane][i].x,
                 state.lanes[lane][i].y,
@@ -324,6 +395,7 @@ ParsedModelOutput k230_parsed_from_model_state(const K230ModelState &state)
         }
         for (int edge = 0; edge < 2; ++edge) {
             parsed.road_edges[edge].valid = parsed.valid;
+            parsed.road_edges[edge].std = state.road_edge_stds[edge];
             parsed.road_edges[edge].points[i] = {
                 state.road_edges[edge][i].x,
                 state.road_edges[edge][i].y,
@@ -331,6 +403,8 @@ ParsedModelOutput k230_parsed_from_model_state(const K230ModelState &state)
             };
         }
     }
+    for (int i = 0; i < kDesireLen; ++i)
+        parsed.meta.desire_state[i] = state.desire_state[i];
 
     if (state.lead.valid) {
         parsed.leads.valid = true;

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import math
 import mmap
 import os
 import signal
@@ -21,7 +22,11 @@ CAN_BATCH_HEADER = struct.Struct("<QIIII")
 CAN_BATCH_MAX_FRAMES = 256
 CAN_BATCH_SIZE = CAN_BATCH_HEADER.size + CAN_FRAME.size * CAN_BATCH_MAX_FRAMES
 PANDA_STATE = struct.Struct("<Q" + "I" * 16)
+TRAJECTORY_SIZE = 33
 CONTROL_N = 17
+DESIRE_LEN = 8
+MODEL_HEADER = struct.Struct("<QQQfIIif")
+POINT_FLOATS = 3
 LATERAL_TARGET = struct.Struct("<Iffff")
 LATERAL_PLAN = struct.Struct("<II" + "f" * (CONTROL_N * 4 + 1) + "I")
 
@@ -40,6 +45,8 @@ PARAM_DEFAULTS = {
     "AvoidLKASFaultEnabled": "0",
     "AvoidLKASFaultMaxAngle": "90",
     "AvoidLKASFaultMaxFrame": "89",
+    "CameraOffsetAdj": "0",
+    "CloseToRoadEdge": "0",
     "CruiseAutoRes": "0",
     "CruiseGapAdjust": "0",
     "CruiseGapBySpdGap": "4,3,2",
@@ -52,14 +59,27 @@ PARAM_DEFAULTS = {
     "E2ELong": "0",
     "FCA11Message": "0",
     "FingerprintTwoSet": "0",
+    "IsMetric": "1",
     "JoystickDebugMode": "0",
     "JustDoGearD": "0",
     "LaneWidth": "37",
+    "LanelessMode": "0",
     "LdwsCarFix": "0",
     "LateralControlMethod": "3",
+    "LCTimingFactor30": "100",
+    "LCTimingFactor60": "100",
+    "LCTimingFactor80": "100",
+    "LCTimingFactor110": "100",
+    "LCTimingFactorEnable": "0",
     "LeftCurvOffsetAdj": "0",
     "LeftEdgeOffset": "0",
     "LqrKi": "16",
+    "EndToEndToggle": "0",
+    "MultipleLateralUse": "0",
+    "MultipleLateralOpS": "0,1,3",
+    "MultipleLateralSpd": "30,60,90",
+    "MultipleLateralOpA": "0,1,3",
+    "MultipleLateralAng": "10,30,60",
     "PathOffsetAdj": "0",
     "PidKd": "150",
     "PidKf": "7",
@@ -74,7 +94,9 @@ PARAM_DEFAULTS = {
     "OSMCustomSpeedLimitT": "30,60,90",
     "OSMSpeedLimitEnable": "0",
     "OpkrAutoResume": "0",
+    "OpkrAutoLaneChangeDelay": "0",
     "OpkrDriverAngleWait": "0.001",
+    "OpkrLaneChangeSpeed": "0",
     "OpkrLiveTunePanelEnable": "0",
     "OpkrMapEnable": "0",
     "OpkrMaxAngleLimit": "90",
@@ -95,10 +117,13 @@ PARAM_DEFAULTS = {
     "RoadList": "\n",
     "RoutineDriveOn": "0",
     "RoutineDriveOption": "000",
+    "RightCurvOffsetAdj": "0",
+    "RightEdgeOffset": "0",
     "Scale": "1500",
     "SafetyCamDecelDistGain": "0",
     "SetSpeedFive": "0",
     "SpeedLimitDecelOff": "1",
+    "SpeedCameraOffset": "0",
     "SpdLaneWidthSet": "2.8,3.5",
     "SpdLaneWidthSpd": "0,31",
     "StandstillResumeAlt": "0",
@@ -432,6 +457,161 @@ class LateralPlan:
             self.d_path_points = [0.0] * CONTROL_N
 
 
+@dataclass
+class ModelPoint:
+    x: float = 0.0
+    y: float = 0.0
+    z: float = 0.0
+
+
+@dataclass
+class K230ModelSnapshot:
+    frame_id: int = 0
+    capture_timestamp_ns: int = 0
+    model_timestamp_ns: int = 0
+    valid: bool = False
+    model_t: List[float] = None
+    lane_t: List[float] = None
+    plan: List[ModelPoint] = None
+    plan_stds: List[ModelPoint] = None
+    plan_orientations: List[ModelPoint] = None
+    lanes: List[List[ModelPoint]] = None
+    lane_probabilities: List[float] = None
+    lane_stds: List[float] = None
+    road_edges: List[List[ModelPoint]] = None
+    road_edge_stds: List[float] = None
+    desire_state: List[float] = None
+
+    def __post_init__(self):
+        if self.model_t is None:
+            self.model_t = [0.0] * TRAJECTORY_SIZE
+        if self.lane_t is None:
+            self.lane_t = [0.0] * TRAJECTORY_SIZE
+        if self.plan is None:
+            self.plan = [ModelPoint() for _ in range(TRAJECTORY_SIZE)]
+        if self.plan_stds is None:
+            self.plan_stds = [ModelPoint() for _ in range(TRAJECTORY_SIZE)]
+        if self.plan_orientations is None:
+            self.plan_orientations = [ModelPoint() for _ in range(TRAJECTORY_SIZE)]
+        if self.lanes is None:
+            self.lanes = [[ModelPoint() for _ in range(TRAJECTORY_SIZE)] for _ in range(4)]
+        if self.lane_probabilities is None:
+            self.lane_probabilities = [0.0] * 4
+        if self.lane_stds is None:
+            self.lane_stds = [0.0] * 4
+        if self.road_edges is None:
+            self.road_edges = [[ModelPoint() for _ in range(TRAJECTORY_SIZE)] for _ in range(2)]
+        if self.road_edge_stds is None:
+            self.road_edge_stds = [0.0] * 2
+        if self.desire_state is None:
+            self.desire_state = [0.0] * DESIRE_LEN
+
+
+def unpack_float_list(payload: bytes, offset: int, count: int) -> Tuple[List[float], int]:
+    values = list(struct.unpack_from("<" + "f" * count, payload, offset))
+    return values, offset + count * 4
+
+
+def unpack_points(payload: bytes, offset: int, count: int) -> Tuple[List[ModelPoint], int]:
+    values, offset = unpack_float_list(payload, offset, count * POINT_FLOATS)
+    points = [ModelPoint(values[i], values[i + 1], values[i + 2])
+              for i in range(0, len(values), POINT_FLOATS)]
+    return points, offset
+
+
+def decode_k230_model_state(payload: bytes) -> Optional[K230ModelSnapshot]:
+    min_size = MODEL_HEADER.size
+    if len(payload) < min_size:
+        return None
+
+    frame_id, capture_ts, model_ts, _model_ms, valid, _projection_mode, _best_plan, _plan_prob = (
+        MODEL_HEADER.unpack_from(payload, 0))
+    offset = MODEL_HEADER.size
+
+    try:
+        model_t, offset = unpack_float_list(payload, offset, TRAJECTORY_SIZE)
+        lane_t, offset = unpack_float_list(payload, offset, TRAJECTORY_SIZE)
+        plan, offset = unpack_points(payload, offset, TRAJECTORY_SIZE)
+        plan_stds, offset = unpack_points(payload, offset, TRAJECTORY_SIZE)
+        plan_orientations, offset = unpack_points(payload, offset, TRAJECTORY_SIZE)
+        lanes = []
+        for _ in range(4):
+            lane, offset = unpack_points(payload, offset, TRAJECTORY_SIZE)
+            lanes.append(lane)
+        lane_probabilities, offset = unpack_float_list(payload, offset, 4)
+        lane_stds, offset = unpack_float_list(payload, offset, 4)
+        road_edges = []
+        for _ in range(2):
+            edge, offset = unpack_points(payload, offset, TRAJECTORY_SIZE)
+            road_edges.append(edge)
+        road_edge_stds, offset = unpack_float_list(payload, offset, 2)
+        desire_state, offset = unpack_float_list(payload, offset, DESIRE_LEN)
+    except struct.error:
+        return None
+
+    return K230ModelSnapshot(frame_id=frame_id,
+                             capture_timestamp_ns=capture_ts,
+                             model_timestamp_ns=model_ts,
+                             valid=bool(valid),
+                             model_t=model_t,
+                             lane_t=lane_t,
+                             plan=plan,
+                             plan_stds=plan_stds,
+                             plan_orientations=plan_orientations,
+                             lanes=lanes,
+                             lane_probabilities=lane_probabilities,
+                             lane_stds=lane_stds,
+                             road_edges=road_edges,
+                             road_edge_stds=road_edge_stds,
+                             desire_state=desire_state)
+
+
+def xyzt_message(points: List[ModelPoint], t_values: List[float]) -> DummyMessage:
+    return DummyMessage(t=list(t_values),
+                        x=[point.x for point in points],
+                        y=[point.y for point in points],
+                        z=[point.z for point in points])
+
+
+def position_message(points: List[ModelPoint], stds: List[ModelPoint],
+                     t_values: List[float]) -> DummyMessage:
+    msg = xyzt_message(points, t_values)
+    msg.xStd = [point.x for point in stds]
+    msg.yStd = [point.y for point in stds]
+    msg.zStd = [point.z for point in stds]
+    return msg
+
+
+def model_v2_message(snapshot: K230ModelSnapshot) -> DummyMessage:
+    return DummyMessage(
+        position=position_message(snapshot.plan, snapshot.plan_stds, snapshot.model_t),
+        orientation=xyzt_message(snapshot.plan_orientations, snapshot.model_t),
+        laneLines=[xyzt_message(lane, snapshot.lane_t) for lane in snapshot.lanes],
+        laneLineProbs=list(snapshot.lane_probabilities),
+        laneLineStds=list(snapshot.lane_stds),
+        roadEdges=[xyzt_message(edge, snapshot.lane_t) for edge in snapshot.road_edges],
+        roadEdgeStds=list(snapshot.road_edge_stds),
+        meta=DummyMessage(desireState=list(snapshot.desire_state)),
+    )
+
+
+class PlannerSubMaster:
+    def __init__(self):
+        self.frame = -1
+        self.logMonoTime = {"modelV2": 0}
+        self.data = {}
+
+    def update_data(self, car_state, controls_state, model_snapshot: K230ModelSnapshot):
+        self.frame += 1
+        self.logMonoTime["modelV2"] = model_snapshot.model_timestamp_ns
+        self.data["carState"] = car_state
+        self.data["controlsState"] = controls_state
+        self.data["modelV2"] = model_v2_message(model_snapshot)
+
+    def __getitem__(self, service: str):
+        return self.data[service]
+
+
 def decode_can_batch(payload: bytes) -> List[CanFrame]:
     if len(payload) < CAN_BATCH_HEADER.size:
         return []
@@ -533,6 +713,7 @@ class OpenpilotHyundaiController:
         from selfdrive.controls.lib.latcontrol_lqr import LatControlLQR
         from selfdrive.controls.lib.latcontrol_pid import LatControlPID
         from selfdrive.controls.lib.latcontrol_torque import LatControlTorque
+        from selfdrive.controls.lib.lateral_planner import LateralPlanner
         from selfdrive.controls.lib.vehicle_model import VehicleModel
 
         self.car = car
@@ -561,6 +742,12 @@ class OpenpilotHyundaiController:
         self.live_location_kalman = DummyMessage(
             angularVelocityCalibrated=DummyMessage(value=[0.0, 0.0, 0.0]))
         self.last_actuators = self.car.CarControl.Actuators.new_message()
+        self.last_lac_output = 0.0
+        self.last_control_curvature = 0.0
+        self.last_planner_frame_id = None
+        self.lateral_plan = LateralPlan()
+        self.planner_sm = PlannerSubMaster()
+        self.lateral_planner = LateralPlanner(self.CP)
 
     def make_lateral_controller(self, controller_classes):
         which = self.CP.lateralTuning.which()
@@ -582,18 +769,64 @@ class OpenpilotHyundaiController:
             can[i].dat = frame.dat
         return [msg.to_bytes()]
 
-    def update(self, frames: List[CanFrame], target: LateralTarget, plan: LateralPlan) -> List[CanFrame]:
+    def planner_controls_state(self, car_state) -> DummyMessage:
+        steer_angle_without_offset = math.radians(
+            car_state.steeringAngleDeg - self.live_parameters.angleOffsetDeg)
+        curvature = -self.VM.calc_curvature(steer_angle_without_offset,
+                                            car_state.vEgo,
+                                            self.live_parameters.roll)
+        self.last_control_curvature = curvature
+        lat_state = DummyMessage(output=self.last_lac_output)
+        return DummyMessage(active=bool(self.enabled and car_state.cruiseState.enabled),
+                            vCruise=0.0,
+                            curvature=curvature,
+                            pauseSpdLimit=False,
+                            lateralControlState=DummyMessage(pidState=lat_state,
+                                                             indiState=lat_state,
+                                                             lqrState=lat_state,
+                                                             torqueState=lat_state,
+                                                             atomState=lat_state))
+
+    def update_lateral_plan(self, car_state, model_snapshot: Optional[K230ModelSnapshot]):
+        if model_snapshot is None or not model_snapshot.valid:
+            self.lateral_plan = LateralPlan()
+            self.last_planner_frame_id = None
+            return
+        if self.last_planner_frame_id == model_snapshot.frame_id:
+            return
+
+        controls_state = self.planner_controls_state(car_state)
+        self.planner_sm.update_data(car_state, controls_state, model_snapshot)
+        self.lateral_planner.update(self.planner_sm, self.CP)
+        self.last_planner_frame_id = model_snapshot.frame_id
+
+        x_sol = self.lateral_planner.lat_mpc.x_sol
+        u_sol = self.lateral_planner.lat_mpc.u_sol
+        self.lateral_plan = LateralPlan(
+            valid=True,
+            mpc_solution_valid=self.lateral_planner.solution_invalid_cnt < 2,
+            psis=[float(x) for x in x_sol[0:CONTROL_N, 2]],
+            curvatures=[float(x) for x in x_sol[0:CONTROL_N, 3]],
+            curvature_rates=[float(x) for x in u_sol[0:CONTROL_N - 1]] + [0.0],
+            d_path_points=[float(x) for x in self.lateral_planner.y_pts],
+            output_scale=float(self.lateral_planner.DH.output_scale),
+        )
+
+    def update(self, frames: List[CanFrame], model_snapshot: Optional[K230ModelSnapshot]) -> List[CanFrame]:
         can_strings = self.can_strings(frames)
         cc = self.car.CarControl.new_message()
         car_state = self.CI.update(cc, can_strings)
 
-        cc.enabled = bool(self.enabled)
-        cc.active = bool(self.enabled and target.valid and plan.valid and
-                         plan.mpc_solution_valid and car_state.cruiseState.enabled)
-
         stiffness_factor = max(float(self.live_parameters.stiffnessFactor), 0.1)
         steer_ratio = max(float(self.live_parameters.steerRatio), 0.1)
         self.VM.update_params(stiffness_factor, steer_ratio)
+
+        self.update_lateral_plan(car_state, model_snapshot)
+        plan = self.lateral_plan
+
+        cc.enabled = bool(self.enabled)
+        cc.active = bool(self.enabled and plan.valid and
+                         plan.mpc_solution_valid and car_state.cruiseState.enabled)
 
         desired_curvature, desired_curvature_rate = self.get_lag_adjusted_curvature(
             self.CP, car_state.vEgo, plan.psis, plan.curvatures, plan.curvature_rates)
@@ -604,6 +837,7 @@ class OpenpilotHyundaiController:
             lat_active, car_state, self.CP, self.VM, self.live_parameters,
             self.last_actuators, desired_curvature, desired_curvature_rate,
             self.live_location_kalman)
+        self.last_lac_output = float(getattr(_lac_log, "output", steer))
 
         cc.actuators.steer = steer
         cc.actuators.steeringAngleDeg = steering_angle_deg
@@ -683,8 +917,7 @@ def main() -> int:
         fp_min_addrs = int(env_float("K230_CONTROLD_FINGERPRINT_MIN_ADDRS", 20.0))
         last_can_seq = 0
         last_model_seq = 0
-        target = LateralTarget()
-        lateral_plan = LateralPlan()
+        model_snapshot: Optional[K230ModelSnapshot] = None
         frames_in = 0
         frames_out = 0
         errors = 0
@@ -693,7 +926,7 @@ def main() -> int:
         while not stop:
             last_model_seq, model_payload = model_sub.read_new(last_model_seq, 0)
             if model_payload:
-                target, lateral_plan = decode_model_control(model_payload)
+                model_snapshot = decode_k230_model_state(model_payload)
 
             last_can_seq, can_payload = can_sub.read_new(last_can_seq, 1000)
             if not can_payload:
@@ -719,7 +952,7 @@ def main() -> int:
                 continue
 
             try:
-                out_frames = controller.update(frames, target, lateral_plan)
+                out_frames = controller.update(frames, model_snapshot)
                 if out_frames:
                     sendcan_pub.publish(encode_can_batch(out_frames))
                     frames_out += len(out_frames)
@@ -738,9 +971,11 @@ def main() -> int:
                     if len(panda_payload) >= PANDA_STATE.size:
                         unpacked = PANDA_STATE.unpack_from(panda_payload, 0)
                         controls_allowed = unpacked[4]
+                lateral_plan = controller.lateral_plan if controller is not None else LateralPlan()
                 print(f"k230_controlsd: can_in={frames_in} sendcan={frames_out} "
-                      f"errors={errors} lateral={int(target.valid)} "
+                      f"errors={errors} model={int(model_snapshot.valid if model_snapshot else 0)} "
                       f"lat_plan={int(lateral_plan.valid)} "
+                      f"mpc={int(lateral_plan.mpc_solution_valid)} "
                       f"controls_allowed={controls_allowed} "
                       f"fingerprint_addrs={fingerprint_addr_count(fingerprint)}", flush=True)
                 frames_in = frames_out = errors = 0

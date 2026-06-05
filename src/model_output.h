@@ -10,6 +10,7 @@ constexpr int kTrajectorySize = 33;
 constexpr int kLeadMhpSelection = 3;
 constexpr int kLeadMhpN = 2;
 constexpr int kLeadTrajLen = 6;
+constexpr int kDesireLen = 8;
 constexpr float kModelHeight = 1.22f;
 
 struct ModelPoint {
@@ -31,12 +32,18 @@ struct ParsedPlan {
 struct ParsedLaneLine {
     bool valid = false;
     float probability = 0.0f;
+    float std = 0.0f;
     std::array<ModelPoint, kTrajectorySize> points{};
 };
 
 struct ParsedRoadEdge {
     bool valid = false;
+    float std = 0.0f;
     std::array<ModelPoint, kTrajectorySize> points{};
+};
+
+struct ParsedMeta {
+    std::array<float, kDesireLen> desire_state{};
 };
 
 struct ParsedLeadPoint {
@@ -65,6 +72,7 @@ struct ParsedModelOutput {
     std::array<ParsedLaneLine, 4> lanes{};
     std::array<ParsedRoadEdge, 2> road_edges{};
     ParsedLeads leads;
+    ParsedMeta meta;
     bool has_pose = false;
     PoseObservation pose{};
 };

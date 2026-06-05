@@ -17,8 +17,14 @@ constexpr int kLeadElementSize = 4;
 constexpr int kLeadPredictionStride = kLeadTrajLen * kLeadElementSize * 2 + kLeadMhpSelection;
 constexpr int kLeadOffset = kRoadEdgeOffset + kRoadEdgeSize;
 constexpr int kLeadProbOffset = kLeadOffset + kLeadMhpN * kLeadPredictionStride;
+constexpr int kStopLinePredictionStride = 17;
+constexpr int kStopLineMhpN = 3;
+constexpr int kStopLineOffset = kLeadProbOffset + kLeadMhpSelection;
+constexpr int kStopLineSize = kStopLineMhpN * kStopLinePredictionStride + 1;
+constexpr int kMetaOffset = kStopLineOffset + kStopLineSize;
 constexpr int kMinOverlayOutputFloats = kRoadEdgeOffset + kRoadEdgeMeanSize;
 constexpr int kMinLeadOutputFloats = kLeadProbOffset + kLeadMhpSelection;
+constexpr int kMinMetaOutputFloats = kMetaOffset + kDesireLen;
 constexpr int kPoseOffset = 6000;
 constexpr int kMinPoseOutputFloats = kPoseOffset + 12;
 
@@ -31,8 +37,8 @@ float ModelOutputParser::sigmoid(float x)
 
 float ModelOutputParser::x_idx(int i)
 {
-    const float t = static_cast<float>(i) / static_cast<float>(kTrajectorySize - 1);
-    return 192.0f * t * t;
+    const double t = static_cast<double>(i) / static_cast<double>(kTrajectorySize - 1);
+    return static_cast<float>(192.0 * t * t);
 }
 
 bool ParsedLeads::primary(int time_idx, float min_probability, ParsedLeadPoint *lead, float *probability) const
@@ -54,6 +60,19 @@ bool ParsedLeads::primary(int time_idx, float min_probability, ParsedLeadPoint *
     *lead = predictions[best].points[0];
     if (probability) *probability = global_prob;
     return true;
+}
+
+void softmax(const float *input, float *output, int size)
+{
+    const float max_value = *std::max_element(input, input + size);
+    float denominator = 0.0f;
+    for (int i = 0; i < size; ++i) {
+        output[i] = std::exp(input[i] - max_value);
+        denominator += output[i];
+    }
+    const float inv_denominator = 1.0f / denominator;
+    for (int i = 0; i < size; ++i)
+        output[i] *= inv_denominator;
 }
 
 ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
@@ -105,8 +124,10 @@ ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
     for (int lane = 0; lane < 4; ++lane) {
         ParsedLaneLine &line = output.lanes[lane];
         const int prob_idx = kLaneProbOffset + lane * 2 + 1;
+        const int std_base = kLaneOffset + kLaneLineSize + lane * kTrajectorySize * 2;
         line.valid = true;
         line.probability = sigmoid(raw[prob_idx]);
+        line.std = std::exp(raw[std_base]);
         const int base = kLaneOffset + lane * kTrajectorySize * 2;
         for (int i = 0; i < kTrajectorySize; ++i) {
             line.points[i] = {
@@ -120,6 +141,8 @@ ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
     for (int edge = 0; edge < 2; ++edge) {
         ParsedRoadEdge &road_edge = output.road_edges[edge];
         road_edge.valid = true;
+        const int std_base = kRoadEdgeOffset + kRoadEdgeMeanSize + edge * kTrajectorySize * 2;
+        road_edge.std = std::exp(raw[std_base]);
         const int base = kRoadEdgeOffset + edge * kTrajectorySize * 2;
         for (int i = 0; i < kTrajectorySize; ++i) {
             road_edge.points[i] = {
@@ -149,6 +172,9 @@ ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
         for (int i = 0; i < kLeadMhpSelection; ++i)
             output.leads.global_probabilities[i] = sigmoid(raw[kLeadProbOffset + i]);
     }
+
+    if (raw.size() >= static_cast<size_t>(kMinMetaOutputFloats))
+        softmax(raw.data() + kMetaOffset, output.meta.desire_state.data(), kDesireLen);
 
     if (raw.size() >= static_cast<size_t>(kMinPoseOutputFloats)) {
         output.has_pose = true;
