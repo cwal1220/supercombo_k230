@@ -98,6 +98,11 @@ void SupercomboModel::reset_state()
     std::fill(recurrent_state_.begin(), recurrent_state_.end(), 0.0f);
 }
 
+void SupercomboModel::set_input_calibration(const float rpy[3])
+{
+    input_transform_.set_calibration(rpy[0], rpy[1], rpy[2]);
+}
+
 bool SupercomboModel::run_frame_nv12(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &raw_output)
 {
     const bool profile = profile_enabled();

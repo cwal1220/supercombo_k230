@@ -11,6 +11,7 @@ class ModelInputTransform
 public:
     explicit ModelInputTransform(const AppConfig &config);
 
+    void set_calibration(float roll, float pitch, float yaw);
     void nv12_to_yuv6_warped(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &out);
 
 private:

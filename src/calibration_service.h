@@ -15,6 +15,7 @@ public:
     void update(const ParsedModelOutput &output);
     ProjectionState projection() const { return projection_; }
     OnlineCalibrator::Snapshot snapshot() const { return last_snapshot_; }
+    void input_rpy(float rpy[3]) const;
     bool can_apply_online() const { return auto_enabled_ && !manual_override_; }
 
 private:

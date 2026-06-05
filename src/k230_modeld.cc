@@ -37,11 +37,15 @@ uint64_t steady_ns()
         std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
-bool publish_output(K230LatestChannel &model_pub, const ParsedModelOutput &parsed,
+bool publish_output(K230LatestChannel &model_pub, SupercomboModel &model, const ParsedModelOutput &parsed,
                     CalibrationService &calibration, LateralControlDraft &lateral_control,
                     uint64_t frame_id, uint64_t capture_timestamp_ns, float model_ms)
 {
     calibration.update(parsed);
+    float input_rpy[3];
+    calibration.input_rpy(input_rpy);
+    model.set_input_calibration(input_rpy);
+
     const ProjectionState projection = calibration.projection();
     const LateralTarget lateral = lateral_control.update(parsed.plan, projection);
 
@@ -80,7 +84,7 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
         if (ok) {
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);
             const float model_ms = static_cast<float>((t1 - t0) / 1000000.0);
-            if (!publish_output(model_pub, parsed, calibration, lateral_control,
+            if (!publish_output(model_pub, model, parsed, calibration, lateral_control,
                                 processed, k230_now_ns(), model_ms)) {
                 std::fprintf(stderr, "\nmodeld: publish modelState failed\n");
                 ++errors;
@@ -177,7 +181,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub)
         if (ok) {
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);
             const float model_ms = static_cast<float>((t1 - t0) / 1000000.0);
-            if (!publish_output(model_pub, parsed, calibration, lateral_control,
+            if (!publish_output(model_pub, model, parsed, calibration, lateral_control,
                                 meta.frame_id, meta.timestamp_ns, model_ms)) {
                 std::fprintf(stderr, "\nmodeld: publish modelState failed\n");
                 ++errors;

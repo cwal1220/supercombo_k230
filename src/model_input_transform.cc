@@ -93,6 +93,21 @@ ModelInputTransform::ModelInputTransform(const AppConfig &config)
 {
 }
 
+void ModelInputTransform::set_calibration(float roll, float pitch, float yaw)
+{
+    constexpr float kEpsilon = 1e-7f;
+    if (std::fabs(roll_ - roll) < kEpsilon &&
+        std::fabs(pitch_ - pitch) < kEpsilon &&
+        std::fabs(yaw_ - yaw) < kEpsilon) {
+        return;
+    }
+
+    roll_ = roll;
+    pitch_ = pitch;
+    yaw_ = yaw;
+    map_valid_ = false;
+}
+
 uint8_t ModelInputTransform::sample_luma(const uint8_t *base, const BilinearSample &sample)
 {
     int sum = 0;

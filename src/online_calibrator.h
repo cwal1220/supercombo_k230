@@ -46,16 +46,17 @@ private:
     static constexpr int kInputsNeeded = 5;
     static constexpr int kInputsWanted = 50;
 
-    void reset_to_rpy(const float rpy[3], int valid_blocks);
+    void reset_to_rpy(const float rpy[3], int valid_blocks, const float *smooth_from = nullptr);
     void update_status();
+    void smooth_rpy(float out[3]) const;
     bool is_calibration_valid(const float rpy[3]) const;
     void sanity_clip(float rpy[3]) const;
 
     float block_rpys_[kInputsWanted][3] = {};
-    float block_sum_[3] = {};
-    int block_sample_count_ = 0;
-    int block_pos_ = 0;
-    int completed_blocks_total_ = 0;
+    int sample_idx_ = 0;
+    int block_idx_ = 0;
+    float old_rpy_[3] = {};
+    float old_rpy_weight_ = 0.0f;
     Snapshot snapshot_;
 };
 

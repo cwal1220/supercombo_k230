@@ -175,7 +175,7 @@ and publishes compact `modelState`. The overlay display process uses
 The model input preparation always uses the calibrated homography
 `NV12 -> YUV6` path. With default intrinsics and zero rpy it is
 identity-equivalent to the previous direct packer, but the same path can apply
-manual calibration without changing the camera/display pipeline.
+manual or online calibration without changing the camera/display pipeline.
 
 Runtime structure:
 
@@ -194,7 +194,8 @@ Runtime structure:
     homography sampling and openpilot-compatible YUV6 packing without creating
     an intermediate RGB or warped image buffer.
 - `src/calibration_service.*`
-  - wraps pose-based online calibration, manual override, and projection policy.
+  - wraps pose-based online calibration, manual override, projection policy, and
+    the model-input calibration feedback loop.
 - `src/projection.*`
   - converts model road coordinates to display pixels. Default mode is
     the K230 road-frame projection used by the pre-refactor runtime;
@@ -243,8 +244,9 @@ Useful runtime options:
 - `SUPERCOMBO_INPUT_WARP_ROLL_DEG`, `SUPERCOMBO_INPUT_WARP_PITCH_DEG`,
   `SUPERCOMBO_INPUT_WARP_YAW_DEG`
   - optional model-input warp calibration in degrees. If unset, the input warp
-    reuses `SUPERCOMBO_CALIB_*` values; online pose calibration is not fed back
-    into model input.
+    reuses `SUPERCOMBO_CALIB_*` values. Without a manual override, pose-based
+    online calibration feeds back into the next frame's model input warp,
+    matching openpilot's `cameraOdometry -> liveCalibration -> modeld` loop.
 - `SUPERCOMBO_INPUT_WARP_FX`, `SUPERCOMBO_INPUT_WARP_FY`,
   `SUPERCOMBO_INPUT_WARP_CX`, `SUPERCOMBO_INPUT_WARP_CY`
   - optional camera intrinsics for the `512x256` source frame. Defaults are

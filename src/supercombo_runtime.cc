@@ -93,6 +93,9 @@ int SupercomboRuntime::run_replay()
             if (ok) {
                 ParsedModelOutput parsed = ModelOutputParser::parse(raw);
                 calibration_.update(parsed);
+                float input_rpy[3];
+                calibration_.input_rpy(input_rpy);
+                model.set_input_calibration(input_rpy);
                 const ProjectionState projection = calibration_.projection();
                 lateral_control_.update(parsed.plan, projection);
                 ++processed;
@@ -154,6 +157,9 @@ void SupercomboRuntime::ai_thread_proc()
             if (ok) {
                 ParsedModelOutput parsed = ModelOutputParser::parse(raw);
                 calibration_.update(parsed);
+                float input_rpy[3];
+                calibration_.input_rpy(input_rpy);
+                model.set_input_calibration(input_rpy);
                 const ProjectionState projection = calibration_.projection();
                 lateral_control_.update(parsed.plan, projection);
                 {

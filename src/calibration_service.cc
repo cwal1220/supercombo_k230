@@ -27,6 +27,14 @@ void CalibrationService::set_fixed_projection()
     projection_ = make_projection_state(projection_mode_, fixed_rpy_[0], fixed_rpy_[1], fixed_rpy_[2]);
 }
 
+void CalibrationService::input_rpy(float rpy[3]) const
+{
+    const float *src = can_apply_online() ? last_snapshot_.rpy : fixed_rpy_;
+    rpy[0] = src[0];
+    rpy[1] = src[1];
+    rpy[2] = src[2];
+}
+
 const char *CalibrationService::mode_name(const OnlineCalibrator::Snapshot &snapshot) const
 {
     if (!can_apply_online()) return "manual";
