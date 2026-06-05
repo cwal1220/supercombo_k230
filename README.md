@@ -177,6 +177,48 @@ The model input preparation always uses the calibrated homography
 identity-equivalent to the previous direct packer, but the same path can apply
 manual or online calibration without changing the camera/display pipeline.
 
+Calibration/input-warp equivalence checks:
+
+- `benchmarks/verify_calibration_equivalence.cc` is a host-only verifier for
+  the openpilot-derived calibration and input-warp math. It checks the
+  pose-based calibration state machine, manual-vs-online feedback policy,
+  medmodel homography matrix, UV `transform_scale_buffer(0.5)` handling, and
+  YUV6 plane order (`Y00, Y10, Y01, Y11, U, V`) without requiring nncase or K230
+  display libraries.
+- The verifier intentionally treats model-input feedback as roll-free, matching
+  openpilot's `get_view_frame_from_road_frame(0, pitch, yaw, model_height)`
+  extrinsic matrix. `rpyCalib` may contain a tiny roll internally in openpilot,
+  but that roll is not fed into `modeld`.
+- The K230 input source is already `512x256 NV12`, so the homography is verified
+  in that source coordinate space. This differs from openpilot's original full
+  camera/VisionIPC path by design.
+- The current K230 calibrator uses pose `trans[0]` as the speed gate because CAN
+  `vEgo` is not wired into this runtime yet. Openpilot uses both `carState.vEgo`
+  and camera odometry `trans[0]`.
+- `big_input_imgs` remains zero-filled and outside the current equivalence
+  target.
+
+Run the host-only verifier:
+
+```sh
+cmake -S . -B /tmp/supercombo_k230_verify \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DSUPERCOMBO_BUILD_RUNTIME=OFF \
+  -DSUPERCOMBO_BUILD_BENCHMARKS=ON
+cmake --build /tmp/supercombo_k230_verify \
+  --target verify_calibration_equivalence bench_input_warp_overhead -j2
+./verify_calibration_equivalence
+./bench_input_warp_overhead 3000
+```
+
+Latest local/Pi checks:
+
+- macOS host: `verify_calibration_equivalence: PASS`
+- Raspberry Pi 4 aarch64: `verify_calibration_equivalence: PASS`
+- Raspberry Pi 4 warp timing over 3000 frames:
+  direct pack `0.251 ms`, identity warp `1.821 ms`, pitch `1.836 ms`, so the
+  calibrated warp adds about `1.57-1.58 ms/frame` on Cortex-A72.
+
 Runtime structure:
 
 - `src/main.cc`

@@ -179,7 +179,7 @@ void OnlineCalibrator::reset_to_rpy(const float rpy[3], int valid_blocks, const 
             block_rpys_[b][i] = rpy[i];
     }
     sample_idx_ = 0;
-    block_idx_ = clamped_valid_blocks % kInputsWanted;
+    block_idx_ = 0;
     if (smooth_from) {
         for (int i = 0; i < 3; ++i)
             old_rpy_[i] = smooth_from[i];

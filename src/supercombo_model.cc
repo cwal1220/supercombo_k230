@@ -166,9 +166,9 @@ void SupercomboModel::nv12_to_yuv6(const uint8_t *nv12, int src_w, int src_h, st
     const uint8_t *uv_plane = nv12 + src_w * src_h;
     const int plane_size = kHalfW * kHalfH;
     float *y00_plane = out.data();
-    float *y01_plane = y00_plane + plane_size;
-    float *y10_plane = y01_plane + plane_size;
-    float *y11_plane = y10_plane + plane_size;
+    float *y10_plane = y00_plane + plane_size;
+    float *y01_plane = y10_plane + plane_size;
+    float *y11_plane = y01_plane + plane_size;
     float *u_plane = y11_plane + plane_size;
     float *v_plane = u_plane + plane_size;
 
@@ -179,16 +179,16 @@ void SupercomboModel::nv12_to_yuv6(const uint8_t *nv12, int src_w, int src_h, st
             const uint8_t *y1 = y0 + src_w;
             const uint8_t *uv = uv_plane + (src_y0 / 2) * src_w;
             float *dst_y00 = y00_plane + y2 * kHalfW;
-            float *dst_y01 = y01_plane + y2 * kHalfW;
             float *dst_y10 = y10_plane + y2 * kHalfW;
+            float *dst_y01 = y01_plane + y2 * kHalfW;
             float *dst_y11 = y11_plane + y2 * kHalfW;
             float *dst_u = u_plane + y2 * kHalfW;
             float *dst_v = v_plane + y2 * kHalfW;
 
             for (int x2 = 0; x2 < kHalfW; ++x2) {
                 dst_y00[x2] = static_cast<float>(y0[0]);
-                dst_y01[x2] = static_cast<float>(y0[1]);
                 dst_y10[x2] = static_cast<float>(y1[0]);
+                dst_y01[x2] = static_cast<float>(y0[1]);
                 dst_y11[x2] = static_cast<float>(y1[1]);
                 dst_u[x2] = static_cast<float>(uv[0]);
                 dst_v[x2] = static_cast<float>(uv[1]);
@@ -205,8 +205,8 @@ void SupercomboModel::nv12_to_yuv6(const uint8_t *nv12, int src_w, int src_h, st
 
     for (int y2 = 0; y2 < kHalfH; ++y2) {
         float *dst_y00 = y00_plane + y2 * kHalfW;
-        float *dst_y01 = y01_plane + y2 * kHalfW;
         float *dst_y10 = y10_plane + y2 * kHalfW;
+        float *dst_y01 = y01_plane + y2 * kHalfW;
         float *dst_y11 = y11_plane + y2 * kHalfW;
         float *dst_u = u_plane + y2 * kHalfW;
         float *dst_v = v_plane + y2 * kHalfW;

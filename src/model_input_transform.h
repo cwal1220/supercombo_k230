@@ -12,6 +12,7 @@ public:
     explicit ModelInputTransform(const AppConfig &config);
 
     void set_calibration(float roll, float pitch, float yaw);
+    void projection_matrix(float *projection) const;
     void nv12_to_yuv6_warped(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &out);
 
 private:
@@ -28,7 +29,6 @@ private:
     static constexpr int kWeightScale = 1 << kWeightBits;
 
     void rebuild_maps(int src_w, int src_h);
-    void build_projection(float *projection) const;
     void build_sample_map(const float *projection, int src_w, int src_h,
                           int dst_w, int dst_h, int src_stride_pixels,
                           int bytes_per_pixel, std::vector<BilinearSample> &map) const;

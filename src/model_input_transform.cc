@@ -130,7 +130,7 @@ uint8_t ModelInputTransform::sample_chroma(const uint8_t *base, const BilinearSa
     return static_cast<uint8_t>(std::min(255, std::max(0, rounded)));
 }
 
-void ModelInputTransform::build_projection(float *projection) const
+void ModelInputTransform::projection_matrix(float *projection) const
 {
     // Same medmodel inverse used by openpilot modeld.update_calibration().
     const float ground_from_medmodel_frame[9] = {
@@ -228,7 +228,7 @@ void ModelInputTransform::rebuild_maps(int src_w, int src_h)
 
     float projection_y[9];
     float projection_uv[9];
-    build_projection(projection_y);
+    projection_matrix(projection_y);
     transform_scale_buffer(projection_y, 0.5f, projection_uv);
 
     build_sample_map(projection_y, src_w, src_h, kModelW, kModelH, src_w, 1, y_map_);
