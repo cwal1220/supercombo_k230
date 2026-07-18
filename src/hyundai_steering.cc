@@ -1,0 +1,57 @@
+#include "hyundai_steering.h"
+
+#include <algorithm>
+#include <cmath>
+
+namespace {
+
+int clip_int(int value, int lo, int hi) {
+  return std::min(std::max(value, lo), hi);
+}
+
+}  // namespace
+
+int apply_hyundai_steer_torque_limits(int desired_torque, int last_torque, int driver_torque,
+                                      const HyundaiSteeringLimits &limits) {
+  const int driver_max_torque = limits.steer_max +
+      (limits.steer_driver_allowance + driver_torque * limits.steer_driver_factor) *
+      limits.steer_driver_multiplier;
+  const int driver_min_torque = -limits.steer_max +
+      (-limits.steer_driver_allowance + driver_torque * limits.steer_driver_factor) *
+      limits.steer_driver_multiplier;
+
+  const int max_steer_allowed = std::max(std::min(limits.steer_max, driver_max_torque), 0);
+  const int min_steer_allowed = std::min(std::max(-limits.steer_max, driver_min_torque), 0);
+  int apply_torque = clip_int(desired_torque, min_steer_allowed, max_steer_allowed);
+
+  if (last_torque > 0) {
+    apply_torque = clip_int(apply_torque,
+                            std::max(last_torque - limits.steer_delta_down, -limits.steer_delta_up),
+                            last_torque + limits.steer_delta_up);
+  } else {
+    apply_torque = clip_int(apply_torque,
+                            last_torque - limits.steer_delta_up,
+                            std::min(last_torque + limits.steer_delta_down, limits.steer_delta_up));
+  }
+  return apply_torque;
+}
+
+bool steering_gate_allows(const SteeringGateInput &input) {
+  if (!input.path_usable || !input.engaged || !input.panda_ready || input.steering_fault) {
+    return false;
+  }
+  if (!std::isfinite(input.v_ego_mps)) {
+    return false;
+  }
+  if (input.no_smart_mdps && input.v_ego_mps < input.min_enable_speed_mps) {
+    return false;
+  }
+  return true;
+}
+
+float mdps_speed_for_lkas(float cluster_speed, bool lkas_active, bool is_mph) {
+  if (!std::isfinite(cluster_speed) || cluster_speed < 0.0f) return 0.0f;
+  const float threshold = is_mph ? 38.0f : 60.0f;
+  if (!lkas_active || cluster_speed > threshold) return cluster_speed;
+  return threshold;
+}
