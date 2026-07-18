@@ -12,6 +12,7 @@ constexpr uint32_t kHyundaiEEms11Address = 881;      // 0x371
 constexpr uint32_t kHyundaiElectGearAddress = 882;   // 0x372
 constexpr uint32_t kHyundaiCgw1Address = 1345;       // 0x541
 constexpr uint32_t kHyundaiCgw2Address = 1363;       // 0x553
+constexpr uint32_t kHyundaiLca11Address = 1419;      // 0x58b
 
 constexpr uint8_t kK7PowertrainBus = 0;
 constexpr uint8_t kK7MdpsBus = 1;
@@ -80,6 +81,11 @@ struct Cgw2Values {
   bool rear_door_open = false;
 };
 
+struct Lca11Values {
+  bool left_blindspot = false;
+  bool right_blindspot = false;
+};
+
 struct K7VehicleCanState {
   std::array<uint8_t, 8> lkas11_seed{};
   std::array<uint8_t, 4> clu11_seed{};
@@ -100,6 +106,7 @@ struct K7VehicleCanState {
   double elect_gear_time_s = -1.0;
   double cgw1_time_s = -1.0;
   double cgw2_time_s = -1.0;
+  double lca11_time_s = -1.0;
 
   int clu_button = 0;
   float cluster_speed = 0.0f;
@@ -136,6 +143,8 @@ struct K7VehicleCanState {
   bool left_blinker = false;
   bool right_blinker = false;
   bool hazard = false;
+  bool left_blindspot = false;
+  bool right_blindspot = false;
   int acc_mode = 0;
   bool cruise_active = false;
 };
@@ -169,6 +178,9 @@ Cgw1Values decode_cgw1(const std::array<uint8_t, 8> &data);
 
 // K7 CGW2 rear door 값을 해석한다.
 Cgw2Values decode_cgw2(const std::array<uint8_t, 8> &data);
+
+// K7 LCA11 blind-spot indicators를 해석한다.
+Lca11Values decode_lca11(const std::array<uint8_t, 8> &data);
 
 // raw CAN frame을 K7 vehicle state에 반영한다.
 void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,

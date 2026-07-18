@@ -14,6 +14,7 @@ struct LateralTarget {
     float heading = 0.0f;
     float curvature = 0.0f;
     float output_scale = 0.0f;
+    int desire = 0;
     float psis[kLateralControlN] = {};
     float curvatures[kLateralControlN] = {};
     float curvature_rates[kLateralControlN] = {};

@@ -12,7 +12,7 @@ class CalibrationService {
 public:
     explicit CalibrationService(const AppConfig &config);
 
-    void update(const ParsedModelOutput &output);
+    void update(const ParsedModelOutput &output, float v_ego);
     ProjectionState projection() const { return projection_; }
     OnlineCalibrator::Snapshot snapshot() const { return last_snapshot_; }
     void input_rpy(float rpy[3]) const;
@@ -28,6 +28,7 @@ private:
     bool manual_override_ = false;
     bool log_enabled_ = false;
     float fixed_rpy_[3] = {};
+    float online_rpy_[3] = {};
 
     OnlineCalibrator calibrator_;
     OnlineCalibrator::Snapshot last_snapshot_{};

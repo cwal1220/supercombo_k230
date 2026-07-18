@@ -92,7 +92,7 @@ int SupercomboRuntime::run_replay()
             const bool ok = model.run_frame_nv12(frame.data.data(), frame.width, frame.height, raw);
             if (ok) {
                 ParsedModelOutput parsed = ModelOutputParser::parse(raw);
-                calibration_.update(parsed);
+                calibration_.update(parsed, 0.0f);
                 float input_rpy[3];
                 calibration_.input_rpy(input_rpy);
                 model.set_input_calibration(input_rpy);
@@ -156,7 +156,7 @@ void SupercomboRuntime::ai_thread_proc()
             const bool ok = model.run_frame_nv12(frame.data.data(), frame.width, frame.height, raw);
             if (ok) {
                 ParsedModelOutput parsed = ModelOutputParser::parse(raw);
-                calibration_.update(parsed);
+                calibration_.update(parsed, 0.0f);
                 float input_rpy[3];
                 calibration_.input_rpy(input_rpy);
                 model.set_input_calibration(input_rpy);

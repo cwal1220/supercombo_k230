@@ -23,6 +23,7 @@ bool expected_openpilot_k7_bus(uint32_t address, uint8_t bus) {
     case kHyundaiElectGearAddress:
     case kHyundaiCgw1Address:
     case kHyundaiCgw2Address:
+    case kHyundaiLca11Address:
       return bus == kK7PowertrainBus;
     case kHyundaiMdps12Address:
       return bus == kK7MdpsBus;
@@ -151,6 +152,13 @@ Cgw2Values decode_cgw2(const std::array<uint8_t, 8> &data) {
   return values;
 }
 
+Lca11Values decode_lca11(const std::array<uint8_t, 8> &data) {
+  Lca11Values values;
+  values.left_blindspot = get_signal_le(data.data(), 8, 2) != 0;
+  values.right_blindspot = get_signal_le(data.data(), 16, 2) != 0;
+  return values;
+}
+
 void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
                                  const std::array<uint8_t, 8> &data,
                                  uint8_t length, uint8_t bus,
@@ -235,6 +243,11 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     state->door_open = state->driver_door_open || state->passenger_door_open ||
                        state->rear_left_door_open || state->rear_right_door_open;
     state->cgw2_time_s = now_s;
+  } else if (address == kHyundaiLca11Address && length >= 8) {
+    const Lca11Values lca = decode_lca11(data);
+    state->left_blindspot = lca.left_blindspot;
+    state->right_blindspot = lca.right_blindspot;
+    state->lca11_time_s = now_s;
   }
 }
 

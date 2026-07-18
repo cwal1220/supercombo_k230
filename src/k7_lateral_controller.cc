@@ -12,6 +12,11 @@ constexpr float kLaneChangeSpeedMinMps = 30.0f * 0.2777777778f;
 constexpr int kManualSteerDisableFrames = 50;
 constexpr int kDriverSteeringTorqueAbove = 170;
 constexpr float kSmoothSteerRecoverStep = 0.005f;
+constexpr float kMaxLateralJerk = 5.0f;
+constexpr float kDesiredCurvatureLimit = 0.1f;
+constexpr float kMaxLateralAccel = 3.0f;
+constexpr float kMaxCurvature = 0.2f;
+constexpr float kGravity = 9.8f;
 
 float clamp_float(float value, float lo, float hi) {
   if (!std::isfinite(value)) return lo;
@@ -37,6 +42,24 @@ float cluster_speed_kph(const K7VehicleCanState &vehicle_state) {
   return vehicle_state.cluster_speed * (vehicle_state.speed_unit_mph ? 1.609344f : 1.0f);
 }
 
+float model_t_idx(int i) {
+  const float ratio = static_cast<float>(i) / 32.0f;
+  return 10.0f * ratio * ratio;
+}
+
+float interp_lateral(float x, const float *values) {
+  if (x <= 0.0f) return values[0];
+  for (int i = 1; i < kLateralControlN; ++i) {
+    const float high_x = model_t_idx(i);
+    if (x <= high_x) {
+      const float low_x = model_t_idx(i - 1);
+      const float p = (x - low_x) / (high_x - low_x);
+      return values[i - 1] + p * (values[i] - values[i - 1]);
+    }
+  }
+  return values[kLateralControlN - 1];
+}
+
 bool signal_fresh(double timestamp_s, double now_s, double timeout_s = 0.5) {
   return timestamp_s >= 0.0 && now_s >= timestamp_s && now_s - timestamp_s <= timeout_s;
 }
@@ -55,6 +78,7 @@ K7LateralController::K7LateralController(K7LateralControllerConfig config)
 
 // 차량 버튼/상태와 lane path를 바탕으로 LKAS 제어 결과와 CAN frame을 만든다.
 K7LateralControlResult K7LateralController::update(const LateralPath &path,
+                                                   const LateralTarget &target,
                                                    const K7VehicleCanState &vehicle_state,
                                                    double now_s,
                                                    int frame) {
@@ -74,20 +98,10 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
     update_manual_blinker_timers(vehicle_state, speed_mps);
   }
 
-  std::string curvature_block;
-  result.desired_curvature = sanitized_desired_curvature(path, speed_mps, &curvature_block);
-  result.active_block = active_block_reason(path, vehicle_state, now_s, result.seeds_ready,
-                                            result.vehicle_fresh, result.speed_kph);
-  if (result.active_block.empty() && !curvature_block.empty()) {
-    result.active_block = curvature_block;
-  }
-  if (result.active_block.empty()) {
-    const float actual_curvature = torque_controller_.estimate_actual_curvature(
-        speed_mps, vehicle_state.steering_angle_deg, config_.steering_params,
-        vehicle_state.yaw_rate_rad_s, vehicle_state.yaw_rate_valid);
-    result.active_block = curvature_consistency_block(
-        result.desired_curvature, actual_curvature, result.speed_kph);
-  }
+  result.desired_curvature = lag_adjusted_desired_curvature(target, speed_mps);
+  result.active_block = active_block_reason(path, target, vehicle_state, now_s,
+                                            result.seeds_ready, result.vehicle_fresh,
+                                            result.speed_kph);
   if (logical_engaged && is_hard_disengage_block(result.active_block)) {
     engaged_ = false;
     reset_control_state();
@@ -337,6 +351,7 @@ void K7LateralController::reset_control_state() {
 // active를 막는 현재 gate reason을 계산한다.
 std::string K7LateralController::active_block_reason(
     const LateralPath &path,
+    const LateralTarget &target,
     const K7VehicleCanState &vehicle_state,
     double now_s,
     bool seeds_ready,
@@ -345,6 +360,7 @@ std::string K7LateralController::active_block_reason(
   if (!config_.force_engaged && !engaged_) return "not_engaged";
   if (!config_.enabled || !config_.steering_params.enabled) return "controller_disabled";
   if (!path.usable_for_steering) return "path_invalid";
+  if (!target.valid || !target.mpc_solution_valid) return "lateral_plan_invalid";
   if (!seeds_ready) return "seeds_missing";
   if (!vehicle_fresh) return "vehicle_state_stale";
   if (vehicle_state.door_open) return "door_open";
@@ -371,49 +387,31 @@ std::string K7LateralController::active_block_reason(
   return "";
 }
 
-// path curvature를 안전한 desired curvature로 제한한다.
-float K7LateralController::sanitized_desired_curvature(const LateralPath &path,
-                                                       float speed_mps,
-                                                       std::string *block) const {
-  if (block) block->clear();
-  float lateral_20m = 0.0f;
-  if (!path_lateral_at(path, 20.0f, &lateral_20m) ||
-      !std::isfinite(lateral_20m) ||
-      std::fabs(lateral_20m) > config_.max_abs_steering_lateral_m) {
-    if (block) *block = "path_lateral_outlier";
-    return 0.0f;
-  }
-  const float curvature = steering_curvature(path, 20.0f);
-  if (!std::isfinite(curvature) ||
-      std::fabs(curvature) > config_.max_command_curvature) {
-    if (block) *block = "curvature_invalid";
-    return 0.0f;
-  }
-  const float speed_for_limit = std::max(std::fabs(speed_mps), 1.0f);
-  const float max_lat_accel =
-      std::max(1.0f, config_.steering_params.torque_max_lat_accel() * 1.2f);
-  const float max_curvature = max_lat_accel / (speed_for_limit * speed_for_limit);
-  const float signed_curvature =
-      config_.steering_params.invert_steer ? -curvature : curvature;
-  return clamp_float(signed_curvature, -max_curvature, max_curvature);
-}
+float K7LateralController::lag_adjusted_desired_curvature(
+    const LateralTarget &target, float speed_mps) const {
+  if (!target.valid) return 0.0f;
+  const float delay = std::max(0.01f, config_.steering_params.steer_actuator_delay);
+  const float current_curvature = target.curvatures[0];
+  const float psi = interp_lateral(delay, target.psis);
+  const float speed = std::max(speed_mps, 0.1f);
+  const float curvature_from_psi = psi / (speed * delay);
+  float desired_curvature = current_curvature +
+      2.0f * (curvature_from_psi - current_curvature);
 
-// 현재 차량 curvature와 path curvature가 크게 어긋나는지 검사한다.
-std::string K7LateralController::curvature_consistency_block(float desired_curvature,
-                                                             float actual_curvature,
-                                                             float speed_kph) const {
-  if (!std::isfinite(speed_kph) ||
-      speed_kph < config_.min_curvature_consistency_speed_kph) {
-    return "";
-  }
-  if (!std::isfinite(desired_curvature) || !std::isfinite(actual_curvature)) {
-    return "curvature_invalid";
-  }
-  const float max_error = std::max(0.0f, config_.max_curvature_consistency_error);
-  if (max_error > 0.0f && std::fabs(desired_curvature - actual_curvature) > max_error) {
-    return "path_curvature_mismatch";
-  }
-  return "";
+  const float max_curvature_rate = kMaxLateralJerk / (speed * speed);
+  desired_curvature = clamp_float(
+      desired_curvature,
+      current_curvature - max_curvature_rate * kDesiredCurvatureLimit,
+      current_curvature + max_curvature_rate * kDesiredCurvatureLimit);
+
+  const float limit_speed = std::max(speed, 1.0f);
+  const float roll_compensation = config_.steering_params.roll_rad * kGravity;
+  desired_curvature = clamp_float(
+      desired_curvature,
+      (-kMaxLateralAccel + roll_compensation) / (limit_speed * limit_speed),
+      (kMaxLateralAccel + roll_compensation) / (limit_speed * limit_speed));
+  desired_curvature = clamp_float(desired_curvature, -kMaxCurvature, kMaxCurvature);
+  return config_.steering_params.invert_steer ? -desired_curvature : desired_curvature;
 }
 
 // LKAS HUD state 값을 lane availability와 active 상태에서 만든다.

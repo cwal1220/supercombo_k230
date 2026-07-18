@@ -35,7 +35,7 @@ LateralPath k7_path_from_model_state(const K230ModelState &state,
                                      unsigned long long now_ns,
                                      unsigned long long timeout_ns) {
   LateralPath path;
-  if (!state.valid || !state.lateral_target.valid) {
+  if (!state.valid) {
     path.invalid_reason = "model_invalid";
     return path;
   }
@@ -56,12 +56,7 @@ LateralPath k7_path_from_model_state(const K230ModelState &state,
     path.points.push_back({x, -y, path.confidence});
   }
 
-  float lateral_20m = 0.0f;
-  float lateral_30m = 0.0f;
-  const bool coverage = path_lateral_at(path, 20.0f, &lateral_20m) &&
-                        path_lateral_at(path, 30.0f, &lateral_30m);
-  path.usable_for_steering = path.points.size() >= 4 && coverage &&
-                             finite(lateral_20m) && std::fabs(lateral_20m) <= 2.0f;
+  path.usable_for_steering = path.points.size() >= 4;
   if (!path.usable_for_steering) path.invalid_reason = "path_invalid";
   return path;
 }

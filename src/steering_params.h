@@ -30,13 +30,13 @@ struct K7SteeringParams {
   int steer_delta_down_base = 7;
 
   int torque_max_lat_accel_raw = 27;
-  int torque_kp_raw = 3;
-  int torque_kf_raw = 1;
-  int torque_ki_raw = 0;
-  int torque_friction_raw = 20;
+  int torque_kp_raw = 10;
+  int torque_kf_raw = 10;
+  int torque_ki_raw = 1;
+  int torque_friction_raw = 65;
   bool torque_use_angle = true;
   int torque_angle_deadzone_raw = 10;
-  int torque_output_sign = 1;
+  int torque_output_sign = -1;
 
   int smooth_steer_method = 0;
   float smooth_max_steering_angle_deg = 90.0f;

@@ -1,6 +1,7 @@
 #include "model_output.h"
 
 #include <cstdint>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -8,6 +9,76 @@
 #include <vector>
 
 namespace {
+
+constexpr int kPlanStride = kTrajectorySize * 15 * 2 + 1;
+constexpr int kLaneOffset = 5 * kPlanStride;
+constexpr int kLaneLineSize = 4 * kTrajectorySize * 2;
+constexpr int kLaneProbOffset = kLaneOffset + kLaneLineSize * 2;
+constexpr int kRoadEdgeOffset = kLaneProbOffset + 8;
+constexpr int kRoadEdgeMeanSize = 2 * kTrajectorySize * 2;
+constexpr int kLeadOffset = kRoadEdgeOffset + kRoadEdgeMeanSize * 2;
+constexpr int kLeadStride = kLeadTrajLen * 4 * 2 + kLeadMhpSelection;
+constexpr int kLeadProbOffset = kLeadOffset + kLeadMhpN * kLeadStride;
+constexpr int kMetaOffset = kLeadProbOffset + kLeadMhpSelection + 3 * 17 + 1;
+constexpr int kPoseOffset = 6000;
+
+bool near(float actual, float expected, float tolerance = 1e-6f)
+{
+    return std::fabs(actual - expected) <= tolerance;
+}
+
+int self_test()
+{
+    std::vector<float> raw(6012 + 512, 0.0f);
+    for (int plan = 0; plan < 5; ++plan)
+        raw[plan * kPlanStride + kPlanStride - 1] = static_cast<float>(plan);
+    const int plan_base = 4 * kPlanStride;
+    raw[plan_base + 7 * 15 + 0] = 17.0f;
+    raw[plan_base + 7 * 15 + 1] = -1.25f;
+    raw[plan_base + 7 * 15 + 9 + 2] = 0.12f;
+    raw[plan_base + kTrajectorySize * 15 + 7 * 15 + 1] = std::log(0.4f);
+
+    const int lane = 2;
+    raw[kLaneOffset + lane * kTrajectorySize * 2 + 5 * 2] = 2.5f;
+    raw[kLaneOffset + kLaneLineSize + lane * kTrajectorySize * 2] = std::log(0.2f);
+    raw[kLaneProbOffset + lane * 2 + 1] = 1.5f;
+
+    raw[kRoadEdgeOffset + kTrajectorySize * 2 + 3 * 2] = -3.0f;
+    raw[kRoadEdgeOffset + kRoadEdgeMeanSize + kTrajectorySize * 2] = std::log(0.3f);
+
+    raw[kLeadOffset + 1 * kLeadStride] = 31.0f;
+    raw[kLeadOffset + 1 * kLeadStride + kLeadStride - kLeadMhpSelection] = 2.0f;
+    raw[kLeadProbOffset] = 3.0f;
+    raw[kMetaOffset + 4] = 4.0f;
+    for (int i = 0; i < 3; ++i) {
+        raw[kPoseOffset + i] = 10.0f + i;
+        raw[kPoseOffset + 3 + i] = 0.1f * i;
+        raw[kPoseOffset + 6 + i] = std::log(0.01f * (i + 1));
+        raw[kPoseOffset + 9 + i] = std::log(0.02f * (i + 1));
+    }
+
+    const ParsedModelOutput parsed = ModelOutputParser::parse(raw);
+    ParsedLeadPoint lead;
+    const bool ok = parsed.valid && parsed.plan.best_index == 4 &&
+        near(parsed.plan.points[7].x, 17.0f) &&
+        near(parsed.plan.points[7].y, -1.25f) &&
+        near(parsed.plan.orientations[7].z, 0.12f) &&
+        near(parsed.plan.position_stds[7].y, 0.4f) &&
+        near(parsed.lanes[2].points[5].y, 2.5f) &&
+        near(parsed.lanes[2].std, 0.2f) &&
+        near(parsed.road_edges[1].points[3].y, -3.0f) &&
+        near(parsed.road_edges[1].std, 0.3f) &&
+        parsed.leads.primary(0, 0.0f, &lead) && near(lead.x, 31.0f) &&
+        parsed.meta.desire_state[4] > parsed.meta.desire_state[0] &&
+        parsed.has_pose && near(parsed.pose.trans[2], 12.0f) &&
+        near(parsed.pose.trans_std[2], 0.03f);
+    if (!ok) {
+        std::cerr << "model output layout self-test failed\n";
+        return 1;
+    }
+    std::cout << "MODEL_OUTPUT_EQUIVALENCE_OK output=6012 recurrent=512 pose_offset=6000\n";
+    return 0;
+}
 
 template <typename T>
 bool read_exact(std::ifstream &file, T *value)
@@ -20,6 +91,7 @@ bool read_exact(std::ifstream &file, T *value)
 
 int main(int argc, char *argv[])
 {
+    if (argc == 1) return self_test();
     if (argc != 2) {
         std::cerr << "Usage: " << argv[0] << " <SCODMP1 raw dump>\n";
         return 1;

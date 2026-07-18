@@ -6,10 +6,16 @@
 #include <cstdint>
 #include <vector>
 
+enum class ModelFrame {
+    MedModel,
+    SmallBigModel,
+};
+
 class ModelInputTransform
 {
 public:
-    explicit ModelInputTransform(const AppConfig &config);
+    explicit ModelInputTransform(const AppConfig &config,
+                                 ModelFrame model_frame = ModelFrame::MedModel);
 
     void set_calibration(float roll, float pitch, float yaw);
     void projection_matrix(float *projection) const;
@@ -47,6 +53,7 @@ private:
     float roll_ = 0.0f;
     float pitch_ = 0.0f;
     float yaw_ = 0.0f;
+    ModelFrame model_frame_ = ModelFrame::MedModel;
 
     std::vector<BilinearSample> y_map_;
     std::vector<BilinearSample> uv_map_;

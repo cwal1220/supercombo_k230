@@ -106,14 +106,17 @@ OnlineCalibrator::OnlineCalibrator()
     reset_to_rpy(snapshot_.rpy, 0);
 }
 
-OnlineCalibrator::UpdateResult OnlineCalibrator::update(const PoseObservation &pose)
+OnlineCalibrator::UpdateResult OnlineCalibrator::update(const PoseObservation &pose,
+                                                        float v_ego)
 {
     UpdateResult result;
     result.snapshot = snapshot_;
     old_rpy_weight_ = std::min(0.0f, old_rpy_weight_ - 1.0f / kSmoothCycles);
 
-    const bool valid_numbers = finite3(pose.trans) && finite3(pose.rot) && finite3(pose.trans_std);
+    const bool valid_numbers = finite3(pose.trans) && finite3(pose.rot) &&
+        finite3(pose.trans_std) && std::isfinite(v_ego);
     const bool straight_and_fast = valid_numbers &&
+        v_ego > kMinSpeedFilter &&
         pose.trans[0] > kMinSpeedFilter &&
         std::fabs(pose.rot[2]) < kMaxYawRateFilter;
     const bool certain_if_calib = valid_numbers &&
@@ -169,6 +172,11 @@ OnlineCalibrator::UpdateResult OnlineCalibrator::update(const PoseObservation &p
 OnlineCalibrator::Snapshot OnlineCalibrator::snapshot() const
 {
     return snapshot_;
+}
+
+void OnlineCalibrator::output_rpy(float rpy[3]) const
+{
+    smooth_rpy(rpy);
 }
 
 void OnlineCalibrator::reset_to_rpy(const float rpy[3], int valid_blocks, const float *smooth_from)
@@ -272,7 +280,6 @@ void OnlineCalibrator::sanity_clip(float rpy[3]) const
         rpy[2] = 0.0f;
         return;
     }
-    rpy[0] = 0.0f;
     rpy[1] = std::max(kPitchMin - kSanityMargin, std::min(kPitchMax + kSanityMargin, rpy[1]));
     rpy[2] = std::max(kYawMin - kSanityMargin, std::min(kYawMax + kSanityMargin, rpy[2]));
 }

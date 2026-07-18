@@ -1,6 +1,7 @@
 #include "k230_ipc.h"
 #include "k7_lateral_controller.h"
 #include "k7_path.h"
+#include "openpilot_lateral_planner.h"
 #include "steering_params.h"
 #include "vehicle_can.h"
 
@@ -10,11 +11,13 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <thread>
+#include <mutex>
 
 namespace {
 
@@ -74,6 +77,86 @@ K230CanBatch make_send_batch(const std::vector<CanFrame> &frames) {
   return batch;
 }
 
+float vehicle_speed_mps(const K7VehicleCanState &vehicle) {
+  const float unit_scale = vehicle.speed_unit_mph ? 1.609344f : 1.0f;
+  return std::max(0.0f, vehicle.cluster_speed * unit_scale / 3.6f);
+}
+
+class LateralPlannerWorker {
+public:
+  explicit LateralPlannerWorker(const K7SteeringParams &params)
+      : planner_(params), thread_(&LateralPlannerWorker::run, this) {}
+
+  ~LateralPlannerWorker() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      stop_ = true;
+    }
+    condition_.notify_one();
+    thread_.join();
+  }
+
+  void submit(const K230ModelState &model, const K7VehicleCanState &vehicle,
+              float v_ego, float measured_curvature, bool active,
+              float output_scale) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      request_.model = model;
+      request_.vehicle = vehicle;
+      request_.v_ego = v_ego;
+      request_.measured_curvature = measured_curvature;
+      request_.active = active;
+      request_.output_scale = output_scale;
+      pending_ = true;
+    }
+    condition_.notify_one();
+  }
+
+  LateralTarget latest() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return latest_;
+  }
+
+private:
+  struct Request {
+    K230ModelState model;
+    K7VehicleCanState vehicle;
+    float v_ego = 0.0f;
+    float measured_curvature = 0.0f;
+    bool active = false;
+    float output_scale = 0.0f;
+  };
+
+  void run() {
+    while (true) {
+      Request request;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait(lock, [this] { return stop_ || pending_; });
+        if (stop_) return;
+        request = request_;
+        pending_ = false;
+      }
+      const LateralTarget result = planner_.update(
+          request.model, request.vehicle, request.v_ego,
+          request.measured_curvature, request.active, request.output_scale);
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        latest_ = result;
+      }
+    }
+  }
+
+  OpenpilotLateralPlanner planner_;
+  mutable std::mutex mutex_;
+  std::condition_variable condition_;
+  Request request_;
+  LateralTarget latest_;
+  bool pending_ = false;
+  bool stop_ = false;
+  std::thread thread_;
+};
+
 }  // namespace
 
 int main() {
@@ -103,8 +186,10 @@ int main() {
       }
     }
     K7LateralController controller(config);
+    LateralPlannerWorker lateral_planner(config.steering_params);
     K7VehicleCanState vehicle;
     K230ModelState model;
+    LateralTarget lateral_target;
     uint64_t can_seq = 0;
     uint64_t model_seq = 0;
     unsigned can_frames = 0;
@@ -139,10 +224,16 @@ int main() {
       if (model_sub.read(&model, sizeof(model), &next_model_seq) &&
           next_model_seq != model_seq) {
         model_seq = next_model_seq;
+        lateral_planner.submit(
+            model, vehicle, vehicle_speed_mps(vehicle),
+            last_result.actual_curvature, last_result.active,
+            last_result.normalized_output);
       }
+      lateral_target = lateral_planner.latest();
 
       const LateralPath path = k7_path_from_model_state(model, k230_now_ns());
-      last_result = controller.update(path, vehicle, now_s, control_frame++);
+      last_result = controller.update(path, lateral_target, vehicle, now_s,
+                                      control_frame++);
 
       K230ControlState control_state;
       control_state.timestamp_ns = k230_now_ns();
@@ -162,6 +253,7 @@ int main() {
       control_state.desired_torque = last_result.desired_torque;
       control_state.apply_torque = last_result.apply_torque;
       control_state.driver_torque = vehicle.driver_torque;
+      control_state.desire = static_cast<uint32_t>(lateral_target.desire);
       std::snprintf(control_state.active_block, sizeof(control_state.active_block), "%s",
                     last_result.active_block.c_str());
       if (!control_state_pub.publish(&control_state, sizeof(control_state))) {
@@ -189,10 +281,13 @@ int main() {
         std::fprintf(stderr,
                      "k230_k7_controlsd: hz=%.3f work_avg_us=%.1f work_max_us=%.1f "
                      "misses=%u can=%u generated=%u errors=%u engaged=%u active=%u "
-                     "torque=%d speed=%.1f block=%s\n",
+                     "plan=%u mpc=%u desire=%d torque=%d speed=%.1f block=%s\n",
                      ticks / window_s, work_sum_us / std::max(1U, ticks), work_max_us,
                      misses, can_frames, generated_frames, publish_errors,
                      last_result.engaged ? 1 : 0, last_result.active ? 1 : 0,
+                     lateral_target.valid ? 1 : 0,
+                     lateral_target.mpc_solution_valid ? 1 : 0,
+                     lateral_target.desire,
                      last_result.apply_torque, last_result.speed_kph,
                      last_result.active_block.c_str());
         log_start = work_end;

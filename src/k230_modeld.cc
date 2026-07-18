@@ -39,9 +39,10 @@ uint64_t steady_ns()
 
 bool publish_output(K230LatestChannel &model_pub, SupercomboModel &model, const ParsedModelOutput &parsed,
                     CalibrationService &calibration, LateralControlDraft &lateral_control,
-                    uint64_t frame_id, uint64_t capture_timestamp_ns, float model_ms)
+                    uint64_t frame_id, uint64_t capture_timestamp_ns, float model_ms,
+                    float v_ego)
 {
-    calibration.update(parsed);
+    calibration.update(parsed, v_ego);
     float input_rpy[3];
     calibration.input_rpy(input_rpy);
     model.set_input_calibration(input_rpy);
@@ -85,7 +86,7 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);
             const float model_ms = static_cast<float>((t1 - t0) / 1000000.0);
             if (!publish_output(model_pub, model, parsed, calibration, lateral_control,
-                                processed, k230_now_ns(), model_ms)) {
+                                processed, k230_now_ns(), model_ms, 0.0f)) {
                 std::fprintf(stderr, "\nmodeld: publish modelState failed\n");
                 ++errors;
             }
@@ -134,6 +135,10 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub)
     SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode, config);
     CalibrationService calibration(config);
     LateralControlDraft lateral_control;
+    K230LatestChannel control_sub;
+    bool control_sub_open = false;
+    float v_ego = 0.0f;
+    int desire = 0;
     std::vector<float> raw;
     uint64_t last_frame_seq = 0;
     unsigned processed = 0;
@@ -175,6 +180,18 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub)
             continue;
         }
 
+        if (!control_sub_open)
+            control_sub_open = control_sub.open(kK230ControlStateTopic,
+                                                sizeof(K230ControlState), false);
+        if (control_sub_open) {
+            K230ControlState control_state;
+            if (control_sub.read(&control_state, sizeof(control_state))) {
+                v_ego = std::max(0.0f, control_state.speed_kph / 3.6f);
+                desire = static_cast<int>(control_state.desire);
+            }
+        }
+        model.set_desire(desire);
+
         const uint64_t t0 = steady_ns();
         const bool ok = model.run_frame_nv12(nv12, meta.width, meta.height, raw);
         const uint64_t t1 = steady_ns();
@@ -182,7 +199,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub)
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);
             const float model_ms = static_cast<float>((t1 - t0) / 1000000.0);
             if (!publish_output(model_pub, model, parsed, calibration, lateral_control,
-                                meta.frame_id, meta.timestamp_ns, model_ms)) {
+                                meta.frame_id, meta.timestamp_ns, model_ms, v_ego)) {
                 std::fprintf(stderr, "\nmodeld: publish modelState failed\n");
                 ++errors;
             }

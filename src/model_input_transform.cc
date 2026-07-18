@@ -81,7 +81,7 @@ void transform_scale_buffer(const float *in, float scale, float *out)
 
 } // namespace
 
-ModelInputTransform::ModelInputTransform(const AppConfig &config)
+ModelInputTransform::ModelInputTransform(const AppConfig &config, ModelFrame model_frame)
     : fx_(config.input_warp_fx),
       fy_(config.input_warp_fy),
       cx_(config.input_warp_cx),
@@ -89,7 +89,8 @@ ModelInputTransform::ModelInputTransform(const AppConfig &config)
       height_(config.input_warp_height),
       roll_(config.input_warp_roll),
       pitch_(config.input_warp_pitch),
-      yaw_(config.input_warp_yaw)
+      yaw_(config.input_warp_yaw),
+      model_frame_(model_frame)
 {
 }
 
@@ -132,11 +133,16 @@ uint8_t ModelInputTransform::sample_chroma(const uint8_t *base, const BilinearSa
 
 void ModelInputTransform::projection_matrix(float *projection) const
 {
-    // Same medmodel inverse used by openpilot modeld.update_calibration().
+    // Same model-frame inverses used by openpilot modeld.update_calibration().
     const float ground_from_medmodel_frame[9] = {
         0.00000000e+00f, 0.00000000e+00f, 1.00000000e+00f,
        -1.09890110e-03f, 0.00000000e+00f, 2.81318681e-01f,
        -1.84808520e-20f, 9.00738606e-04f, -4.28751576e-02f,
+    };
+    const float ground_from_sbigmodel_frame[9] = {
+        0.00000000e+00f,  7.31372216e-19f,  1.00000000e+00f,
+       -2.19780220e-03f,  4.11497335e-19f,  5.62637363e-01f,
+       -5.46146580e-20f,  1.80147721e-03f, -2.73464241e-01f,
     };
 
     const float k[9] = {
@@ -179,7 +185,10 @@ void ModelInputTransform::projection_matrix(float *projection) const
         camera_frame_from_ground[row * 3 + 2] = camera_frame_from_road[row * 4 + 3];
     }
 
-    matmul3(camera_frame_from_ground, ground_from_medmodel_frame, projection);
+    const float *ground_from_model_frame = model_frame_ == ModelFrame::SmallBigModel
+        ? ground_from_sbigmodel_frame
+        : ground_from_medmodel_frame;
+    matmul3(camera_frame_from_ground, ground_from_model_frame, projection);
 }
 
 void ModelInputTransform::build_sample_map(const float *projection, int src_w, int src_h,
@@ -239,8 +248,9 @@ void ModelInputTransform::rebuild_maps(int src_w, int src_h)
     map_valid_ = true;
 
     std::fprintf(stderr,
-                 "input warp=on source=%dx%d intrinsics=(fx=%.2f fy=%.2f cx=%.2f cy=%.2f) "
+                 "input warp=on frame=%s source=%dx%d intrinsics=(fx=%.2f fy=%.2f cx=%.2f cy=%.2f) "
                  "rpy_deg=(%.3f %.3f %.3f)\n",
+                 model_frame_ == ModelFrame::SmallBigModel ? "sbigmodel" : "medmodel",
                  src_w, src_h, fx_, fy_, cx_, cy_,
                  rad_to_deg(roll_), rad_to_deg(pitch_), rad_to_deg(yaw_));
 }

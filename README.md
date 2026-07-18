@@ -72,28 +72,31 @@ cmake --build build -j2
 
 Mac Docker cross-build:
 
-The repository can also be cross-built from macOS with the local Docker image
-`supercombo-k230-toolchain:24.04`. First fetch the nncase runtime deps and copy
-the K230 headers/libraries into the ignored local sysroot:
+The repository can also be cross-built from macOS using the Buildroot host
+tools produced by `k230_linux_sdk`. This is required to keep the target glibc
+ABI at or below the board's glibc 2.33. First fetch the nncase runtime deps and
+build the `k230_canmv_01studio_defconfig` SDK output:
 
 ```sh
 cd /Users/chan/Documents/supercombo_k230
 ./fetch_nncase_runtime.sh
-K230_RSYNC_RSH="sshpass -p '<password>' ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no" \
-  scripts/sync_k230_sysroot.sh root@192.168.219.115
 ```
 
-Then configure once and build. The build command below is intentionally the
-same command used during the current validation:
+Then configure and build with the SDK host wrapper and Xuantie toolchain. The
+script defaults to the SDK and toolchain paths under
+`/Users/chan/Documents/K230`; override `K230_LINUX_SDK_DIR` or
+`K230_XUANTIE_TOOLCHAIN_DIR` when needed:
 
 ```sh
 scripts/configure_mac_rv64.sh
 
-docker run --rm --platform linux/arm64/v8 \
+docker run --rm --platform linux/amd64 \
   -v "$PWD":/work \
+  -v /Users/chan/Documents/K230/downloads/k230_linux_sdk/output/k230_canmv_01studio_defconfig/host:/sdk \
+  -v /Users/chan/Documents/K230/.docker-toolchain/Xuantie-900-gcc-linux-6.6.0-glibc-x86_64-V3.0.2:/opt/toolchain/Xuantie-900-gcc-linux-6.6.0-glibc-x86_64-V3.0.2 \
   -w /work \
-  supercombo-k230-toolchain:24.04 \
-  bash -lc 'cmake --build build-mac-rv64 -j$(nproc)'
+  ubuntu:24.04 \
+  bash -lc 'export PATH=/sdk/bin:$PATH; cmake --build build-k230-sdk -j$(nproc)'
 ```
 
 Upload the rebuilt runtime files to the board:
@@ -103,10 +106,9 @@ K230_RSYNC_RSH="sshpass -p '<password>' ssh -o PubkeyAuthentication=no -o Prefer
   scripts/upload_to_board.sh root@192.168.219.115
 ```
 
-`deps/k230_sysroot/` and `build-mac-rv64/` are local generated directories and
-are not tracked. The sysroot sync script also points OpenCV `core/imgproc`
-development symlinks at the board's `*.so.410` libraries, avoiding the broken
-`libopencv_*.so.4.6.0 -> lapack/blas` dependency path seen on the flashed image.
+`build-k230-sdk/` is local generated output and is not tracked. Do not use a
+generic Ubuntu riscv64 compiler for board binaries: it can link against a newer
+glibc than the flashed K230 image provides.
 
 The historical Makefile is still kept as a rollback build path:
 
@@ -164,10 +166,10 @@ minimal passive overlay subscriber:
   - defaults to shadow mode: `K230_PANDA_TX=0`, so no CAN frames are transmitted
 - `k230_k7_controlsd` (optional K7 controller)
   - enabled with `K230_ENABLE_CONTROL=1`
-  - runs the standalone KIA K7 YG HEV CAN decoder, torque controller, and
-    `LKAS11`/`CLU11`/`MDPS12` packer at 100 Hz without Python or openpilot
-    runtime dependencies
-  - consumes the path and lane confidence published in `modelState`
+  - runs the openpilot-compatible lane planner and Acados lateral MPC in a
+    worker, with the KIA K7 YG HEV torque controller and
+    `LKAS11`/`CLU11`/`MDPS12` packer at 100 Hz
+  - consumes model path, lane, road-edge, and vehicle-state IPC
   - publishes generated raw `sendcan` batches for `k230_pandad`
   - publishes compact `controlState` diagnostics for the display HUD
   - does not transmit by itself; actual TX still requires `K230_PANDA_TX=1`
@@ -182,10 +184,11 @@ The model path captures the AI stream as `NV12 512x256` through `/dev/video2`
 crop/resize, prepares the YUV6 recurrent inputs, runs nncase runtime directly,
 and publishes compact `modelState`. The overlay display process uses
 `/dev/video1` for preview and `/dev/video2` remains dedicated to the AI stream.
-The model input preparation always uses the calibrated homography
-`NV12 -> YUV6` path. With default intrinsics and zero rpy it is
-identity-equivalent to the previous direct packer, but the same path can apply
-manual or online calibration without changing the camera/display pipeline.
+The model input preparation always uses calibrated homography sampling followed
+by `NV12 -> YUV6` packing. Source intrinsics are derived from the OV5647
+full-resolution calibration and the configured crop/resize. Separate medmodel
+and sbigmodel transforms feed `input_imgs` and `big_input_imgs`, each with its
+own previous-frame history.
 
 Calibration/input-warp equivalence checks:
 
@@ -199,14 +202,13 @@ Calibration/input-warp equivalence checks:
   openpilot's `get_view_frame_from_road_frame(0, pitch, yaw, model_height)`
   extrinsic matrix. `rpyCalib` may contain a tiny roll internally in openpilot,
   but that roll is not fed into `modeld`.
-- The K230 input source is already `512x256 NV12`, so the homography is verified
-  in that source coordinate space. This differs from openpilot's original full
-  camera/VisionIPC path by design.
-- The current K230 calibrator uses pose `trans[0]` as the speed gate because CAN
-  `vEgo` is not wired into this runtime yet. Openpilot uses both `carState.vEgo`
-  and camera odometry `trans[0]`.
-- `big_input_imgs` remains zero-filled and outside the current equivalence
-  target.
+- The verifier scales the OV5647 camera matrix through the configured
+  full-sensor crop and `512x256` resize, then compares both medmodel and
+  sbigmodel matrices with the original openpilot formulas.
+- Automatic calibration requires both CAN `vEgo` and camera-odometry
+  `trans[0]` above 15 mph, matching openpilot's acceptance gate.
+- `big_input_imgs` uses the sbigmodel transform and temporal YUV6 history; it is
+  no longer zero-filled.
 
 Run the host-only verifier:
 
@@ -255,9 +257,12 @@ Runtime structure:
 - `src/overlay_renderer.*`
   - draws plan/lane/road-edge/lead overlay with OpenCV into the CPU ARGB8888
     buffer used by the split DRM overlay process and monolithic rollback app.
-- `src/lateral_control.*`
-  - computes a `LateralTarget` skeleton only; it does not send CAN or steering
-    commands.
+- `src/openpilot_lateral_planner.*`
+  - applies openpilot lane probability/width logic, lane-change state, and the
+    generated Acados lateral MPC solver to produce curvature targets.
+- `src/lateral_control.*`, `src/k7_lateral_controller.*`
+  - hold the planner target and apply openpilot lag-adjusted curvature before
+    the validated K7 torque/CAN path.
 - `src/supercombo_runtime.*`
   - owns the live/replay pipeline and thread coordination.
 - `src/k230_ipc.*`
@@ -274,7 +279,8 @@ Runtime structure:
     and the final TX gate, but does not generate vehicle control messages.
 - `src/k230_k7_controlsd.cc`, `src/k7_lateral_controller.*`
   - standalone K7 YG HEV lateral controller using the validated Hyundai CAN
-    bus split, torque limits, counters, checksums, and 60 kph MDPS helper.
+    bus split, torque limits, counters, checksums, 60 kph MDPS helper, and a
+    20 Hz planner worker separated from the 100 Hz control loop.
 
 Useful runtime options:
 
@@ -304,9 +310,9 @@ Useful runtime options:
     matching openpilot's `cameraOdometry -> liveCalibration -> modeld` loop.
 - `SUPERCOMBO_INPUT_WARP_FX`, `SUPERCOMBO_INPUT_WARP_FY`,
   `SUPERCOMBO_INPUT_WARP_CX`, `SUPERCOMBO_INPUT_WARP_CY`
-  - optional camera intrinsics for the `512x256` source frame. Defaults are
-    medmodel-compatible values `(910, 910, 256, 47.6)` so zero calibration keeps
-    the input warp at identity.
+  - optional camera intrinsics for the resized source frame. Defaults are
+    derived from the calibrated OV5647 `1920x1080` matrix and the active
+    crop/resize geometry.
 - `SUPERCOMBO_REPLAY_NV12=/path/to/replay.scnv12`
   - runs headless from a preconverted `512x256 NV12` replay file instead of
     opening the camera and display. This is for validating inference and online

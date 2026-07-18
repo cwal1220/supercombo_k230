@@ -5,6 +5,7 @@
 
 #include "hyundai_can.h"
 #include "k7_path.h"
+#include "lateral_control.h"
 #include "steering_params.h"
 #include "vehicle_can.h"
 
@@ -13,10 +14,6 @@ struct K7LateralControllerConfig {
   bool zero_release_when_inactive = true;
   bool force_engaged = false;
   float command_timeout_s = 0.25f;
-  float max_command_curvature = 0.2f;
-  float max_abs_steering_lateral_m = 2.0f;
-  float min_curvature_consistency_speed_kph = 20.0f;
-  float max_curvature_consistency_error = 0.012f;
   K7SteeringParams steering_params{};
   HyundaiCanConfig can_config{};
 };
@@ -50,6 +47,7 @@ public:
 
   // 차량 버튼/상태와 lane path를 바탕으로 LKAS 제어 결과와 CAN frame을 만든다.
   K7LateralControlResult update(const LateralPath &path,
+                                const LateralTarget &target,
                                 const K7VehicleCanState &vehicle_state,
                                 double now_s,
                                 int frame);
@@ -66,6 +64,7 @@ private:
 
   // active를 막는 현재 gate reason을 계산한다.
   std::string active_block_reason(const LateralPath &path,
+                                  const LateralTarget &target,
                                   const K7VehicleCanState &vehicle_state,
                                   double now_s,
                                   bool seeds_ready,
@@ -107,14 +106,9 @@ private:
   // 제어 내부 상태를 초기값으로 되돌린다.
   void reset_control_state();
 
-  // path curvature를 안전한 desired curvature로 제한한다.
-  float sanitized_desired_curvature(const LateralPath &path, float speed_mps,
-                                    std::string *block) const;
-
-  // 현재 차량 curvature와 path curvature가 크게 어긋나는지 검사한다.
-  std::string curvature_consistency_block(float desired_curvature,
-                                          float actual_curvature,
-                                          float speed_kph) const;
+  // lateral MPC 출력을 actuator delay와 횡가속도 한계에 맞춰 보정한다.
+  float lag_adjusted_desired_curvature(const LateralTarget &target,
+                                       float speed_mps) const;
 
   // LKAS HUD state 값을 lane availability와 active 상태에서 만든다.
   int lkas_sys_state(bool active, bool left_lane, bool right_lane) const;

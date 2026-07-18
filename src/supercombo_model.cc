@@ -79,12 +79,16 @@ ProfileStats &profile_stats()
 
 SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const AppConfig &config)
     : AIBase(kmodel_file, "Supercombo", debug_mode),
-      input_transform_(config),
+      input_transform_(config, ModelFrame::MedModel),
+      big_input_transform_(config, ModelFrame::SmallBigModel),
       prev_yuv_(kYuv6Floats, 0.0f),
       current_yuv_(kYuv6Floats, 0.0f),
+      prev_big_yuv_(kYuv6Floats, 0.0f),
+      current_big_yuv_(kYuv6Floats, 0.0f),
       input_imgs_(kInputImageFloats, 0.0f),
       big_input_imgs_(kInputImageFloats, 0.0f),
       desire_(8, 0.0f),
+      prev_desire_(8, 0.0f),
       traffic_convention_{1.0f, 0.0f},
       recurrent_state_(kRecurrentFloats, 0.0f)
 {
@@ -95,12 +99,25 @@ SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const 
 void SupercomboModel::reset_state()
 {
     std::fill(prev_yuv_.begin(), prev_yuv_.end(), 0.0f);
+    std::fill(prev_big_yuv_.begin(), prev_big_yuv_.end(), 0.0f);
+    std::fill(desire_.begin(), desire_.end(), 0.0f);
+    std::fill(prev_desire_.begin(), prev_desire_.end(), 0.0f);
     std::fill(recurrent_state_.begin(), recurrent_state_.end(), 0.0f);
+}
+
+void SupercomboModel::set_desire(int desire)
+{
+    for (int i = 1; i < static_cast<int>(desire_.size()); ++i) {
+        const float current = i == desire ? 1.0f : 0.0f;
+        desire_[i] = current - prev_desire_[i] > 0.99f ? current : 0.0f;
+        prev_desire_[i] = current;
+    }
 }
 
 void SupercomboModel::set_input_calibration(const float rpy[3])
 {
     input_transform_.set_calibration(rpy[0], rpy[1], rpy[2]);
+    big_input_transform_.set_calibration(rpy[0], rpy[1], rpy[2]);
 }
 
 bool SupercomboModel::run_frame_nv12(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &raw_output)
@@ -108,6 +125,7 @@ bool SupercomboModel::run_frame_nv12(const uint8_t *nv12, int src_w, int src_h, 
     const bool profile = profile_enabled();
     const uint64_t t0 = profile ? now_ns() : 0;
     input_transform_.nv12_to_yuv6_warped(nv12, src_w, src_h, current_yuv_);
+    big_input_transform_.nv12_to_yuv6_warped(nv12, src_w, src_h, current_big_yuv_);
     const uint64_t t1 = profile ? now_ns() : 0;
     return run_current_yuv6(raw_output, profile, t0, t1);
 }
@@ -116,7 +134,10 @@ bool SupercomboModel::run_current_yuv6(std::vector<float> &raw_output, bool prof
 {
     std::memcpy(input_imgs_.data(), prev_yuv_.data(), prev_yuv_.size() * sizeof(float));
     std::memcpy(input_imgs_.data() + prev_yuv_.size(), current_yuv_.data(), current_yuv_.size() * sizeof(float));
+    std::memcpy(big_input_imgs_.data(), prev_big_yuv_.data(), prev_big_yuv_.size() * sizeof(float));
+    std::memcpy(big_input_imgs_.data() + prev_big_yuv_.size(), current_big_yuv_.data(), current_big_yuv_.size() * sizeof(float));
     prev_yuv_.swap(current_yuv_);
+    prev_big_yuv_.swap(current_big_yuv_);
     const uint64_t t2 = profile ? now_ns() : 0;
 
     if (!write_input(0, input_imgs_.data(), input_imgs_.size())) return false;

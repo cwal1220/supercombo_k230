@@ -29,8 +29,8 @@ void CalibrationService::set_fixed_projection()
 
 void CalibrationService::input_rpy(float rpy[3]) const
 {
-    const float *src = can_apply_online() ? last_snapshot_.rpy : fixed_rpy_;
-    rpy[0] = src[0];
+    const float *src = can_apply_online() ? online_rpy_ : fixed_rpy_;
+    rpy[0] = can_apply_online() ? 0.0f : src[0];
     rpy[1] = src[1];
     rpy[2] = src[2];
 }
@@ -43,19 +43,20 @@ const char *CalibrationService::mode_name(const OnlineCalibrator::Snapshot &snap
         : "auto-pose-shadow-unvalid";
 }
 
-void CalibrationService::update(const ParsedModelOutput &output)
+void CalibrationService::update(const ParsedModelOutput &output, float v_ego)
 {
     if (!can_apply_online()) return;
     if (!output.has_pose) return;
 
-    const OnlineCalibrator::UpdateResult result = calibrator_.update(output.pose);
+    const OnlineCalibrator::UpdateResult result = calibrator_.update(output.pose, v_ego);
     last_snapshot_ = result.snapshot;
+    calibrator_.output_rpy(online_rpy_);
 
     if (result.snapshot.status == CalibrationStatus::Calibrated) {
         projection_ = make_projection_state(projection_mode_,
-                                            result.snapshot.rpy[0],
-                                            result.snapshot.rpy[1],
-                                            result.snapshot.rpy[2]);
+                                            online_rpy_[0],
+                                            online_rpy_[1],
+                                            online_rpy_[2]);
     } else if (result.snapshot.status == CalibrationStatus::Invalid) {
         set_fixed_projection();
     }

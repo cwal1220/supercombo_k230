@@ -2,6 +2,7 @@
 .DS_Store
 build/
 build-mac-rv64/
+build-*/
 deps/k230_sysroot/
 CMakeFiles/
 CMakeCache.txt

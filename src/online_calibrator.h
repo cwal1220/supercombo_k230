@@ -38,8 +38,9 @@ public:
 
     OnlineCalibrator();
 
-    UpdateResult update(const PoseObservation &pose);
+    UpdateResult update(const PoseObservation &pose, float v_ego);
     Snapshot snapshot() const;
+    void output_rpy(float rpy[3]) const;
 
 private:
     static constexpr int kBlockSize = 100;

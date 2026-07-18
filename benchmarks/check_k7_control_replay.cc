@@ -31,6 +31,49 @@ LateralPath replay_path() {
   return path;
 }
 
+LateralTarget replay_target() {
+  LateralTarget target;
+  target.valid = true;
+  target.mpc_solution_valid = true;
+  for (int i = 0; i < kLateralControlN; ++i) {
+    target.psis[i] = 0.0008f * 20.0f * (10.0f * i * i / (32.0f * 32.0f));
+    target.curvatures[i] = 0.0008f;
+  }
+  return target;
+}
+
+float original_lag_adjusted_curvature(const LateralTarget &target, float speed_mps) {
+  constexpr float delay = 0.36f;
+  constexpr float desired_curvature_limit = 0.1f;
+  constexpr float max_lateral_jerk = 5.0f;
+  constexpr float max_lateral_accel = 3.0f;
+  constexpr float max_curvature = 0.2f;
+  const auto model_t = [](int i) {
+    const float ratio = static_cast<float>(i) / 32.0f;
+    return 10.0f * ratio * ratio;
+  };
+  float psi = target.psis[kLateralControlN - 1];
+  for (int i = 1; i < kLateralControlN; ++i) {
+    if (delay <= model_t(i)) {
+      const float p = (delay - model_t(i - 1)) / (model_t(i) - model_t(i - 1));
+      psi = target.psis[i - 1] + p * (target.psis[i] - target.psis[i - 1]);
+      break;
+    }
+  }
+  const float speed = std::max(speed_mps, 0.1f);
+  const float current = target.curvatures[0];
+  float desired = current + 2.0f * (psi / (speed * delay) - current);
+  const float rate_limit = max_lateral_jerk / (speed * speed);
+  desired = std::clamp(desired,
+                       current - rate_limit * desired_curvature_limit,
+                       current + rate_limit * desired_curvature_limit);
+  const float accel_speed = std::max(speed, 1.0f);
+  desired = std::clamp(desired,
+                       -max_lateral_accel / (accel_speed * accel_speed),
+                       max_lateral_accel / (accel_speed * accel_speed));
+  return std::clamp(desired, -max_curvature, max_curvature);
+}
+
 void verify_mdps_speed_spoof() {
   HyundaiCanConfig config;
   config.main_bus = 0;
@@ -53,6 +96,21 @@ void verify_mdps_speed_spoof() {
           "MDPS CLU11 60 kph spoof");
   require(std::fabs(decoded.speed_decimal - 0.375f) < 0.001f,
           "MDPS CLU11 decimal preservation");
+}
+
+void verify_lca11() {
+  std::array<uint8_t, 8> bytes{};
+  bytes[1] = 1;
+  bytes[2] = 2;
+  const Lca11Values decoded = decode_lca11(bytes);
+  require(decoded.left_blindspot && decoded.right_blindspot,
+          "LCA11 blind-spot decoding");
+
+  K7VehicleCanState vehicle;
+  update_k7_vehicle_can_state(&vehicle, kHyundaiLca11Address, bytes,
+                              bytes.size(), kK7PowertrainBus, 1.0);
+  require(vehicle.left_blindspot && vehicle.right_blindspot,
+          "LCA11 vehicle-state update");
 }
 
 void verify_model_path_adapter() {
@@ -85,6 +143,7 @@ int main(int argc, char **argv) {
   try {
     if (argc != 2) throw std::runtime_error("usage: check_k7_control_replay fixture.k230can");
     verify_mdps_speed_spoof();
+    verify_lca11();
     verify_model_path_adapter();
 
     CanReplaySource replay;
@@ -94,6 +153,7 @@ int main(int argc, char **argv) {
     K7LateralController controller(config);
     K7VehicleCanState vehicle;
     const LateralPath path = replay_path();
+    const LateralTarget target = replay_target();
     size_t rx_frames = 0;
     size_t generated_frames = 0;
     size_t active_ticks = 0;
@@ -103,6 +163,7 @@ int main(int argc, char **argv) {
     size_t clu1 = 0;
     size_t mdps2 = 0;
     int max_torque = 0;
+    float max_curvature_error = 0.0f;
 
     const auto begin = std::chrono::steady_clock::now();
     const int ticks = static_cast<int>(std::ceil(replay.duration_s() * 100.0)) + 2;
@@ -115,7 +176,13 @@ int main(int argc, char **argv) {
         update_k7_vehicle_can_state(&vehicle, frame.address, frame.data,
                                     frame.length, frame.bus, now_s);
       }
-      const auto result = controller.update(path, vehicle, now_s, tick);
+      const auto result = controller.update(path, target, vehicle, now_s, tick);
+      const float speed_kph = vehicle.cluster_speed *
+          (vehicle.speed_unit_mph ? 1.609344f : 1.0f);
+      const float expected_curvature = original_lag_adjusted_curvature(
+          target, std::max(0.0f, speed_kph / 3.6f));
+      max_curvature_error = std::max(
+          max_curvature_error, std::fabs(result.desired_curvature - expected_curvature));
       if (result.active) ++active_ticks;
       max_torque = std::max(max_torque, std::abs(result.apply_torque));
       generated_frames += result.frames.size();
@@ -142,13 +209,15 @@ int main(int argc, char **argv) {
     require(clu1 > 2900 && clu1 * 2 >= lkas0 - 1 && clu1 * 2 <= lkas0 + 1,
             "50 Hz CLU11 schedule mismatch");
     require(max_torque > 0 && max_torque <= 384, "steering torque range");
+    require(max_curvature_error < 1e-6f,
+            "lag-adjusted curvature differs from openpilot reference");
 
     std::printf(
         "K7_REPLAY_OK records=%zu duration_s=%.3f ticks=%d active=%zu "
         "generated=%zu lkas0=%zu lkas1=%zu clu1=%zu mdps2=%zu "
-        "max_torque=%d compute_ms=%.3f\n",
+        "max_torque=%d curvature_err=%.8f compute_ms=%.3f\n",
         rx_frames, replay.duration_s(), ticks, active_ticks, generated_frames,
-        lkas0, lkas1, clu1, mdps2, max_torque, elapsed_ms);
+        lkas0, lkas1, clu1, mdps2, max_torque, max_curvature_error, elapsed_ms);
     return 0;
   } catch (const std::exception &error) {
     std::fprintf(stderr, "check_k7_control_replay: %s\n", error.what());

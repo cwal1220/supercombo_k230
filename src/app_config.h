@@ -5,6 +5,10 @@
 
 constexpr unsigned kDefaultSensorWidth = 1920;
 constexpr unsigned kDefaultSensorHeight = 1080;
+constexpr float kDefaultSensorFx = 1625.7416788144435f;
+constexpr float kDefaultSensorFy = 1585.9830269782024f;
+constexpr float kDefaultSensorCx = 946.13450988811394f;
+constexpr float kDefaultSensorCy = 537.34063862123787f;
 
 enum class ProjectionMode {
     Openpilot = 0,
@@ -34,10 +38,10 @@ struct AppConfig {
     bool log_calibration = false;
     bool profile = false;
 
-    float input_warp_fx = 910.0f;
-    float input_warp_fy = 910.0f;
-    float input_warp_cx = 256.0f;
-    float input_warp_cy = 47.6f;
+    float input_warp_fx = kDefaultSensorFx * 512.0f / kDefaultSensorWidth;
+    float input_warp_fy = kDefaultSensorFy * 256.0f / kDefaultSensorHeight;
+    float input_warp_cx = kDefaultSensorCx * 512.0f / kDefaultSensorWidth;
+    float input_warp_cy = kDefaultSensorCy * 256.0f / kDefaultSensorHeight;
     float input_warp_height = 1.22f;
     float input_warp_roll = 0.0f;
     float input_warp_pitch = 0.0f;

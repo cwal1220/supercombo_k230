@@ -132,6 +132,10 @@ class Manager:
             raise ValueError(f"Usage: {argv[0] if argv else 'k230_manager.py'} <supercombo.kmodel> [debug_mode]")
         self.kmodel = argv[1]
         self.debug = argv[2] if len(argv) >= 3 else "1"
+        app_lib = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
+        os.environ["LD_LIBRARY_PATH"] = app_lib + (
+            ":" + os.environ["LD_LIBRARY_PATH"] if os.environ.get("LD_LIBRARY_PATH") else ""
+        )
         self.shutdown = False
         self.manager_state = LatestPublisher("/k230_manager_state", MANAGER_STATE_SIZE)
         self.procs: Dict[str, ProcState] = {}

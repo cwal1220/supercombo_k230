@@ -189,6 +189,22 @@ if(SUPERCOMBO_BUILD_RUNTIME)
   )
 
   if(SUPERCOMBO_BUILD_PANDA)
+    set(ACADOS_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/acados/include")
+    set(ACADOS_SOLVER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/acados/lateral_solver")
+    set(ACADOS_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/acados/riscv64/lib")
+    set(ACADOS_RUNTIME_LIBS
+      "${ACADOS_SOLVER_DIR}/libacados_ocp_solver_lat.so"
+      "${ACADOS_LIB_DIR}/libacados.so"
+      "${ACADOS_LIB_DIR}/libblasfeo.so"
+      "${ACADOS_LIB_DIR}/libhpipm.so"
+      "${ACADOS_LIB_DIR}/libqpOASES_e.so.3.1"
+    )
+    foreach(required_lib IN LISTS ACADOS_RUNTIME_LIBS)
+      if(NOT EXISTS "${required_lib}")
+        message(FATAL_ERROR "Missing Acados lateral MPC dependency: ${required_lib}")
+      endif()
+    endforeach()
+
     add_executable(k230_pandad
       src/k230_pandad.cc
       src/panda_client.cc
@@ -203,8 +219,22 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     add_executable(k230_k7_controlsd
       src/k230_k7_controlsd.cc
       src/k230_latest_channel.cc
+      src/openpilot_lateral_planner.cc
     )
-    configure_k230_target(k230_k7_controlsd k7_control_core)
+    target_include_directories(k230_k7_controlsd SYSTEM PRIVATE
+      "${ACADOS_INCLUDE_DIR}"
+      "${ACADOS_INCLUDE_DIR}/blasfeo/include"
+      "${ACADOS_INCLUDE_DIR}/hpipm/include"
+      "${ACADOS_SOLVER_DIR}"
+    )
+    set_target_properties(k230_k7_controlsd PROPERTIES
+      BUILD_RPATH "\$ORIGIN/lib"
+      INSTALL_RPATH "\$ORIGIN/lib"
+    )
+    configure_k230_target(k230_k7_controlsd
+      k7_control_core
+      ${ACADOS_RUNTIME_LIBS}
+    )
   endif()
 endif()
 
@@ -275,6 +305,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
   )
   if(SUPERCOMBO_BUILD_PANDA)
     install(TARGETS k230_pandad k230_k7_controlsd RUNTIME DESTINATION .)
+    install(FILES ${ACADOS_RUNTIME_LIBS} DESTINATION lib)
   endif()
   install(PROGRAMS k230_manager.py DESTINATION .)
   install(DIRECTORY models DESTINATION . OPTIONAL FILES_MATCHING PATTERN "*.kmodel")

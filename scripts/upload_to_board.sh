@@ -26,5 +26,15 @@ fi
 
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/model'"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "${runtime_files[@]}" "$BOARD:$DEST/"
+if [ -x k230_k7_controlsd ]; then
+  "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/lib'"
+  "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \
+    deps/acados/lateral_solver/libacados_ocp_solver_lat.so \
+    deps/acados/riscv64/lib/libacados.so \
+    deps/acados/riscv64/lib/libblasfeo.so \
+    deps/acados/riscv64/lib/libhpipm.so \
+    deps/acados/riscv64/lib/libqpOASES_e.so.3.1 \
+    "$BOARD:$DEST/lib/"
+fi
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "$model" "$BOARD:$DEST/model/"
 echo "Uploaded runtime files to $BOARD:$DEST"

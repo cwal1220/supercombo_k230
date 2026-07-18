@@ -216,7 +216,7 @@ struct K230ControlState {
     int32_t desired_torque = 0;
     int32_t apply_torque = 0;
     int32_t driver_torque = 0;
-    uint32_t reserved = 0;
+    uint32_t desire = 0;
     char active_block[32] = {};
 };
 
