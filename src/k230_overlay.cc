@@ -12,6 +12,9 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <array>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -20,6 +23,8 @@ namespace {
 
 constexpr unsigned kSensorWidth = 1920;
 constexpr unsigned kSensorHeight = 1080;
+constexpr unsigned kLogicalDisplayWidth = 800;
+constexpr unsigned kLogicalDisplayHeight = 480;
 
 volatile sig_atomic_t g_stop = 0;
 
@@ -36,6 +41,8 @@ uint64_t timeval_us(const timeval &tv)
 constexpr const char *kDisplayReadyPath = "/tmp/k230_display_ready";
 constexpr int kPreviewVideoDevice = 1;
 constexpr unsigned kDisplayReadyPreviewFrames = 30;
+constexpr unsigned kOverlayBufferCount = 2;
+constexpr uint64_t kStateFreshNs = 2000000000ULL;
 
 const char *display_ready_path()
 {
@@ -63,6 +70,81 @@ struct StageStats {
     }
 };
 
+class SystemMonitor {
+public:
+    void sample(OverlayHudState *hud)
+    {
+        if (!hud) return;
+        sample_cpu(&hud->cpu_percent);
+        sample_memory(&hud->memory_percent);
+        sample_temperature(&hud->cpu_temp_c);
+    }
+
+private:
+    void sample_cpu(float *percent)
+    {
+        FILE *file = std::fopen("/proc/stat", "r");
+        if (!file) return;
+        unsigned long long user = 0, nice = 0, system = 0, idle = 0;
+        unsigned long long iowait = 0, irq = 0, softirq = 0, steal = 0;
+        const int count = std::fscanf(file, "cpu %llu %llu %llu %llu %llu %llu %llu %llu",
+                                      &user, &nice, &system, &idle, &iowait,
+                                      &irq, &softirq, &steal);
+        std::fclose(file);
+        if (count < 4) return;
+
+        const uint64_t idle_total = idle + iowait;
+        const uint64_t total = user + nice + system + idle + iowait + irq + softirq + steal;
+        if (previous_total_ != 0 && total > previous_total_) {
+            const uint64_t total_delta = total - previous_total_;
+            const uint64_t idle_delta = idle_total - previous_idle_;
+            *percent = static_cast<float>(100.0 *
+                (1.0 - static_cast<double>(std::min(idle_delta, total_delta)) / total_delta));
+        }
+        previous_total_ = total;
+        previous_idle_ = idle_total;
+    }
+
+    void sample_memory(float *percent)
+    {
+        FILE *file = std::fopen("/proc/meminfo", "r");
+        if (!file) return;
+        unsigned long long total_kb = 0;
+        unsigned long long available_kb = 0;
+        char line[128];
+        while (std::fgets(line, sizeof(line), file)) {
+            std::sscanf(line, "MemTotal: %llu kB", &total_kb);
+            std::sscanf(line, "MemAvailable: %llu kB", &available_kb);
+        }
+        std::fclose(file);
+        if (total_kb > 0) {
+            *percent = static_cast<float>(100.0 *
+                (1.0 - static_cast<double>(std::min(available_kb, total_kb)) / total_kb));
+        }
+    }
+
+    void sample_temperature(float *temperature_c)
+    {
+        float maximum = 0.0f;
+        for (int i = 0; i < 16; ++i) {
+            char path[96];
+            std::snprintf(path, sizeof(path), "/sys/class/thermal/thermal_zone%d/temp", i);
+            FILE *file = std::fopen(path, "r");
+            if (!file) continue;
+            float value = 0.0f;
+            const bool read = std::fscanf(file, "%f", &value) == 1;
+            std::fclose(file);
+            if (!read) continue;
+            if (value > 1000.0f) value /= 1000.0f;
+            if (value > 0.0f && value < 200.0f) maximum = std::max(maximum, value);
+        }
+        *temperature_c = maximum;
+    }
+
+    uint64_t previous_total_ = 0;
+    uint64_t previous_idle_ = 0;
+};
+
 class K230OverlayDisplay;
 K230OverlayDisplay *g_app = nullptr;
 
@@ -87,6 +169,12 @@ public:
     {
         if (!model_state_sub_.open(kK230ModelStateTopic, sizeof(K230ModelState), true))
             throw std::runtime_error("open modelState ipc failed");
+        if (!panda_state_sub_.open(kK230PandaStateTopic, sizeof(K230PandaState), true))
+            throw std::runtime_error("open pandaState ipc failed");
+        if (!control_state_sub_.open(kK230ControlStateTopic, sizeof(K230ControlState), true))
+            throw std::runtime_error("open controlState ipc failed");
+        if (!manager_state_sub_.open(kK230ManagerStateTopic, sizeof(K230ManagerState), true))
+            throw std::runtime_error("open managerState ipc failed");
 
         display_ = display_init(0);
         if (!display_) throw std::runtime_error("display_init error");
@@ -112,15 +200,25 @@ public:
 
         overlay_plane_ = display_get_plane(display_, DRM_FORMAT_ARGB8888);
         if (!overlay_plane_) throw std::runtime_error("display_get_plane ARGB failed");
-        overlay_buffer_ = display_allocate_buffer(overlay_plane_, display_->width, display_->height);
-        if (!overlay_buffer_) throw std::runtime_error("display_allocate_buffer ARGB failed");
-        std::memset(overlay_buffer_->map, 0, overlay_buffer_->size);
+        overlay_plane_->drm_rotation = context.drm_rotation;
+        for (display_buffer *&buffer : overlay_buffers_) {
+            buffer = display_allocate_buffer(overlay_plane_,
+                                             kLogicalDisplayWidth,
+                                             kLogicalDisplayHeight);
+            if (!buffer) throw std::runtime_error("display_allocate_buffer ARGB failed");
+            std::memset(buffer->map, 0, buffer->size);
+            clean(buffer);
+        }
+        overlay_buffer_ = overlay_buffers_[0];
+        overlay_.draw(overlay_buffer_, ParsedModelOutput{}, default_projection_, hud_);
         clean(overlay_buffer_);
-        display_commit_buffer(overlay_buffer_, 0, 0);
+        if (display_update_buffer(overlay_buffer_, 0, 0) != 0)
+            throw std::runtime_error("initial overlay update failed");
 
         std::fprintf(stderr,
-                     "k230_overlay: display=%ux%u preview=/dev/video%d %ux%u rotation=%d projection=%s\n",
-                     display_->width, display_->height, video_device_,
+                     "k230_overlay: display=%ux%u logical=%ux%u preview=/dev/video%d %ux%u rotation=%d projection=%s\n",
+                     display_->width, display_->height,
+                     kLogicalDisplayWidth, kLogicalDisplayHeight, video_device_,
                      context.width, context.height, static_cast<int>(context.drm_rotation),
                      projection_mode_name(config_.projection_mode));
         std::fprintf(stderr,
@@ -145,24 +243,28 @@ private:
     int on_frame(v4l2_drm_context *context, bool displayed)
     {
         ++poll_count_;
-        const bool model_updated = update_model();
+        pending_redraw_ = update_model() || update_aux_state() || pending_redraw_;
 
         if (displayed && overlay_buffer_) {
-            if (!ready_file_written_) {
-                ++startup_preview_frames_;
-                if (startup_preview_frames_ >= kDisplayReadyPreviewFrames)
-                    publish_display_ready();
-            }
-
             display_buffer *current = nullptr;
             if (context[0].buffer_hold[context[0].wp] >= 0)
                 current = context[0].display_buffers[context[0].buffer_hold[context[0].wp]];
 
-            if (current != last_preview_buffer_ || model_updated || force_redraw_) {
+            const bool preview_updated = current && current != last_preview_buffer_;
+            if (preview_updated) {
+                last_preview_buffer_ = current;
+                if (!ready_file_written_) {
+                    ++startup_preview_frames_;
+                    if (startup_preview_frames_ >= kDisplayReadyPreviewFrames)
+                        publish_display_ready();
+                }
+            }
+
+            if (pending_redraw_ || force_redraw_) {
                 force_redraw_ = false;
+                pending_redraw_ = false;
                 redraw_overlay();
                 ++overlay_frames_;
-                last_preview_buffer_ = current;
             }
             ++display_frames_;
         }
@@ -175,25 +277,36 @@ private:
             const double display_fps = display_frames_ * 1000000.0 / duration;
             const double camera_fps = context[0].frame_count * 1000000.0 / duration;
             const double overlay_fps = overlay_frames_ * 1000000.0 / duration;
+            const double model_fps = model_updates_ * 1000000.0 / duration;
+            hud_.display_fps = static_cast<float>(display_fps);
+            hud_.preview_fps = static_cast<float>(camera_fps);
+            hud_.overlay_fps = static_cast<float>(overlay_fps);
+            hud_.model_fps = static_cast<float>(model_fps);
+            system_monitor_.sample(&hud_);
+            refresh_hud_state();
+            pending_redraw_ = true;
             if (profile_) {
                 std::fprintf(stderr,
-                             "overlay: poll=%.2f display=%.2f camera=%.2f overlay=%.2f model_seq=%llu draw=%.2fms present=%.2fms errors=%u          \r",
-                             poll_fps, display_fps, camera_fps, overlay_fps,
+                             "overlay: poll=%.2f display=%.2f preview=%.2f model=%.2f overlay=%.2f model_seq=%llu draw=%.2fms present=%.2fms cpu=%.1f%% mem=%.1f%% temp=%.1fC errors=%u          \r",
+                             poll_fps, display_fps, camera_fps, model_fps, overlay_fps,
                              static_cast<unsigned long long>(latest_model_seq_),
                              overlay_stats_.avg_ms_and_reset(),
                              present_stats_.avg_ms_and_reset(),
+                             hud_.cpu_percent, hud_.memory_percent, hud_.cpu_temp_c,
                              errors_);
             } else {
                 std::fprintf(stderr,
-                             "overlay: poll=%.2f display=%.2f camera=%.2f overlay=%.2f model_seq=%llu errors=%u          \r",
-                             poll_fps, display_fps, camera_fps, overlay_fps,
+                             "overlay: poll=%.2f display=%.2f preview=%.2f model=%.2f overlay=%.2f model_seq=%llu cpu=%.1f%% mem=%.1f%% temp=%.1fC errors=%u          \r",
+                             poll_fps, display_fps, camera_fps, model_fps, overlay_fps,
                              static_cast<unsigned long long>(latest_model_seq_),
+                             hud_.cpu_percent, hud_.memory_percent, hud_.cpu_temp_c,
                              errors_);
             }
             std::fflush(stderr);
             poll_count_ = 0;
             display_frames_ = 0;
             overlay_frames_ = 0;
+            model_updates_ = 0;
             context[0].frame_count = 0;
             fps_tv_ = now;
         }
@@ -203,10 +316,13 @@ private:
 
     void cleanup()
     {
-        if (overlay_buffer_) {
-            display_free_buffer(overlay_buffer_);
-            overlay_buffer_ = nullptr;
+        for (display_buffer *&buffer : overlay_buffers_) {
+            if (buffer) {
+                display_free_buffer(buffer);
+                buffer = nullptr;
+            }
         }
+        overlay_buffer_ = nullptr;
         if (overlay_plane_) {
             display_free_plane(overlay_plane_);
             overlay_plane_ = nullptr;
@@ -233,17 +349,103 @@ private:
         if (!model_state_sub_.read(&state, sizeof(state), &seq) || seq == latest_model_seq_)
             return false;
         latest_model_seq_ = seq;
-        have_model_state_ = state.valid != 0;
+        latest_model_state_ = state;
+        ++model_updates_;
+        const uint64_t now = k230_now_ns();
+        const bool model_fresh = state.model_timestamp_ns != 0 &&
+            now >= state.model_timestamp_ns && now - state.model_timestamp_ns <= kStateFreshNs;
+        have_model_state_ = state.valid != 0 && model_fresh;
         latest_output_ = k230_parsed_from_model_state(state);
         latest_projection_ = k230_projection_from_model_state(state);
+        hud_.model_execution_ms = state.model_execution_ms;
         return true;
+    }
+
+    bool update_aux_state()
+    {
+        bool visual_changed = false;
+        uint64_t seq = latest_panda_seq_;
+        if (panda_state_sub_.read(&latest_panda_state_, sizeof(latest_panda_state_), &seq) &&
+            seq != latest_panda_seq_) {
+            latest_panda_seq_ = seq;
+            visual_changed = true;
+        }
+
+        seq = latest_control_seq_;
+        if (control_state_sub_.read(&latest_control_state_, sizeof(latest_control_state_), &seq) &&
+            seq != latest_control_seq_) {
+            latest_control_seq_ = seq;
+        }
+
+        seq = latest_manager_seq_;
+        if (manager_state_sub_.read(&latest_manager_state_, sizeof(latest_manager_state_), &seq) &&
+            seq != latest_manager_seq_) {
+            latest_manager_seq_ = seq;
+            visual_changed = true;
+        }
+        refresh_hud_state();
+        return visual_changed;
+    }
+
+    void refresh_hud_state()
+    {
+        const uint64_t now = k230_now_ns();
+        const bool model_fresh = latest_model_state_.model_timestamp_ns != 0 &&
+            now >= latest_model_state_.model_timestamp_ns &&
+            now - latest_model_state_.model_timestamp_ns <= kStateFreshNs;
+        const bool panda_fresh = latest_panda_state_.timestamp_ns != 0 &&
+            now >= latest_panda_state_.timestamp_ns &&
+            now - latest_panda_state_.timestamp_ns <= kStateFreshNs;
+        const bool control_fresh = latest_control_state_.timestamp_ns != 0 &&
+            now >= latest_control_state_.timestamp_ns &&
+            now - latest_control_state_.timestamp_ns <= kStateFreshNs;
+        const bool manager_fresh = latest_manager_state_.timestamp_ns != 0 &&
+            now >= latest_manager_state_.timestamp_ns &&
+            now - latest_manager_state_.timestamp_ns <= kStateFreshNs;
+
+        have_model_state_ = latest_model_state_.valid != 0 && model_fresh;
+
+        hud_.panda_connected = panda_fresh && latest_panda_state_.connected != 0;
+        hud_.panda_healthy = panda_fresh && latest_panda_state_.comms_healthy != 0;
+        hud_.panda_tx_enabled = latest_panda_state_.tx_enabled != 0;
+        hud_.panda_controls_allowed = panda_fresh && latest_panda_state_.controls_allowed != 0;
+        hud_.ignition = panda_fresh &&
+            (latest_panda_state_.ignition_line != 0 || latest_panda_state_.ignition_can != 0);
+        hud_.panda_faults = panda_fresh ? latest_panda_state_.faults : 0;
+
+        hud_.controller_enabled = control_fresh && latest_control_state_.enabled != 0;
+        hud_.controller_engaged = control_fresh && latest_control_state_.engaged != 0;
+        hud_.controller_active = control_fresh && latest_control_state_.active != 0;
+        hud_.vehicle_fresh = control_fresh && latest_control_state_.vehicle_fresh != 0;
+        hud_.steering_fault = control_fresh && latest_control_state_.steering_fault != 0;
+        hud_.speed_kph = control_fresh ? latest_control_state_.speed_kph : 0.0f;
+        hud_.steering_angle_deg = control_fresh ? latest_control_state_.steering_angle_deg : 0.0f;
+        hud_.desired_curvature = control_fresh ? latest_control_state_.desired_curvature : 0.0f;
+        hud_.actual_curvature = control_fresh ? latest_control_state_.actual_curvature : 0.0f;
+        hud_.normalized_output = control_fresh ? latest_control_state_.normalized_output : 0.0f;
+        hud_.desired_torque = control_fresh ? latest_control_state_.desired_torque : 0;
+        hud_.apply_torque = control_fresh ? latest_control_state_.apply_torque : 0;
+        hud_.driver_torque = control_fresh ? latest_control_state_.driver_torque : 0;
+        std::snprintf(hud_.active_block, sizeof(hud_.active_block), "%s",
+                      control_fresh ? latest_control_state_.active_block : "control_stale");
+
+        hud_.running_processes = 0;
+        hud_.total_processes = manager_fresh
+            ? std::min<unsigned>(latest_manager_state_.process_count, kK230MaxProcesses)
+            : 0;
+        for (unsigned i = 0; i < hud_.total_processes; ++i)
+            hud_.running_processes += latest_manager_state_.processes[i].running ? 1U : 0U;
+        hud_.services_healthy = manager_fresh && hud_.total_processes >= 3 &&
+            hud_.running_processes == hud_.total_processes && have_model_state_;
     }
 
     void redraw_overlay()
     {
+        overlay_buffer_index_ = (overlay_buffer_index_ + 1) % kOverlayBufferCount;
+        overlay_buffer_ = overlay_buffers_[overlay_buffer_index_];
         const uint64_t draw_start = profile_ ? k230_now_ns() : 0;
         overlay_.draw(overlay_buffer_, have_model_state_ ? latest_output_ : ParsedModelOutput{},
-                      have_model_state_ ? latest_projection_ : default_projection_);
+                      have_model_state_ ? latest_projection_ : default_projection_, hud_);
         if (profile_) overlay_stats_.add(k230_now_ns() - draw_start);
 
         const uint64_t present_start = profile_ ? k230_now_ns() : 0;
@@ -273,18 +475,31 @@ private:
     bool profile_ = false;
 
     K230LatestChannel model_state_sub_;
+    K230LatestChannel panda_state_sub_;
+    K230LatestChannel control_state_sub_;
+    K230LatestChannel manager_state_sub_;
 
     display *display_ = nullptr;
     display_plane *overlay_plane_ = nullptr;
     display_buffer *overlay_buffer_ = nullptr;
+    std::array<display_buffer *, kOverlayBufferCount> overlay_buffers_ {};
+    unsigned overlay_buffer_index_ = 0;
     display_buffer *last_preview_buffer_ = nullptr;
 
     uint64_t latest_model_seq_ = 0;
+    uint64_t latest_panda_seq_ = 0;
+    uint64_t latest_control_seq_ = 0;
+    uint64_t latest_manager_seq_ = 0;
+    K230ModelState latest_model_state_ {};
+    K230PandaState latest_panda_state_ {};
+    K230ControlState latest_control_state_ {};
+    K230ManagerState latest_manager_state_ {};
     ParsedModelOutput latest_output_ {};
     ProjectionState latest_projection_ {};
     ProjectionState default_projection_ {};
     bool have_model_state_ = false;
     bool force_redraw_ = true;
+    bool pending_redraw_ = true;
     bool ready_file_written_ = false;
     unsigned startup_preview_frames_ = 0;
     unsigned errors_ = 0;
@@ -293,9 +508,12 @@ private:
     unsigned poll_count_ = 0;
     unsigned display_frames_ = 0;
     unsigned overlay_frames_ = 0;
+    unsigned model_updates_ = 0;
 
     StageStats overlay_stats_;
     StageStats present_stats_;
+    SystemMonitor system_monitor_;
+    OverlayHudState hud_;
 };
 
 } // namespace

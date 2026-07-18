@@ -25,6 +25,7 @@ constexpr char kK230ManagerStateTopic[] = "/k230_manager_state";
 constexpr char kK230CanTopic[] = "/k230_can";
 constexpr char kK230SendCanTopic[] = "/k230_sendcan";
 constexpr char kK230PandaStateTopic[] = "/k230_panda_state";
+constexpr char kK230ControlStateTopic[] = "/k230_control_state";
 constexpr char kK230RoadAiFrameRing[] = "/k230_road_ai";
 constexpr unsigned kK230CanBatchMaxFrames = 256;
 
@@ -195,6 +196,28 @@ struct K230PandaState {
     uint32_t fault_status = 0;
     uint32_t voltage = 0;
     uint32_t current = 0;
+};
+
+struct K230ControlState {
+    uint64_t timestamp_ns = 0;
+    uint32_t enabled = 0;
+    uint32_t engaged = 0;
+    uint32_t active = 0;
+    uint32_t should_send = 0;
+    uint32_t path_usable = 0;
+    uint32_t seeds_ready = 0;
+    uint32_t vehicle_fresh = 0;
+    uint32_t steering_fault = 0;
+    float speed_kph = 0.0f;
+    float steering_angle_deg = 0.0f;
+    float desired_curvature = 0.0f;
+    float actual_curvature = 0.0f;
+    float normalized_output = 0.0f;
+    int32_t desired_torque = 0;
+    int32_t apply_torque = 0;
+    int32_t driver_torque = 0;
+    uint32_t reserved = 0;
+    char active_block[32] = {};
 };
 
 class K230LatestChannel {

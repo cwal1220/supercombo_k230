@@ -133,10 +133,18 @@ minimal passive overlay subscriber:
   - is overlay-only despite the historical name
   - owns the LCD directly through `libdisplay`/DRM and does not use Qt or touch
   - opens `/dev/video1` through the verified `v4l2_drm` preview path
-  - configures preview as `800x480 NV12` with DRM rotation for the native
-    `480x800` panel
+  - uses the ChanLKAS landscape layout: preview and ARGB overlay are both
+    rendered at logical `800x480` and rotated together for the native `480x800`
+    panel
   - subscribes to compact `modelState` and draws only plan/lane/road-edge/lead
-    on an ARGB8888 overlay plane
+    on a double-buffered ARGB8888 overlay plane
+  - renders the K230 driving HUD adapted from `openpilot_c2_k230/previewd`,
+    using the same full `800x480` composition: center speed, top
+    `CRUISE`/`OPENPILOT` panels, middle `ROAD`/`SYSTEM` panels, bottom
+    `VEHICLE`/`K7 CONTROL` panels, and a centered status alert
+  - fills that layout with camera/model/display FPS, inference time,
+    CPU/temperature/memory, process health, Panda state, vehicle speed,
+    steering torque, and K7 control state
   - writes `/tmp/k230_display_ready` after preview/display setup is complete
     and several preview frames have actually been displayed
 - `k230_camerad`
@@ -161,6 +169,7 @@ minimal passive overlay subscriber:
     runtime dependencies
   - consumes the path and lane confidence published in `modelState`
   - publishes generated raw `sendcan` batches for `k230_pandad`
+  - publishes compact `controlState` diagnostics for the display HUD
   - does not transmit by itself; actual TX still requires `K230_PANDA_TX=1`
 
 Large AI frames are never sent through the small-message IPC. `k230_overlay`

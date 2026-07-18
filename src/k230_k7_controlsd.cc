@@ -84,9 +84,12 @@ int main() {
     K230LatestChannel can_sub;
     K230LatestChannel model_sub;
     K230LatestChannel sendcan_pub;
+    K230LatestChannel control_state_pub;
     if (!open_when_ready(&can_sub, kK230CanTopic, sizeof(K230CanBatch), false) ||
         !open_when_ready(&model_sub, kK230ModelStateTopic, sizeof(K230ModelState), false) ||
-        !open_when_ready(&sendcan_pub, kK230SendCanTopic, sizeof(K230CanBatch), true)) {
+        !open_when_ready(&sendcan_pub, kK230SendCanTopic, sizeof(K230CanBatch), true) ||
+        !open_when_ready(&control_state_pub, kK230ControlStateTopic,
+                         sizeof(K230ControlState), true)) {
       return 0;
     }
 
@@ -140,6 +143,31 @@ int main() {
 
       const LateralPath path = k7_path_from_model_state(model, k230_now_ns());
       last_result = controller.update(path, vehicle, now_s, control_frame++);
+
+      K230ControlState control_state;
+      control_state.timestamp_ns = k230_now_ns();
+      control_state.enabled = config.enabled ? 1U : 0U;
+      control_state.engaged = last_result.engaged ? 1U : 0U;
+      control_state.active = last_result.active ? 1U : 0U;
+      control_state.should_send = last_result.should_send ? 1U : 0U;
+      control_state.path_usable = last_result.path_usable ? 1U : 0U;
+      control_state.seeds_ready = last_result.seeds_ready ? 1U : 0U;
+      control_state.vehicle_fresh = last_result.vehicle_fresh ? 1U : 0U;
+      control_state.steering_fault = vehicle.steering_fault ? 1U : 0U;
+      control_state.speed_kph = last_result.speed_kph;
+      control_state.steering_angle_deg = vehicle.steering_angle_deg;
+      control_state.desired_curvature = last_result.desired_curvature;
+      control_state.actual_curvature = last_result.actual_curvature;
+      control_state.normalized_output = last_result.normalized_output;
+      control_state.desired_torque = last_result.desired_torque;
+      control_state.apply_torque = last_result.apply_torque;
+      control_state.driver_torque = vehicle.driver_torque;
+      std::snprintf(control_state.active_block, sizeof(control_state.active_block), "%s",
+                    last_result.active_block.c_str());
+      if (!control_state_pub.publish(&control_state, sizeof(control_state))) {
+        ++publish_errors;
+      }
+
       if (last_result.should_send && !last_result.frames.empty()) {
         const K230CanBatch send_batch = make_send_batch(last_result.frames);
         if (!sendcan_pub.publish(&send_batch, sizeof(send_batch))) {
