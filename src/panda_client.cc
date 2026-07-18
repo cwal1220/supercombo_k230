@@ -14,6 +14,8 @@ constexpr uint8_t kUsbRequestOut = LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VEN
 constexpr uint8_t kUsbRequestIn = LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE;
 constexpr uint8_t kCanRxEndpoint = 0x81;
 constexpr uint8_t kCanTxEndpoint = 3;
+constexpr uint8_t kExpectedHealthPacketVersion = 7;
+constexpr uint8_t kExpectedCanPacketVersion = 2;
 constexpr int kRecvSize = 0x4000;
 constexpr int kUsbTxSoftLimit = 0x100;
 
@@ -111,6 +113,20 @@ bool PandaClient::connect(const std::string &serial)
         return false;
     }
 
+    uint8_t packet_versions[2] = {};
+    if (!control_read(0xdd, 0, 0, packet_versions, sizeof(packet_versions)) ||
+        packet_versions[0] != kExpectedHealthPacketVersion ||
+        packet_versions[1] != kExpectedCanPacketVersion) {
+        std::fprintf(stderr,
+                     "panda: unsupported packet versions health=%u can=%u (expected %u/%u)\n",
+                     packet_versions[0], packet_versions[1],
+                     kExpectedHealthPacketVersion, kExpectedCanPacketVersion);
+        close();
+        return false;
+    }
+    health_packet_version_ = packet_versions[0];
+    can_packet_version_ = packet_versions[1];
+
     uint8_t hw_query = 0;
     if (control_read(0xc1, 0, 0, &hw_query, sizeof(hw_query)))
         hw_type_ = hw_query;
@@ -131,6 +147,8 @@ void PandaClient::close()
     }
     usb_serial_.clear();
     hw_type_ = 0;
+    health_packet_version_ = 0;
+    can_packet_version_ = 0;
     comms_healthy_ = true;
 }
 

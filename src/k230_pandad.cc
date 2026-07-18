@@ -192,8 +192,10 @@ int main()
                     sleep(1);
                     continue;
                 }
-                std::fprintf(stderr, "k230_pandad: connected serial=%s hw_type=%u\n",
-                             panda.usb_serial().c_str(), panda.hw_type());
+                std::fprintf(stderr,
+                             "k230_pandad: connected serial=%s hw_type=%u health_v=%u can_v=%u\n",
+                             panda.usb_serial().c_str(), panda.hw_type(),
+                             panda.health_packet_version(), panda.can_packet_version());
                 panda.set_safety_model(safety_model, safety_param);
                 last_health_ns = 0;
                 last_heartbeat_ns = 0;
