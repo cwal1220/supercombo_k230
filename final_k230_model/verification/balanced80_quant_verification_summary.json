@@ -1,0 +1,163 @@
+{
+  "model": {
+    "path": "/Users/chan/Documents/supercombo_k230/out/no_gru_update/supercombo_gemm_split3_iddwelu223_nogru_splitplan_delta_nobig_keepinput_foldzero_int16a_uint8w_balanced80_noclip.kmodel",
+    "sha256": "b6462b3374361ed0a0d65127d00da2af48da65b0b02d23ae096ec43d07f34822",
+    "size_bytes": 23541144,
+    "quant_type": "int16 activation, uint8 weight, NoClip"
+  },
+  "calibration_npz": {
+    "path": "/Users/chan/Documents/supercombo_k230/out/supercombo_balanced80_calib.npz",
+    "sha256": "0eafd30925b807898f61663cdb7b3fb289c7c4a5100444870bdf97ee5aff8bc1",
+    "input_imgs": {
+      "shape": [
+        80,
+        12,
+        128,
+        256
+      ],
+      "min": 16.0,
+      "max": 240.0,
+      "mean": 97.290771484375
+    },
+    "big_input_imgs": {
+      "shape": [
+        80,
+        12,
+        128,
+        256
+      ],
+      "min": 16.0,
+      "max": 239.0,
+      "mean": 99.53209686279297
+    },
+    "initial_state": {
+      "shape": [
+        80,
+        512
+      ],
+      "min": -0.9999915957450867,
+      "max": 0.9943937063217163,
+      "mean": -0.006238155998289585
+    }
+  },
+  "live_steady_8f_after_reboot": {
+    "path": "/Users/chan/Documents/supercombo_k230/out/quant_verify/k230_live_steady_balanced80_retry.raw",
+    "sha256": "91dd6c0bde63c0fcd7fb89d441553f76e9af581fba3b0a49409b5cb5abd65d7a",
+    "frames": 8,
+    "raw_size": 6524,
+    "finite": true,
+    "main_changed_pairs": 7,
+    "pair_stats": [
+      {
+        "pair": "0->1",
+        "main_changed": 5709,
+        "main_mean_abs_delta": 0.17116889357566833,
+        "main_max_abs_delta": 46.0,
+        "state_changed": 511
+      },
+      {
+        "pair": "1->2",
+        "main_changed": 5666,
+        "main_mean_abs_delta": 0.29154351353645325,
+        "main_max_abs_delta": 33.0,
+        "state_changed": 512
+      },
+      {
+        "pair": "2->3",
+        "main_changed": 5728,
+        "main_mean_abs_delta": 0.5123918652534485,
+        "main_max_abs_delta": 41.375,
+        "state_changed": 512
+      },
+      {
+        "pair": "3->4",
+        "main_changed": 5704,
+        "main_mean_abs_delta": 0.5681777596473694,
+        "main_max_abs_delta": 38.25,
+        "state_changed": 511
+      },
+      {
+        "pair": "4->5",
+        "main_changed": 5695,
+        "main_mean_abs_delta": 0.39307835698127747,
+        "main_max_abs_delta": 24.875,
+        "state_changed": 512
+      },
+      {
+        "pair": "5->6",
+        "main_changed": 5641,
+        "main_mean_abs_delta": 0.19529537856578827,
+        "main_max_abs_delta": 11.5,
+        "state_changed": 511
+      },
+      {
+        "pair": "6->7",
+        "main_changed": 5680,
+        "main_mean_abs_delta": 0.1282641887664795,
+        "main_max_abs_delta": 19.0,
+        "state_changed": 512
+      }
+    ],
+    "onnx_reference": "/Users/chan/Documents/supercombo_k230/out/quant_verify/k230_live_steady_onnx.raw",
+    "error_vs_onnx": {
+      "raw_mae": 0.11228975653648376,
+      "raw_p95": 0.4040248990058899,
+      "raw_max": 9.044898986816406,
+      "main_mae": 0.12041720747947693,
+      "main_p95": 0.41463977098464966,
+      "main_max": 9.044898986816406,
+      "state_mae": 0.0168557558208704
+    }
+  },
+  "two_preproc_2f_after_reboot": {
+    "path": "/Users/chan/Documents/supercombo_k230/out/quant_verify/two_preproc_balanced80_retry.raw",
+    "sha256": "83438cf10b017cca8239f632ba422fc0f0a4634b3c15fe9e991e961944208eca",
+    "frames": 2,
+    "raw_size": 6524,
+    "finite": true,
+    "main_changed_pairs": 1,
+    "pair_stats": [
+      {
+        "pair": "0->1",
+        "main_changed": 5732,
+        "main_mean_abs_delta": 0.644940197467804,
+        "main_max_abs_delta": 73.5,
+        "state_changed": 511
+      }
+    ],
+    "onnx_reference": "/Users/chan/Documents/supercombo_k230/out/quant_verify/two_preproc_onnx.raw",
+    "error_vs_onnx": {
+      "raw_mae": 0.12257646024227142,
+      "raw_p95": 0.4406806528568268,
+      "raw_max": 13.233070373535156,
+      "main_mae": 0.13248074054718018,
+      "main_p95": 0.46816661953926086,
+      "main_max": 13.233070373535156,
+      "state_mae": 0.006278499960899353
+    }
+  },
+  "board_timing_ms": {
+    "live_steady_8f_run_mean": 21.9784,
+    "live_steady_8f_run_p50": 21.8009,
+    "live_steady_8f_run_p95": 23.3861,
+    "two_preproc_2f_run_mean": 22.5675
+  },
+  "discarded_candidates": [
+    {
+      "name": "balanced80_kld",
+      "reason": "main output was fixed before reboot and Kld was worse on dark/bright probe"
+    },
+    {
+      "name": "live8_noclip",
+      "reason": "responsive after reboot but main MAE vs ONNX was much worse than balanced80"
+    },
+    {
+      "name": "int16_weight_live8",
+      "reason": "60.12 MiB and did not finish one frame within 20s on board"
+    },
+    {
+      "name": "mix_quant_live8",
+      "reason": "nncase K230Target duplicate-key exception during compile"
+    }
+  ]
+}

@@ -107,6 +107,9 @@ def main() -> None:
   parser.add_argument("--quant-scheme", type=Path)
   parser.add_argument("--use-mix-quant", action="store_true")
   parser.add_argument("--quant-scheme-strict", action="store_true")
+  parser.add_argument("--use-mse-quant-w", action="store_true")
+  parser.add_argument("--dump-quant-error", action="store_true")
+  parser.add_argument("--export-quant-scheme", action="store_true")
   args = parser.parse_args()
 
   args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -133,6 +136,9 @@ def main() -> None:
     ptq_options.quant_type = args.quant_type
     ptq_options.w_quant_type = args.w_quant_type
     ptq_options.use_mix_quant = args.use_mix_quant
+    ptq_options.use_mse_quant_w = args.use_mse_quant_w
+    ptq_options.dump_quant_error = args.dump_quant_error
+    ptq_options.export_quant_scheme = args.export_quant_scheme
     if args.quant_scheme is not None:
       ptq_options.quant_scheme = str(args.quant_scheme)
     ptq_options.quant_scheme_strict_mode = args.quant_scheme_strict

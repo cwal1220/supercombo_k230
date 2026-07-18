@@ -19,10 +19,22 @@ foreach(config_type DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_type} "${CMAKE_CURRENT_SOURCE_DIR}")
 endforeach()
 
-set(K230_SYSROOT_LIB_DIR "/usr/lib/riscv64-linux-gnu" CACHE PATH
+set(K230_SYSROOT "" CACHE PATH "K230 target sysroot")
+if(K230_SYSROOT)
+  set(_K230_DEFAULT_LIB_DIR "${K230_SYSROOT}/usr/lib")
+  set(_K230_DEFAULT_BASE_LIB_DIR "${K230_SYSROOT}/lib")
+  set(_K230_DEFAULT_INCLUDE_DIR "${K230_SYSROOT}/usr/include")
+else()
+  set(_K230_DEFAULT_LIB_DIR "/usr/lib/riscv64-linux-gnu")
+  set(_K230_DEFAULT_BASE_LIB_DIR "/lib/riscv64-linux-gnu")
+  set(_K230_DEFAULT_INCLUDE_DIR "/usr/include")
+endif()
+set(K230_SYSROOT_LIB_DIR "${_K230_DEFAULT_LIB_DIR}" CACHE PATH
     "K230 system library directory")
-set(K230_SYSROOT_BASE_LIB_DIR "/lib/riscv64-linux-gnu" CACHE PATH
+set(K230_SYSROOT_BASE_LIB_DIR "${_K230_DEFAULT_BASE_LIB_DIR}" CACHE PATH
     "K230 base system library directory")
+set(K230_SYSROOT_INCLUDE_DIR "${_K230_DEFAULT_INCLUDE_DIR}" CACHE PATH
+    "K230 system include directory")
 set(NNCASE_DEPS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps" CACHE PATH
     "nncase K230 runtime dependency directory")
 
@@ -46,7 +58,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
 
   list(APPEND PROJECT_SYSTEM_INCLUDES
     "${NNCASE_DEPS_DIR}/include"
-    "/usr/include/libdrm"
+    "${K230_SYSROOT_INCLUDE_DIR}/libdrm"
     ${OpenCV_INCLUDE_DIRS}
   )
   if(SUPERCOMBO_BUILD_PANDA)
@@ -94,6 +106,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
       pthread
       atomic
       dl
+      rt
     )
   endfunction()
 
