@@ -53,6 +53,8 @@ public:
     bool comms_healthy() const { return comms_healthy_; }
     const std::string &usb_serial() const { return usb_serial_; }
     uint8_t hw_type() const { return hw_type_; }
+    uint8_t health_packet_version() const { return health_packet_version_; }
+    uint8_t can_packet_version() const { return can_packet_version_; }
 
     bool set_safety_model(uint16_t safety_model, uint16_t safety_param);
     bool send_heartbeat(bool engaged);
@@ -74,6 +76,8 @@ private:
     libusb_device_handle *dev_handle_ = nullptr;
     std::string usb_serial_;
     uint8_t hw_type_ = 0;
+    uint8_t health_packet_version_ = 0;
+    uint8_t can_packet_version_ = 0;
     bool comms_healthy_ = true;
     std::vector<uint8_t> recv_buf_;
 };

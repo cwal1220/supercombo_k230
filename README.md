@@ -154,14 +154,12 @@ minimal passive overlay subscriber:
   - connects to panda over `libusb`, publishes compact panda health and CAN
     receive batches, and can relay raw `sendcan` batches
   - defaults to shadow mode: `K230_PANDA_TX=0`, so no CAN frames are transmitted
-- `k230_controlsd.py` (optional shadow controller)
+- `k230_k7_controlsd` (optional K7 controller)
   - enabled with `K230_ENABLE_CONTROL=1`
-  - imports the existing openpilot Hyundai controller from `K230_OPENPILOT_PATH`
-    and forces `CAR.K7_HEV_YG`
-  - reconstructs an openpilot-style `modelV2` snapshot from `modelState`, runs
-    openpilot's original `LateralPlanner`/lateral MPC, then feeds the resulting
-    `lateralPlan` into openpilot's `VehicleModel`, `get_lag_adjusted_curvature`,
-    selected `LatControl*`, and Hyundai `CarController`
+  - runs the standalone KIA K7 YG HEV CAN decoder, torque controller, and
+    `LKAS11`/`CLU11`/`MDPS12` packer at 100 Hz without Python or openpilot
+    runtime dependencies
+  - consumes the path and lane confidence published in `modelState`
   - publishes generated raw `sendcan` batches for `k230_pandad`
   - does not transmit by itself; actual TX still requires `K230_PANDA_TX=1`
 
@@ -263,13 +261,11 @@ Runtime structure:
   - minimal supervisor and heartbeat publisher. It is intentionally not a full
     openpilot manager clone.
 - `src/panda_client.*`, `src/k230_pandad.cc`
-  - optional panda USB bridge. It does not generate KIA/Hyundai control CAN;
-    that logic is intentionally left to the existing openpilot controller path.
-- `k230_controlsd.py`
-  - optional shadow control bridge. It uses the openpilot Hyundai interface,
-    `LateralPlanner`, lateral MPC, and lateral controller modules directly. The
-    K230 C++ side publishes the compact model fields needed to rebuild the same
-    `modelV2` planner input without passing the full raw tensor.
+  - optional panda USB bridge. It handles USB, health, heartbeat, receive CAN,
+    and the final TX gate, but does not generate vehicle control messages.
+- `src/k230_k7_controlsd.cc`, `src/k7_lateral_controller.*`
+  - standalone K7 YG HEV lateral controller using the validated Hyundai CAN
+    bus split, torque limits, counters, checksums, and 60 kph MDPS helper.
 
 Useful runtime options:
 
@@ -313,9 +309,8 @@ Useful runtime options:
   - manager also starts `k230_pandad`. The binary must have been built with
     `-DSUPERCOMBO_BUILD_PANDA=ON`.
 - `K230_ENABLE_CONTROL=1`
-  - manager starts `k230_pandad` and `k230_controlsd.py`.
-  - `k230_controlsd.py` requires an openpilot checkout with built Python
-    dependencies (`cereal`, `opendbc`) and uses `K230_OPENPILOT_PATH` to find it.
+  - manager starts `k230_pandad` and `k230_k7_controlsd`.
+  - no openpilot checkout or Python native extension is required.
 - `K230_PANDA_SAFETY=nooutput|silent|hyundai|hyundaiCommunity|allOutput`
   - panda safety mode for `k230_pandad`. Default is `nooutput`.
   - collected KIA K7 YG HEV logs from the current openpilot fork report
@@ -332,19 +327,14 @@ Useful runtime options:
   - sleep time used by `k230_pandad` when panda returns no CAN frames and no
     pending `sendcan` batch exists. This keeps USB-only or parked shadow runs
     from stealing scheduler time from `k230_modeld`.
-- `K230_CONTROLD_ENABLED=0|1`
-  - controls whether the shadow openpilot controller marks `CarControl` as
-    enabled. Default is `1`, but TX is still blocked unless `K230_PANDA_TX=1`.
-- `K230_CONTROLD_FINGERPRINT_SEC=2.0`
-  - maximum time to collect CAN addresses before initializing the openpilot
-    Hyundai interface.
-- `K230_CONTROLD_FINGERPRINT_MIN_ADDRS=20`
-  - initialize early once enough CAN addresses have been observed.
-- `K230_IPC_DIR=/dev/shm`
-  - Python-only IPC base directory. Keep the default on K230; use `/tmp/...`
-    for local Mac/Linux replay tests.
-- `K230_OPENPILOT_PATH=/path/to/openpilot_c2`
-  - openpilot checkout used by `k230_controlsd.py`.
+- `K230_K7_CONTROL=0|1`
+  - enables the standalone controller. Default is `1`; Panda TX remains
+    independently blocked unless `K230_PANDA_TX=1`.
+- `K230_K7_FORCE_ENGAGED=0|1`
+  - bypasses the SET/CANCEL engage latch for offline replay only. Default is
+    `0` and must remain `0` in a vehicle.
+- `K230_K7_STEERING_PARAMS=/path/to/steering_params.json`
+  - optionally overrides the validated built-in K7 steering parameters.
 
 Fixed production defaults:
 

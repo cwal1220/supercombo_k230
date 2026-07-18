@@ -45,6 +45,18 @@ set(PROJECT_LOCAL_INCLUDES
 )
 set(PROJECT_SYSTEM_INCLUDES)
 
+add_library(k7_control_core STATIC
+  src/hyundai_can.cc
+  src/hyundai_steering.cc
+  src/json_utils.cc
+  src/k7_lateral_controller.cc
+  src/k7_path.cc
+  src/steering_params.cc
+  src/vehicle_can.cc
+)
+target_include_directories(k7_control_core PUBLIC ${PROJECT_LOCAL_INCLUDES})
+target_compile_options(k7_control_core PRIVATE ${PROJECT_WARNINGS})
+
 if(SUPERCOMBO_BUILD_RUNTIME)
   find_package(OpenCV REQUIRED COMPONENTS core imgproc)
   find_package(PkgConfig QUIET)
@@ -187,6 +199,12 @@ if(SUPERCOMBO_BUILD_RUNTIME)
       src/lateral_control.cc
     )
     configure_k230_target(k230_pandad ${LIBUSB_LIBRARIES})
+
+    add_executable(k230_k7_controlsd
+      src/k230_k7_controlsd.cc
+      src/k230_latest_channel.cc
+    )
+    configure_k230_target(k230_k7_controlsd k7_control_core)
   endif()
 endif()
 
@@ -208,6 +226,14 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
   )
   target_include_directories(check_panda_can_codec PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_compile_options(check_panda_can_codec PRIVATE ${PROJECT_WARNINGS})
+
+  add_executable(check_k7_control_replay
+    benchmarks/check_k7_control_replay.cc
+    src/can_replay.cc
+  )
+  target_link_libraries(check_k7_control_replay PRIVATE k7_control_core)
+  target_include_directories(check_k7_control_replay PRIVATE ${PROJECT_LOCAL_INCLUDES})
+  target_compile_options(check_k7_control_replay PRIVATE ${PROJECT_WARNINGS})
 
   add_executable(bench_input_warp_overhead
     benchmarks/bench_input_warp_overhead.cc
@@ -248,8 +274,8 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     RUNTIME DESTINATION .
   )
   if(SUPERCOMBO_BUILD_PANDA)
-    install(TARGETS k230_pandad RUNTIME DESTINATION .)
+    install(TARGETS k230_pandad k230_k7_controlsd RUNTIME DESTINATION .)
   endif()
-  install(PROGRAMS k230_manager.py k230_controlsd.py DESTINATION .)
+  install(PROGRAMS k230_manager.py DESTINATION .)
   install(DIRECTORY models DESTINATION . OPTIONAL FILES_MATCHING PATTERN "*.kmodel")
 endif()

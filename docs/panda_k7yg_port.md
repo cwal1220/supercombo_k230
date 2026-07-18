@@ -1,157 +1,80 @@
-# KIA K7 YG HEV panda port plan
+# KIA K7 YG HEV Panda Port
 
-## Current decision
+## Runtime
 
-- Vehicle target: KIA K7 YG HEV (`CAR.K7_HEV_YG` in the current openpilot fork).
-- Panda firmware: keep the currently flashed firmware. Do not rebuild firmware on
+- `k230_pandad` owns Panda USB through `libusb` and publishes CAN batches to
+  `/dev/shm/k230_can`.
+- `k230_k7_controlsd` runs the standalone K7 controller at 100 Hz and publishes
+  generated CAN batches to `/dev/shm/k230_sendcan`.
+- `k230_pandad` is the final TX gate. `K230_PANDA_TX=0` is the default and
+  prevents every generated frame from reaching USB.
+- No openpilot checkout, Python DBC extension, or acados module is required on
   the K230 board.
-- CAN generation: do not reimplement Hyundai/Kia LKAS messages in C++ for v1.
-  Reuse the current openpilot Python `CarInterface`/`CarController`/DBC packer
-  path because it already handles `LKAS11`, optional `MDPS12`, checksum, counters,
-  bus mirroring, and K7 HEV safety parameters.
 
-## Stage 1: shadow panda bridge
+The controller uses the validated K7 YG HEV bus split:
 
-- `k230_pandad` owns panda USB through `libusb`.
-- It publishes panda health to `/dev/shm/k230_panda_state`.
-- It publishes received CAN batches to `/dev/shm/k230_can`.
-- It creates `/dev/shm/k230_sendcan`, but CAN transmission is blocked by default.
-- Default safety mode is `nooutput`.
-- With only USB connected and no vehicle harness, expected health is
-  approximately `voltage=5V`, `ignition_line=0`, `ignition_can=0`, and
-  `rx=0`. This confirms panda USB communication only; it does not validate
-  vehicle CAN wiring.
-- Empty-CAN polling sleeps by default with `K230_PANDA_IDLE_US=5000`, and the
-  manager starts `k230_pandad` at low priority so shadow mode does not steal
-  modeld scheduler time.
-- The collected K7 YG HEV logs from this fork report:
-  - `sccBus=-1`
-  - `mdpsBus=1`
-  - `sasBus=1`
-  - `safety=hyundaiCommunity:0`
-- Therefore the shadow/TX candidate for this car is
-  `K230_PANDA_SAFETY=hyundaiCommunity`, not the generic Hyundai hybrid
-  `hyundai:param=2` path.
+- RX bus 0: powertrain, cluster, SAS, brake, gear, and body state.
+- RX bus 1: MDPS state.
+- RX bus 2: camera `LKAS11` seed.
+- TX bus 0: `LKAS11` at 100 Hz.
+- TX bus 1: mirrored `LKAS11` at 100 Hz and `CLU11` at 50 Hz.
+- TX bus 2: `MDPS12` at 100 Hz.
 
-Build:
+While steering is active below the MDPS threshold, the bus-1 `CLU11` helper
+reports 60 kph (38 mph) and preserves the source decimal-speed field. This
+matches the K7 branch in the reference openpilot controller.
+
+## Build
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSUPERCOMBO_BUILD_PANDA=ON
-cmake --build build -j2
+./scripts/build_k230_linux_sdk.sh
 ```
 
-Run shadow mode:
+The Buildroot SDK configuration must include `BR2_PACKAGE_LIBUSB=y`.
+
+## Offline Validation
+
+Export the collected drive log to the `K230CAN1` fixture format, then run:
 
 ```sh
-K230_ENABLE_PANDA=1 \
-./k230_manager.py models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel 0
+cmake -S . -B build/host-checks \
+  -DSUPERCOMBO_BUILD_RUNTIME=OFF \
+  -DSUPERCOMBO_BUILD_BENCHMARKS=ON
+cmake --build build/host-checks --target check_k7_control_replay
+./check_k7_control_replay build/k7_drive.k230can
 ```
 
-## Stage 2: openpilot controller reuse
+The 60.001 second K7 YG HEV fixture contains 43,273 CAN records. The expected
+result is 5,970 messages each for bus-0 `LKAS11`, bus-1 `LKAS11`, and bus-2
+`MDPS12`, plus 2,985 bus-1 `CLU11` messages. The checker also validates the
+60 kph helper, model-path coordinate conversion, frame lengths, active ticks,
+and torque bounds.
 
-- `k230_controlsd.py` imports the existing openpilot Hyundai interface and
-  forces the candidate to `CAR.K7_HEV_YG`.
-- It is enabled with `K230_ENABLE_CONTROL=1`.
-- It first builds a short CAN fingerprint from `/dev/shm/k230_can`, then calls
-  `CarInterface.get_params(CAR.K7_HEV_YG, fingerprint)` so `sccBus`, `mdpsBus`,
-  and safety model match the actual harness layout.
-- Feed it:
-  - `/dev/shm/k230_can` from `k230_pandad`
-  - `/dev/shm/k230_model_state` from `k230_modeld`
-  - the existing `LateralTarget` or a model path-derived desired curvature
-- The existing openpilot controller produces raw CAN tuples.
-- `k230_controlsd.py` publishes those tuples to `/dev/shm/k230_sendcan`.
-- Keep `K230_PANDA_TX=0` until shadow logs prove counters, bus selection, and
-  generated `LKAS11` payloads match the known-good openpilot behavior.
-
-Run shadow controller:
+## Shadow Run
 
 ```sh
-K230_OPENPILOT_PATH=/root/openpilot_c2 \
 K230_ENABLE_CONTROL=1 \
-K230_PANDA_SAFETY=hyundaiCommunity \
-./k230_manager.py models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel 0
+K230_PANDA_TX=0 \
+K230_PANDA_SAFETY=nooutput \
+./k230_manager.py model/supercombo.kmodel 0
 ```
 
-This still does not transmit CAN unless `K230_PANDA_TX=1` is set.
+Use `hyundaiCommunity` only after the connected vehicle fingerprint and Panda
+health confirm the expected K7 configuration. Collected logs from the current
+vehicle report `mdpsBus=1`, `sasBus=1`, and `hyundaiCommunity:0`.
 
-Local replay validation from collected logs:
+## TX Gates
+
+Vehicle transmission requires every explicit setting below:
 
 ```sh
-uv venv /tmp/k230_openpilot_py311 --python 3.11
-uv pip install --python /tmp/k230_openpilot_py311/bin/python \
-  'scons==4.2.0' 'numpy<2' pycapnp Cython pycryptodome jinja2 crcmod
-
-cd /Users/chan/Documents/openpilot_c2
-PATH=/tmp/k230_openpilot_py311/bin:$PATH \
-PYTHONPATH=/Users/chan/Documents/openpilot_c2:/Users/chan/Documents/openpilot_c2/pyextra \
-ZMQ=1 \
-scons -j4 opendbc/can/packer_pyx.so opendbc/can/parser_pyx.so
-
-cd /Users/chan/Documents/supercombo_k230
-rm -rf /tmp/k230_ipc_control_test
-mkdir -p /tmp/k230_ipc_control_test
-PATH=/tmp/k230_openpilot_py311/bin:$PATH \
-PYTHONPATH=/Users/chan/Documents/openpilot_c2:/Users/chan/Documents/openpilot_c2/pyextra \
-K230_OPENPILOT_PATH=/Users/chan/Documents/openpilot_c2 \
-K230_IPC_DIR=/tmp/k230_ipc_control_test \
-K230_CONTROLD_FINGERPRINT_MIN_ADDRS=20 \
-./k230_controlsd.py
-
-K230_IPC_DIR=/tmp/k230_ipc_control_test \
-benchmarks/replay_controlsd_from_rlog.py \
-  /Users/chan/Documents/openpilot_c2/device_collected/2026-05-23_1600_combined/part0_existing_device_realdata/1970-01-01--09-00-59--0/rlog.bz2 \
-  --openpilot /Users/chan/Documents/openpilot_c2 \
-  --max-can-events 1000 \
-  --sleep-scale 0.2 \
-  --curvature 0.01
+K230_ENABLE_CONTROL=1
+K230_PANDA_TX=1
+K230_PANDA_SAFETY=hyundaiCommunity
+K230_PANDA_ENGAGED=1
 ```
 
-Observed result on Mac with a Python 3.11 openpilot build:
-
-- `can_events=1000`
-- `can_frames=50716`
-- `send_batches=901`
-- `send_frames=3154`
-- top generated send addresses:
-  - `bus0:0x340`
-  - `bus1:0x340`
-  - `bus2:0x251`
-  - `bus1:0x4f1`
-- `k230_controlsd.py` runtime log reported `errors=0` after default-param shim
-  fixes. Exact `send_batches` can vary slightly with controller startup timing
-  during replay.
-
-Payload/codec validation:
-
-```sh
-python3 benchmarks/check_k230_can_payload.py
-c++ -std=c++17 -Wall -Wextra -Isrc \
-  benchmarks/check_panda_can_codec.cc src/panda_can_codec.cc \
-  -o /tmp/check_panda_can_codec && /tmp/check_panda_can_codec
-```
-
-- The openpilot CAN tuple order is kept as `(address, busTime, dat, src)`.
-- The panda USB CAN header is generated with the same byte layout as
-  `panda/python/__init__.py::pack_can_buffer`.
-- `k230_pandad` rejects TX frames with invalid bus, invalid 29-bit address,
-  invalid DLC length, or RX-only returned/rejected flags.
-- RX returned/rejected flags are mapped back to openpilot `src + 128` and
-  `src + 192` semantics before entering `CarState`/fingerprinting.
-
-## Stage 3: controlled TX enable
-
-- Enable real transmission only with all explicit gates set:
-  - `K230_ENABLE_PANDA=1`
-  - `K230_PANDA_TX=1`
-  - `K230_PANDA_SAFETY=hyundaiCommunity`
-  - `K230_PANDA_ENGAGED=1`
-- Confirm panda health reports the expected safety model/param and
-  `controls_allowed=1` before accepting steering output.
-- Start with low-speed/private-road tests and log every send batch.
-
-## Safety constraints
-
-- `k230_pandad` must never create vehicle-specific steering messages.
-- Raw send relay must remain disabled by default.
-- The current openpilot CAN generation path is the source of truth for K7 YG HEV.
+Keep `K230_K7_FORCE_ENGAGED=0` in a vehicle. Engagement must come from the
+vehicle SET/CANCEL button state. Before any closed-course TX test, verify Panda
+USB RX, ignition, safety mode/param, `controls_allowed`, CAN freshness, checksum
+counters, and zero blocked/error counts in shadow mode.

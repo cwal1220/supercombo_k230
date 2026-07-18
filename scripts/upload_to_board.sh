@@ -17,12 +17,11 @@ runtime_files=(
   k230_modeld
   k230_overlay
   k230_manager.py
-  k230_controlsd.py
 )
 model="final_k230_model/model/supercombo.kmodel"
 
 if [ -x k230_pandad ]; then
-  runtime_files+=(k230_pandad)
+  runtime_files+=(k230_pandad k230_k7_controlsd)
 fi
 
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/model'"

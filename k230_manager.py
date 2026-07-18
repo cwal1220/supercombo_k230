@@ -148,7 +148,7 @@ class Manager:
             self.start_order.append("k230_pandad")
             self.process_order.append("k230_pandad")
         if env_enabled("K230_ENABLE_CONTROL"):
-            specs.append(ProcSpec("k230_controlsd", ["./k230_controlsd.py"], 5))
+            specs.append(ProcSpec("k230_controlsd", ["./k230_k7_controlsd"], 5))
             self.start_order.append("k230_controlsd")
             self.process_order.append("k230_controlsd")
         for spec in specs:

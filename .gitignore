@@ -12,6 +12,13 @@ k230_camerad
 k230_modeld
 k230_overlay
 k230_pandad
+k230_k7_controlsd
+check_k7_control_replay
+check_model_output_parser
+check_panda_can_codec
+bench_input_warp_overhead
+bench_nv12_to_yuv6
+verify_calibration_equivalence
 __pycache__/
 *.pyc
 *.raw
