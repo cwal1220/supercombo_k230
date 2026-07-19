@@ -40,10 +40,12 @@ uint64_t timeval_us(const timeval &tv)
 
 constexpr const char *kDisplayReadyPath = "/tmp/k230_display_ready";
 constexpr int kPreviewVideoDevice = 1;
+constexpr unsigned kPreviewBufferCount = 8;
 constexpr unsigned kDisplayReadyPreviewFrames = 30;
 constexpr unsigned kOverlayBufferCount = 2;
 constexpr uint64_t kStateFreshNs = 2000000000ULL;
-constexpr uint64_t kOverlayIntervalNs = 60000000ULL;
+// Leave margin below three 60 Hz display callbacks so redraws do not slip to 15 Hz.
+constexpr uint64_t kOverlayIntervalNs = 45000000ULL;
 
 const char *display_ready_path()
 {
@@ -82,6 +84,14 @@ public:
     }
 
 private:
+    static float canaan_temperature_c(float raw_value)
+    {
+        const unsigned register_value = static_cast<unsigned>(raw_value);
+        const float data = static_cast<float>(register_value & 0x0fffU);
+        return ((((1.01472e-10f * data - 1.10063e-6f) * data + 4.36150e-3f) * data -
+                 7.10128f) * data + 3565.87f);
+    }
+
     void sample_cpu(float *percent)
     {
         FILE *file = std::fopen("/proc/stat", "r");
@@ -136,7 +146,21 @@ private:
             const bool read = std::fscanf(file, "%f", &value) == 1;
             std::fclose(file);
             if (!read) continue;
-            if (value > 1000.0f) value /= 1000.0f;
+
+            char type_path[96];
+            std::snprintf(type_path, sizeof(type_path),
+                          "/sys/class/thermal/thermal_zone%d/type", i);
+            FILE *type_file = std::fopen(type_path, "r");
+            char type[64] = {};
+            const bool type_read = type_file && std::fgets(type, sizeof(type), type_file);
+            if (type_file) std::fclose(type_file);
+
+            if (type_read && std::strncmp(type, "canaan_thermal_zone", 19) == 0 &&
+                value >= 4096.0f) {
+                value = canaan_temperature_c(value);
+            } else if (value > 1000.0f) {
+                value /= 1000.0f;
+            }
             if (value > 0.0f && value < 200.0f) maximum = std::max(maximum, value);
         }
         *temperature_c = maximum;
@@ -154,8 +178,7 @@ public:
     explicit K230OverlayDisplay(const AppConfig &config)
         : profile_(config.profile)
     {
-        default_projection_ = make_projection_state(config.projection_mode,
-                                                    config.manual_roll,
+        default_projection_ = make_projection_state(config.manual_roll,
                                                     config.manual_pitch,
                                                     config.manual_yaw);
     }
@@ -184,6 +207,7 @@ public:
         context.device = kPreviewVideoDevice;
         context.video_format = V4L2_PIX_FMT_NV12;
         context.display_format = 0;
+        context.buffer_num = kPreviewBufferCount;
 
         if (display_->width > display_->height) {
             context.width = display_->width;
@@ -212,22 +236,22 @@ public:
         overlay_buffer_ = overlay_buffers_[0];
         overlay_.draw(overlay_buffer_, ParsedModelOutput{}, default_projection_, hud_, true);
         clean(overlay_buffer_);
-        if (display_update_buffer(overlay_buffer_, 0, 0) != 0)
-            throw std::runtime_error("initial overlay update failed");
+        display_->osd_disp_buffer = overlay_buffer_;
 
         std::fprintf(stderr,
-                     "k230_overlay: display=%ux%u logical=%ux%u preview=/dev/video%d %ux%u rotation=%d overlay=native-direct projection=%s\n",
+                     "k230_overlay: display=%ux%u logical=%ux%u preview=/dev/video%d %ux%u buffers=%u rotation=%d overlay=native-direct\n",
                      display_->width, display_->height,
                      kLogicalDisplayWidth, kLogicalDisplayHeight, kPreviewVideoDevice,
-                     context.width, context.height, static_cast<int>(context.drm_rotation),
-                     projection_mode_name(default_projection_.mode));
+                     context.width, context.height, context.buffer_num,
+                     static_cast<int>(context.drm_rotation));
         std::fprintf(stderr,
                      "k230_overlay: waiting %u displayed preview frames before ready\n",
                      kDisplayReadyPreviewFrames);
 
         gettimeofday(&fps_tv_, nullptr);
         g_app = this;
-        v4l2_drm_run(&context, 1, &K230OverlayDisplay::frame_handler);
+        v4l2_drm_run_v4l2_2_drm_need_run = true;
+        v4l2_drm_run_v4l2_2_drm(&context, 1, &K230OverlayDisplay::frame_handler);
         g_app = nullptr;
 
         std::fprintf(stderr, "\noverlay done errors=%u\n", errors_);
@@ -360,7 +384,6 @@ private:
         have_model_state_ = state.valid != 0 && model_fresh;
         latest_output_ = k230_parsed_from_model_state(state);
         latest_projection_ = k230_projection_from_model_state(state);
-        hud_.model_execution_ms = state.model_execution_ms;
         return true;
     }
 
@@ -417,9 +440,17 @@ private:
         hud_.steering_fault = control_fresh && latest_control_state_.steering_fault != 0;
         hud_.speed_kph = control_fresh ? latest_control_state_.speed_kph : 0.0f;
         hud_.steering_angle_deg = control_fresh ? latest_control_state_.steering_angle_deg : 0.0f;
+        hud_.normalized_output = control_fresh ? latest_control_state_.normalized_output : 0.0f;
         hud_.desired_torque = control_fresh ? latest_control_state_.desired_torque : 0;
         hud_.apply_torque = control_fresh ? latest_control_state_.apply_torque : 0;
         hud_.driver_torque = control_fresh ? latest_control_state_.driver_torque : 0;
+
+        hud_.calibration_available = model_fresh;
+        hud_.calibration_status = latest_model_state_.calibration.status;
+        hud_.calibration_valid_blocks = latest_model_state_.calibration.valid_blocks;
+        hud_.calibration_roll_deg = rad_to_deg(latest_model_state_.calibration.roll);
+        hud_.calibration_pitch_deg = rad_to_deg(latest_model_state_.calibration.pitch);
+        hud_.calibration_yaw_deg = rad_to_deg(latest_model_state_.calibration.yaw);
 
         const unsigned total_processes = manager_fresh
             ? std::min<unsigned>(latest_manager_state_.process_count, kK230MaxProcesses)
@@ -443,8 +474,7 @@ private:
 
         const uint64_t present_start = profile_ ? k230_now_ns() : 0;
         clean(overlay_buffer_);
-        if (display_update_buffer(overlay_buffer_, 0, 0) != 0)
-            ++errors_;
+        display_->osd_disp_buffer = overlay_buffer_;
         if (profile_) present_stats_.add(k230_now_ns() - present_start);
     }
 

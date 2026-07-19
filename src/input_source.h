@@ -31,6 +31,8 @@ public:
     bool read(Nv12Frame &frame) override;
     bool eof() const override { return frames_read_ >= frame_count_; }
     unsigned frame_count() const override { return frame_count_; }
+    unsigned width() const { return width_; }
+    unsigned height() const { return height_; }
 
 private:
     void read_exact(char *dst, size_t size, const char *label);

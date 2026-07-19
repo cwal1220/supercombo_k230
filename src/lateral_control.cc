@@ -66,10 +66,8 @@ float path_curvature(const ParsedPlan &plan, int idx)
 
 } // namespace
 
-LateralTarget LateralControlDraft::update(const ParsedPlan &plan, const ProjectionState &projection)
+LateralTarget LateralControlDraft::update(const ParsedPlan &plan)
 {
-    (void)projection;
-
     LateralTarget target;
     if (!plan.valid) return target;
 

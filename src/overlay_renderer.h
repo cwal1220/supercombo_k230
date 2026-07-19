@@ -19,6 +19,7 @@ struct OverlayHudState {
     unsigned panda_faults = 0;
     float speed_kph = 0.0f;
     float steering_angle_deg = 0.0f;
+    float normalized_output = 0.0f;
     int desired_torque = 0;
     int apply_torque = 0;
     int driver_torque = 0;
@@ -28,7 +29,12 @@ struct OverlayHudState {
     float preview_fps = 0.0f;
     float model_fps = 0.0f;
     float overlay_fps = 0.0f;
-    float model_execution_ms = 0.0f;
+    bool calibration_available = false;
+    unsigned calibration_status = 0;
+    int calibration_valid_blocks = 0;
+    float calibration_roll_deg = 0.0f;
+    float calibration_pitch_deg = 0.0f;
+    float calibration_yaw_deg = 0.0f;
 };
 
 class OverlayRenderer {

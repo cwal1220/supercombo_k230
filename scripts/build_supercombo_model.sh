@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PKG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "${PKG_DIR}/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+MODEL_DIR="${REPO_DIR}/models"
 OPENPILOT_DIR="${OPENPILOT_DIR:-/Users/chan/Documents/openpilot_c2}"
 PYTHON_BIN="${PYTHON_BIN:-${OPENPILOT_DIR}/model_viz_experiment/.venv/bin/python}"
 DOCKER_IMAGE="${DOCKER_IMAGE:-supercombo-nncase-k230:2.11.0-sdk}"
 SOURCE_ONNX="${SOURCE_ONNX:-${OPENPILOT_DIR}/selfdrive/modeld/models/supercombo.onnx}"
 DATA_ROOT="${DATA_ROOT:-${OPENPILOT_DIR}/device_collected}"
 
-INTERMEDIATE_ONNX="${PKG_DIR}/onnx/supercombo_gemm_split3_iddwelu223_nogru_splitplan_delta.onnx"
-FINAL_ONNX="${PKG_DIR}/onnx/supercombo_gemm_split3_iddwelu223_nogru_splitplan_delta_nobig_keepinput_foldzero.onnx"
-PTQ_NPZ="${PKG_DIR}/ptq/supercombo_balanced80_calib.npz"
-FINAL_KMODEL="${PKG_DIR}/model/supercombo.kmodel"
-FULLNAME_KMODEL="${PKG_DIR}/model/supercombo_gemm_split3_iddwelu223_nogru_splitplan_delta_nobig_keepinput_foldzero_int16a_uint8w_balanced80_noclip.kmodel"
+INTERMEDIATE_ONNX="${MODEL_DIR}/onnx/supercombo_gemm_split3_iddwelu223_nogru_splitplan_delta.onnx"
+FINAL_ONNX="${MODEL_DIR}/onnx/supercombo_gemm_split3_iddwelu223_nogru_splitplan_delta_nobig_keepinput_foldzero.onnx"
+PTQ_NPZ="${MODEL_DIR}/ptq/supercombo_balanced80_calib.npz"
+FINAL_KMODEL="${MODEL_DIR}/supercombo.kmodel"
 
-mkdir -p "${PKG_DIR}/onnx" "${PKG_DIR}/ptq" "${PKG_DIR}/model" "${PKG_DIR}/work/nncase_dump"
+mkdir -p "${MODEL_DIR}/onnx" "${MODEL_DIR}/ptq" "${MODEL_DIR}/work/nncase_dump"
 
-"${PYTHON_BIN}" "${REPO_DIR}/model_tools/rewrite_supercombo_onnx.py" \
+"${PYTHON_BIN}" "${REPO_DIR}/tools/model/rewrite_supercombo_onnx.py" \
   --in-model "${SOURCE_ONNX}" \
   --out-model "${INTERMEDIATE_ONNX}" \
   --gemm-split \
@@ -26,14 +26,14 @@ mkdir -p "${PKG_DIR}/onnx" "${PKG_DIR}/ptq" "${PKG_DIR}/model" "${PKG_DIR}/work/
   --identity-dw-before-elu \
   --identity-dw-before-elu-names Elu_223
 
-"${PYTHON_BIN}" "${REPO_DIR}/model_tools/remove_supercombo_big_input.py" \
+"${PYTHON_BIN}" "${REPO_DIR}/tools/model/remove_supercombo_big_input.py" \
   --input "${INTERMEDIATE_ONNX}" \
   --output "${FINAL_ONNX}" \
   --mode fold-zero \
   --keep-big-input
 
 if [[ "${REGEN_PTQ:-0}" == "1" ]]; then
-  "${PYTHON_BIN}" "${REPO_DIR}/model_tools/make_supercombo_calibration.py" \
+  "${PYTHON_BIN}" "${REPO_DIR}/tools/model/make_supercombo_calibration.py" \
     --data-root "${DATA_ROOT}" \
     --model "${SOURCE_ONNX}" \
     --out "${PTQ_NPZ}" \
@@ -56,13 +56,13 @@ docker run --rm --platform linux/amd64 \
   -v "${OPENPILOT_DIR}:/openpilot_c2" \
   -w /work \
   "${DOCKER_IMAGE}" \
-  python -u model_tools/compile_supercombo_nncase.py \
-    --model /work/final_k230_model/onnx/supercombo_gemm_split3_iddwelu223_nogru_splitplan_delta_nobig_keepinput_foldzero.onnx \
-    --out /work/final_k230_model/model/supercombo.kmodel \
-    --dump-dir /work/final_k230_model/work/nncase_dump \
+  python -u tools/model/compile_supercombo_nncase.py \
+    --model /work/models/onnx/supercombo_gemm_split3_iddwelu223_nogru_splitplan_delta_nobig_keepinput_foldzero.onnx \
+    --out /work/models/supercombo.kmodel \
+    --dump-dir /work/models/work/nncase_dump \
     --target k230 \
     --ptq \
-    --calib-npz /work/final_k230_model/ptq/supercombo_balanced80_calib.npz \
+    --calib-npz /work/models/ptq/supercombo_balanced80_calib.npz \
     --samples 80 \
     --calibrate-method NoClip \
     --quant-type int16 \
@@ -70,11 +70,11 @@ docker run --rm --platform linux/amd64 \
     --no-dump-ir \
     --no-dump-asm
 
-ln -sf supercombo.kmodel "${FULLNAME_KMODEL}"
-
 (
-  cd "${PKG_DIR}"
-  find model onnx ptq verification -type f -print0 | sort -z | xargs -0 shasum -a 256 > MANIFEST.sha256
+  cd "${MODEL_DIR}"
+  find . -path ./variants -prune -o -path ./work -prune -o \
+    -name manifest.sha256 -prune -o -type f -print0 | \
+    sort -z | xargs -0 shasum -a 256 > manifest.sha256
 )
 
 shasum -a 256 "${FINAL_KMODEL}" "${FINAL_ONNX}" "${PTQ_NPZ}"

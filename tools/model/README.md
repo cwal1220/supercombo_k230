@@ -5,9 +5,9 @@ and compile a K230 `.kmodel`.
 
 The current cleaned final artifact package is:
 
-- `../final_k230_model/`
+- `../../models/`
 
-Use `../final_k230_model/README.md` for the exact final ONNX, PTQ, compile
+Use `../../models/README.md` for the exact final ONNX, PTQ, compile
 commands, hashes, and input contract. That package is the source of truth for
 the current no-GRU, no-big-tower, input-compatible K230 model.
 
@@ -33,16 +33,16 @@ the current no-GRU, no-big-tower, input-compatible K230 model.
   - Imports ONNX into nncase, applies optional PTQ data, and writes `.kmodel`.
   - On this Mac, the practical K230 path is the `linux/amd64` Docker image
     `supercombo-nncase-k230:2.11.0-sdk` with the Rosetta/.NET mitigation flags
-    documented in `../final_k230_model/README.md`.
+    documented in `../../models/README.md`.
 
 ## Current final model summary
 
 - Final ONNX:
-  - `../final_k230_model/onnx/supercombo_gemm_split3_iddwelu223_nogru_splitplan_delta_nobig_keepinput_foldzero.onnx`
+  - `../../models/onnx/supercombo_gemm_split3_iddwelu223_nogru_splitplan_delta_nobig_keepinput_foldzero.onnx`
 - Final kmodel:
-  - `../final_k230_model/model/supercombo.kmodel`
+  - `../../models/supercombo.kmodel`
 - PTQ data:
-  - `../final_k230_model/ptq/supercombo_balanced80_calib.npz`
+  - `../../models/ptq/supercombo_balanced80_calib.npz`
 - Quantization:
   - INT16 activations, UINT8 weights, `NoClip`, 80 balanced samples.
 - Runtime compatibility:

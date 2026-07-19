@@ -49,9 +49,13 @@ bool steering_gate_allows(const SteeringGateInput &input) {
   return true;
 }
 
-float mdps_speed_for_lkas(float cluster_speed, bool lkas_active, bool is_mph) {
+float mdps_speed_for_lkas(float cluster_speed, bool lkas_active, bool is_mph,
+                          float spoof_speed_kph) {
   if (!std::isfinite(cluster_speed) || cluster_speed < 0.0f) return 0.0f;
-  const float threshold = is_mph ? 38.0f : 60.0f;
+  const float safe_spoof_kph = std::isfinite(spoof_speed_kph)
+      ? std::clamp(spoof_speed_kph, 30.0f, 100.0f)
+      : 60.0f;
+  const float threshold = is_mph ? safe_spoof_kph / 1.609344f : safe_spoof_kph;
   if (!lkas_active || cluster_speed > threshold) return cluster_speed;
   return threshold;
 }

@@ -208,7 +208,8 @@ std::vector<CanFrame> build_k7_hev_lateral_can_frames(const HyundaiLkas11Values 
     if (config.send_clu11_speed_to_mdps && (frame % 2) != 0) {
       HyundaiCluCommand clu_command;
       clu_command.button = 0;
-      clu_command.speed = mdps_speed_for_lkas(cluster_speed, lkas_active, is_mph);
+      clu_command.speed = mdps_speed_for_lkas(
+          cluster_speed, lkas_active, is_mph, config.mdps_speed_spoof_kph);
       clu_command.frame = frame;
       frames.push_back(create_clu11_frame(clu_seed, clu_command, config.mdps_bus));
     }

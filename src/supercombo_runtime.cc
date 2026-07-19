@@ -69,6 +69,15 @@ int SupercomboRuntime::run_replay()
 {
     try {
         ReplayNv12Source source(config_.replay_nv12_path);
+        AppConfig replay_config = config_;
+        if (!env_present("SUPERCOMBO_INPUT_WARP_FX"))
+            replay_config.input_warp_fx = default_input_warp_fx(source.width());
+        if (!env_present("SUPERCOMBO_INPUT_WARP_FY"))
+            replay_config.input_warp_fy = default_input_warp_fy(source.height());
+        if (!env_present("SUPERCOMBO_INPUT_WARP_CX"))
+            replay_config.input_warp_cx = default_input_warp_cx(source.width());
+        if (!env_present("SUPERCOMBO_INPUT_WARP_CY"))
+            replay_config.input_warp_cy = default_input_warp_cy(source.height());
         const unsigned target_frames = config_.max_frames > 0
             ? std::min(config_.max_frames, source.frame_count())
             : source.frame_count();
@@ -79,7 +88,10 @@ int SupercomboRuntime::run_replay()
                      source.frame_count(), config_.replay_nv12_path.c_str(), target_frames);
         std::fprintf(stderr, "replay mode=headless camera=off display=off\n");
 
-        SupercomboModel model(config_.kmodel_path.c_str(), config_.debug_mode, config_);
+        SupercomboModel model(config_.kmodel_path.c_str(), config_.debug_mode, replay_config);
+        float initial_rpy[3] = {};
+        calibration_.input_rpy(initial_rpy);
+        model.set_input_calibration(initial_rpy);
         std::vector<float> raw;
         unsigned processed = 0;
         unsigned errors = 0;
@@ -96,8 +108,7 @@ int SupercomboRuntime::run_replay()
                 float input_rpy[3];
                 calibration_.input_rpy(input_rpy);
                 model.set_input_calibration(input_rpy);
-                const ProjectionState projection = calibration_.projection();
-                lateral_control_.update(parsed.plan, projection);
+                lateral_control_.update(parsed.plan);
                 ++processed;
             } else {
                 ++errors;
@@ -142,6 +153,9 @@ void SupercomboRuntime::ai_thread_proc()
     try {
         LiveNv12Source source(config_, kd_mpi_get_vvcam_video00() + 1);
         SupercomboModel model(config_.kmodel_path.c_str(), config_.debug_mode, config_);
+        float initial_rpy[3] = {};
+        calibration_.input_rpy(initial_rpy);
+        model.set_input_calibration(initial_rpy);
         Nv12Frame frame;
         std::vector<float> raw;
         unsigned processed_frames = 0;
@@ -161,7 +175,7 @@ void SupercomboRuntime::ai_thread_proc()
                 calibration_.input_rpy(input_rpy);
                 model.set_input_calibration(input_rpy);
                 const ProjectionState projection = calibration_.projection();
-                lateral_control_.update(parsed.plan, projection);
+                lateral_control_.update(parsed.plan);
                 {
                     std::lock_guard<std::mutex> lock(result_mutex_);
                     latest_output_ = parsed;

@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "driving_params.h"
 #include "hyundai_can.h"
 #include "k7_path.h"
 #include "lateral_control.h"
@@ -13,8 +14,8 @@ struct K7LateralControllerConfig {
   bool enabled = true;
   bool zero_release_when_inactive = true;
   bool force_engaged = false;
-  float command_timeout_s = 0.25f;
   K7SteeringParams steering_params{};
+  K7DrivingParams driving_params{};
   HyundaiCanConfig can_config{};
 };
 
@@ -36,7 +37,6 @@ struct K7LateralControlResult {
   int desired_torque = 0;
   int apply_torque = 0;
   bool cut_steer_temp = false;
-  bool saturated = false;
   std::string active_block;
   std::vector<CanFrame> frames;
 };
@@ -132,7 +132,6 @@ private:
   int cut_steer_frames_ = 0;
   bool cut_steer_ = false;
   int lanechange_manual_timer_ = 0;
-  int emergency_manual_timer_ = 0;
   int driver_steering_torque_above_timer_ = 100;
   float steer_timer_apply_torque_ = 1.0f;
   bool lkas11_counter_valid_ = false;

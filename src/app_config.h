@@ -5,22 +5,49 @@
 
 constexpr unsigned kDefaultSensorWidth = 1920;
 constexpr unsigned kDefaultSensorHeight = 1080;
+constexpr unsigned kDefaultAiWidth = 640;
+constexpr unsigned kDefaultAiHeight = 360;
+constexpr unsigned kDefaultModelWidth = 512;
+constexpr unsigned kDefaultModelHeight = 256;
 constexpr float kDefaultModelFx = 910.0f;
 constexpr float kDefaultModelFy = 910.0f;
 constexpr float kDefaultModelCx = 256.0f;
 constexpr float kDefaultModelCy = 47.6f;
-
-enum class ProjectionMode {
-    Openpilot = 0,
-    Legacy = 1,
-};
+constexpr float kK230CameraFx = 1625.7416788144435f;
+constexpr float kK230CameraFy = 1585.9830269782024f;
+constexpr float kK230CameraCx = 946.13450988811394f;
+constexpr float kK230CameraCy = 537.34063862123787f;
+constexpr float default_input_warp_fx(unsigned source_width)
+{
+    return kK230CameraFx * static_cast<float>(source_width) /
+        static_cast<float>(kDefaultSensorWidth);
+}
+constexpr float default_input_warp_fy(unsigned source_height)
+{
+    return kK230CameraFy * static_cast<float>(source_height) /
+        static_cast<float>(kDefaultSensorHeight);
+}
+constexpr float default_input_warp_cx(unsigned source_width)
+{
+    return kK230CameraCx * static_cast<float>(source_width) /
+        static_cast<float>(kDefaultSensorWidth);
+}
+constexpr float default_input_warp_cy(unsigned source_height)
+{
+    return kK230CameraCy * static_cast<float>(source_height) /
+        static_cast<float>(kDefaultSensorHeight);
+}
+constexpr float kDefaultInputWarpFx = default_input_warp_fx(kDefaultAiWidth);
+constexpr float kDefaultInputWarpFy = default_input_warp_fy(kDefaultAiHeight);
+constexpr float kDefaultInputWarpCx = default_input_warp_cx(kDefaultAiWidth);
+constexpr float kDefaultInputWarpCy = default_input_warp_cy(kDefaultAiHeight);
 
 struct AppConfig {
     std::string kmodel_path;
     int debug_mode = 1;
 
-    unsigned nv12_width = 512;
-    unsigned nv12_height = 256;
+    unsigned nv12_width = kDefaultAiWidth;
+    unsigned nv12_height = kDefaultAiHeight;
     unsigned nv12_crop_x = 0;
     unsigned nv12_crop_y = 0;
     unsigned nv12_crop_width = kDefaultSensorWidth;
@@ -38,16 +65,14 @@ struct AppConfig {
     bool log_calibration = false;
     bool profile = false;
 
-    float input_warp_fx = kDefaultModelFx;
-    float input_warp_fy = kDefaultModelFy;
-    float input_warp_cx = kDefaultModelCx;
-    float input_warp_cy = kDefaultModelCy;
+    float input_warp_fx = kDefaultInputWarpFx;
+    float input_warp_fy = kDefaultInputWarpFy;
+    float input_warp_cx = kDefaultInputWarpCx;
+    float input_warp_cy = kDefaultInputWarpCy;
     float input_warp_height = 1.22f;
     float input_warp_roll = 0.0f;
     float input_warp_pitch = 0.0f;
     float input_warp_yaw = 0.0f;
-
-    ProjectionMode projection_mode = ProjectionMode::Legacy;
 
     static AppConfig from_env(int argc, char *argv[]);
     static AppConfig from_env_defaults();
@@ -63,6 +88,4 @@ unsigned env_unsigned(const char *name, unsigned default_value);
 float env_float(const char *name, float default_value);
 float deg_to_rad(float deg);
 float rad_to_deg(float rad);
-const char *projection_mode_name(ProjectionMode mode);
-
 #endif

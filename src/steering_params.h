@@ -8,10 +8,6 @@ struct EffectiveSteerLimits {
   int steer_max = 384;
   int steer_delta_up = 3;
   int steer_delta_down = 7;
-  bool variable_steer_max = false;
-  bool variable_steer_delta = false;
-  bool steer_more_active = false;
-  float model_speed_kph = 0.0f;
 };
 
 struct K7SteeringParams {
@@ -47,7 +43,6 @@ struct K7SteeringParams {
   float steer_ratio = 15.5f;
   float tire_stiffness_factor = 0.85f;
   float steer_actuator_delay = 0.36f;
-  float steer_limit_timer = 1.0f;
   float max_steering_angle_deg = 90.0f;
   bool avoid_lkas_fault_enabled = false;
   float avoid_lkas_fault_max_angle_deg = 85.0f;
@@ -106,7 +101,6 @@ public:
   float error() const { return error_; }
   float feedforward() const { return feedforward_; }
   float actual_curvature() const { return actual_curvature_; }
-  bool saturated() const { return saturated_; }
 
 private:
   // 차량 모델 slip factor를 파라미터에 맞춰 갱신한다.
@@ -127,7 +121,6 @@ private:
   float p_ = 0.0f;
   float i_ = 0.0f;
   float f_ = 0.0f;
-  float sat_count_ = 0.0f;
   float slip_factor_ = 0.0f;
   float inv_slip_factor_ = 0.0f;
   float last_mass_kg_ = -1.0f;
@@ -140,7 +133,6 @@ private:
   float error_ = 0.0f;
   float feedforward_ = 0.0f;
   float actual_curvature_ = 0.0f;
-  bool saturated_ = false;
 };
 
 // steering_params.json을 읽어 K7SteeringParams에 반영한다.

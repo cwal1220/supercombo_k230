@@ -21,8 +21,8 @@ private:
         uint16_t weight[4] = {0, 0, 0, 0};
     };
 
-    static constexpr int kModelW = 512;
-    static constexpr int kModelH = 256;
+    static constexpr int kModelW = kDefaultModelWidth;
+    static constexpr int kModelH = kDefaultModelHeight;
     static constexpr int kHalfW = kModelW / 2;
     static constexpr int kHalfH = kModelH / 2;
     static constexpr int kWeightBits = 12;
@@ -39,10 +39,10 @@ private:
     int map_src_w_ = 0;
     int map_src_h_ = 0;
 
-    float fx_ = 910.0f;
-    float fy_ = 910.0f;
-    float cx_ = 256.0f;
-    float cy_ = 47.6f;
+    float fx_ = kDefaultInputWarpFx;
+    float fy_ = kDefaultInputWarpFy;
+    float cx_ = kDefaultInputWarpCx;
+    float cy_ = kDefaultInputWarpCy;
     float height_ = 1.22f;
     float roll_ = 0.0f;
     float pitch_ = 0.0f;

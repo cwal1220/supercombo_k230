@@ -1,6 +1,7 @@
 #ifndef K230_IPC_H
 #define K230_IPC_H
 
+#include "app_config.h"
 #include "lateral_control.h"
 #include "model_output.h"
 #include "online_calibrator.h"
@@ -16,8 +17,8 @@ constexpr uint32_t kK230IpcVersion = 1;
 constexpr uint32_t kK230FrameRingMagic = 0x4b465249;
 constexpr unsigned kK230FrameSlots = 4;
 constexpr unsigned kK230MaxProcesses = 6;
-constexpr unsigned kK230AiWidth = 512;
-constexpr unsigned kK230AiHeight = 256;
+constexpr unsigned kK230AiWidth = kDefaultAiWidth;
+constexpr unsigned kK230AiHeight = kDefaultAiHeight;
 constexpr unsigned kK230AiFrameBytes = kK230AiWidth * kK230AiHeight * 3 / 2;
 constexpr char kK230RoadAiFrameTopic[] = "/k230_road_ai_frame";
 constexpr char kK230ModelStateTopic[] = "/k230_model_state";
@@ -123,7 +124,6 @@ struct K230ModelState {
     uint64_t model_timestamp_ns = 0;
     float model_execution_ms = 0.0f;
     uint32_t valid = 0;
-    uint32_t projection_mode = static_cast<uint32_t>(ProjectionMode::Legacy);
     int32_t best_plan = 0;
     float plan_probability = 0.0f;
     float model_t[kTrajectorySize] = {};

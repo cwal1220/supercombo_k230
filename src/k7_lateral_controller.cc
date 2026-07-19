@@ -8,14 +8,8 @@ namespace {
 constexpr int kButtonSetDecel = 2;
 constexpr int kButtonCancel = 4;
 constexpr int kGearDrive = 5;
-constexpr float kLaneChangeSpeedMinMps = 30.0f * 0.2777777778f;
-constexpr int kManualSteerDisableFrames = 50;
-constexpr int kDriverSteeringTorqueAbove = 170;
 constexpr float kSmoothSteerRecoverStep = 0.005f;
-constexpr float kMaxLateralJerk = 5.0f;
 constexpr float kDesiredCurvatureLimit = 0.1f;
-constexpr float kMaxLateralAccel = 3.0f;
-constexpr float kMaxCurvature = 0.2f;
 constexpr float kGravity = 9.8f;
 
 float clamp_float(float value, float lo, float hi) {
@@ -74,6 +68,7 @@ K7LateralController::K7LateralController(K7LateralControllerConfig config)
   config_.can_config.send_lkas_on_scc_bus = false;
   config_.can_config.send_lkas_on_mdps_bus = true;
   config_.can_config.send_clu11_speed_to_mdps = true;
+  config_.can_config.mdps_speed_spoof_kph = config_.driving_params.mdps_speed_spoof_kph;
 }
 
 // 차량 버튼/상태와 lane path를 바탕으로 LKAS 제어 결과와 CAN frame을 만든다.
@@ -91,7 +86,9 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
   result.left_lane = path.left_valid;
   result.right_lane = path.right_valid;
   result.seeds_ready = k7_seed_frames_ready(vehicle_state);
-  result.vehicle_fresh = k7_vehicle_state_fresh(vehicle_state, now_s);
+  result.vehicle_fresh = k7_vehicle_state_fresh(
+      vehicle_state, now_s,
+      static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) / 1000.0);
   result.speed_kph = cluster_speed_kph(vehicle_state);
   const float speed_mps = result.speed_kph / 3.6f;
   if (logical_engaged) {
@@ -121,7 +118,10 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
   control_params.steer_max = effective_limits.steer_max;
   control_params.steer_delta_up = effective_limits.steer_delta_up;
   control_params.steer_delta_down = effective_limits.steer_delta_down;
-  const bool yaw_rate_valid = signal_fresh(vehicle_state.esp12_time_s, now_s) &&
+  const bool yaw_rate_valid = signal_fresh(
+                                  vehicle_state.esp12_time_s, now_s,
+                                  static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) /
+                                      1000.0) &&
                               vehicle_state.yaw_rate_valid;
   if (result.active) {
     const int raw_torque = torque_controller_.update(
@@ -138,7 +138,6 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
     result.curvature_error = result.desired_curvature - result.actual_curvature;
     result.normalized_output = torque_controller_.normalized_output();
     result.feedforward = torque_controller_.feedforward();
-    result.saturated = torque_controller_.saturated();
     result.apply_torque = apply_hyundai_steer_torque_limits(
         result.desired_torque, last_torque_, vehicle_state.driver_torque,
         control_params.hyundai_limits(effective_limits));
@@ -150,7 +149,6 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
     result.curvature_error = result.desired_curvature - result.actual_curvature;
     result.normalized_output = torque_controller_.normalized_output();
     result.feedforward = torque_controller_.feedforward();
-    result.saturated = torque_controller_.saturated();
     result.desired_torque = 0;
     result.apply_torque = 0;
   }
@@ -159,7 +157,8 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
       result.seeds_ready &&
       (result.active ||
        (config_.zero_release_when_inactive &&
-        (result.engaged || now_s - last_disengage_s_ < 0.25)));
+        (result.engaged || now_s - last_disengage_s_ <
+            static_cast<double>(config_.driving_params.inactive_release_ms) / 1000.0)));
   if (result.should_send) {
     result.frames = build_frames(vehicle_state, result, frame);
   } else {
@@ -209,21 +208,18 @@ void K7LateralController::update_button_state(int button, double now_s) {
 void K7LateralController::update_manual_blinker_timers(
     const K7VehicleCanState &vehicle_state, float speed_mps) {
   const bool one_side_blinker = vehicle_state.left_blinker != vehicle_state.right_blinker;
+  const float lane_change_min_speed_mps =
+      config_.driving_params.lane_change_min_speed_kph / 3.6f;
   if (one_side_blinker &&
-      speed_mps < kLaneChangeSpeedMinMps &&
+      speed_mps < lane_change_min_speed_mps &&
       config_.steering_params.turn_steering_disable) {
-    lanechange_manual_timer_ = kManualSteerDisableFrames;
-  }
-  if (vehicle_state.hazard ||
-      (vehicle_state.left_blinker && vehicle_state.right_blinker)) {
-    emergency_manual_timer_ = kManualSteerDisableFrames;
+    lanechange_manual_timer_ = config_.driving_params.manual_steer_disable_frames;
   }
 }
 
 // 수동 조향 차단 타이머를 한 프레임 감소시킨다.
 void K7LateralController::decay_manual_blinker_timers() {
   if (lanechange_manual_timer_ > 0) --lanechange_manual_timer_;
-  if (emergency_manual_timer_ > 0) --emergency_manual_timer_;
 }
 
 // 현재 수동 조향 차단 사유를 반환한다.
@@ -290,8 +286,8 @@ bool K7LateralController::update_cut_steer_state(
 void K7LateralController::update_driver_steering_guard(
     const K7VehicleCanState &vehicle_state, float speed_mps) {
   const bool driver_steering_torque_above =
-      std::abs(vehicle_state.driver_torque) > kDriverSteeringTorqueAbove &&
-      speed_mps < kLaneChangeSpeedMinMps;
+      std::abs(vehicle_state.driver_torque) > config_.driving_params.driver_torque_threshold &&
+      speed_mps < config_.driving_params.lane_change_min_speed_kph / 3.6f;
   if (driver_steering_torque_above) {
     driver_steering_torque_above_timer_ =
         std::max(0, driver_steering_torque_above_timer_ - 1);
@@ -342,7 +338,6 @@ void K7LateralController::reset_control_state() {
   cut_steer_frames_ = 0;
   cut_steer_ = false;
   lanechange_manual_timer_ = 0;
-  emergency_manual_timer_ = 0;
   driver_steering_torque_above_timer_ = 100;
   steer_timer_apply_torque_ = 1.0f;
   torque_controller_.reset();
@@ -369,7 +364,11 @@ std::string K7LateralController::active_block_reason(
   if (vehicle_state.park_brake) return "park_brake";
   if (vehicle_state.brake_error) return "brake_error";
   if (!config_.steering_params.torque_use_angle) {
-    if (!signal_fresh(vehicle_state.esp12_time_s, now_s)) return "esp_stale";
+    if (!signal_fresh(vehicle_state.esp12_time_s, now_s,
+                      static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) /
+                          1000.0)) {
+      return "esp_stale";
+    }
     if (!vehicle_state.yaw_rate_valid) return "yaw_rate_invalid";
   }
   if (vehicle_state.gear != kGearDrive) return "gear_not_drive";
@@ -398,7 +397,8 @@ float K7LateralController::lag_adjusted_desired_curvature(
   float desired_curvature = current_curvature +
       2.0f * (curvature_from_psi - current_curvature);
 
-  const float max_curvature_rate = kMaxLateralJerk / (speed * speed);
+  const float max_curvature_rate = config_.driving_params.max_lateral_jerk /
+      (speed * speed);
   desired_curvature = clamp_float(
       desired_curvature,
       current_curvature - max_curvature_rate * kDesiredCurvatureLimit,
@@ -408,9 +408,13 @@ float K7LateralController::lag_adjusted_desired_curvature(
   const float roll_compensation = config_.steering_params.roll_rad * kGravity;
   desired_curvature = clamp_float(
       desired_curvature,
-      (-kMaxLateralAccel + roll_compensation) / (limit_speed * limit_speed),
-      (kMaxLateralAccel + roll_compensation) / (limit_speed * limit_speed));
-  desired_curvature = clamp_float(desired_curvature, -kMaxCurvature, kMaxCurvature);
+      (-config_.driving_params.max_lateral_accel + roll_compensation) /
+          (limit_speed * limit_speed),
+      (config_.driving_params.max_lateral_accel + roll_compensation) /
+          (limit_speed * limit_speed));
+  desired_curvature = clamp_float(desired_curvature,
+                                  -config_.driving_params.max_curvature,
+                                  config_.driving_params.max_curvature);
   return config_.steering_params.invert_steer ? -desired_curvature : desired_curvature;
 }
 

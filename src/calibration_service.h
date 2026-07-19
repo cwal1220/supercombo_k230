@@ -7,6 +7,7 @@
 #include "projection.h"
 
 #include <chrono>
+#include <string>
 
 class CalibrationService {
 public:
@@ -21,20 +22,26 @@ public:
 private:
     const char *mode_name(const OnlineCalibrator::Snapshot &snapshot) const;
     void maybe_log(const OnlineCalibrator::UpdateResult &result);
+    void maybe_persist(const OnlineCalibrator::UpdateResult &result);
     void set_fixed_projection();
 
-    ProjectionMode projection_mode_ = ProjectionMode::Legacy;
     bool auto_enabled_ = true;
     bool manual_override_ = false;
     bool log_enabled_ = false;
+    bool restored_ = false;
+    bool has_persisted_ = false;
     float fixed_rpy_[3] = {};
     float online_rpy_[3] = {};
+    float persisted_rpy_[3] = {};
+    std::string params_dir_;
+    std::string calibration_path_;
 
     OnlineCalibrator calibrator_;
     OnlineCalibrator::Snapshot last_snapshot_{};
     ProjectionState projection_;
 
     std::chrono::steady_clock::time_point last_log_{};
+    std::chrono::steady_clock::time_point last_persist_{};
     CalibrationStatus last_status_ = CalibrationStatus::Uncalibrated;
     int last_valid_blocks_ = -1;
 };

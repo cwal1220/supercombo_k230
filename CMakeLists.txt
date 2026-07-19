@@ -14,9 +14,9 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 foreach(config_type DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
-  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_type} "${CMAKE_CURRENT_SOURCE_DIR}")
+  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${config_type} "${CMAKE_BINARY_DIR}/bin")
 endforeach()
 
 set(K230_SYSROOT "" CACHE PATH "K230 target sysroot")
@@ -46,6 +46,7 @@ set(PROJECT_LOCAL_INCLUDES
 set(PROJECT_SYSTEM_INCLUDES)
 
 add_library(k7_control_core STATIC
+  src/driving_params.cc
   src/hyundai_can.cc
   src/hyundai_steering.cc
   src/json_utils.cc
@@ -93,7 +94,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     if(NOT EXISTS "${required_lib}")
       message(FATAL_ERROR
         "Missing required library: ${required_lib}\n"
-        "Run ./fetch_nncase_runtime.sh for deps/, and install/restore K230 display libraries.")
+        "Run scripts/fetch_nncase_runtime.sh for deps/, and install/restore K230 display libraries.")
     endif()
   endforeach()
 
@@ -132,6 +133,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     src/ai_base.cc
     src/calibration_service.cc
     src/input_source.cc
+    src/json_utils.cc
     src/k230_ipc.cc
     src/lateral_control.cc
     src/model_input_transform.cc
@@ -277,6 +279,7 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
     benchmarks/verify_calibration_equivalence.cc
     src/app_config.cc
     src/calibration_service.cc
+    src/json_utils.cc
     src/model_input_transform.cc
     src/online_calibrator.cc
     src/projection.cc
@@ -307,6 +310,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     install(TARGETS k230_pandad k230_k7_controlsd RUNTIME DESTINATION .)
     install(FILES ${ACADOS_RUNTIME_LIBS} DESTINATION lib)
   endif()
-  install(PROGRAMS k230_manager.py DESTINATION .)
+  install(PROGRAMS scripts/k230_manager.py DESTINATION .)
   install(DIRECTORY models DESTINATION . OPTIONAL FILES_MATCHING PATTERN "*.kmodel")
+  install(DIRECTORY params DESTINATION . FILES_MATCHING PATTERN "*.json")
 endif()

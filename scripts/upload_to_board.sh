@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_dir}"
+
 BOARD="${1:-root@192.168.219.111}"
 DEST="${K230_BOARD_DIR:-/root/supercombo_k230}"
+BUILD_DIR="${K230_BUILD_DIR:-build-k230-sdk}"
+BIN_DIR="${K230_BIN_DIR:-${BUILD_DIR}/bin}"
 read -r -a SSH_CMD <<< "${K230_SSH:-ssh}"
 read -r -a SCP_CMD <<< "${K230_SCP:-scp}"
 SSH_OPTIONS=(
@@ -12,21 +17,28 @@ SSH_OPTIONS=(
 )
 
 runtime_files=(
-  supercombo.elf
-  k230_camerad
-  k230_modeld
-  k230_overlay
-  k230_manager.py
+  "${BIN_DIR}/supercombo.elf"
+  "${BIN_DIR}/k230_camerad"
+  "${BIN_DIR}/k230_modeld"
+  "${BIN_DIR}/k230_overlay"
+  scripts/k230_manager.py
 )
-model="final_k230_model/model/supercombo.kmodel"
+model="models/supercombo.kmodel"
 
-if [ -x k230_pandad ]; then
-  runtime_files+=(k230_pandad k230_k7_controlsd)
+if [ -x "${BIN_DIR}/k230_pandad" ]; then
+  runtime_files+=("${BIN_DIR}/k230_pandad" "${BIN_DIR}/k230_k7_controlsd")
 fi
 
-"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/model'"
+for runtime_file in "${runtime_files[@]}"; do
+  if [ ! -f "${runtime_file}" ]; then
+    echo "Missing runtime file: ${runtime_file}" >&2
+    exit 1
+  fi
+done
+
+"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/model' '$DEST/params'"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "${runtime_files[@]}" "$BOARD:$DEST/"
-if [ -x k230_k7_controlsd ]; then
+if [ -x "${BIN_DIR}/k230_k7_controlsd" ]; then
   "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/lib'"
   "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \
     deps/acados/lateral_solver/libacados_ocp_solver_lat.so \
@@ -37,4 +49,9 @@ if [ -x k230_k7_controlsd ]; then
     "$BOARD:$DEST/lib/"
 fi
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "$model" "$BOARD:$DEST/model/"
+"${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \
+  params/calibration.json \
+  params/k7_yg_steering.json \
+  params/k7_yg_driving.json \
+  "$BOARD:$DEST/params/"
 echo "Uploaded runtime files to $BOARD:$DEST"

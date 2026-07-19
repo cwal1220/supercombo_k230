@@ -82,6 +82,7 @@ struct HyundaiCanConfig {
   bool send_lkas_on_scc_bus = true;
   bool send_lkas_on_mdps_bus = true;
   bool send_clu11_speed_to_mdps = true;
+  float mdps_speed_spoof_kph = 60.0f;
 };
 
 HyundaiLkas11Values decode_lkas11(const std::array<uint8_t, 8> &data);

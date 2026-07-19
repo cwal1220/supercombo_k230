@@ -48,7 +48,7 @@ bool publish_output(K230LatestChannel &model_pub, SupercomboModel &model, const 
     model.set_input_calibration(input_rpy);
 
     const ProjectionState projection = calibration.projection();
-    const LateralTarget lateral = lateral_control.update(parsed.plan, projection);
+    const LateralTarget lateral = lateral_control.update(parsed.plan);
 
     K230ModelState state;
     k230_fill_model_state(state, parsed, projection, calibration.snapshot(), lateral,
@@ -59,15 +59,27 @@ bool publish_output(K230LatestChannel &model_pub, SupercomboModel &model, const 
 int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
 {
     ReplayNv12Source source(config.replay_nv12_path);
+    AppConfig replay_config = config;
+    if (!env_present("SUPERCOMBO_INPUT_WARP_FX"))
+        replay_config.input_warp_fx = default_input_warp_fx(source.width());
+    if (!env_present("SUPERCOMBO_INPUT_WARP_FY"))
+        replay_config.input_warp_fy = default_input_warp_fy(source.height());
+    if (!env_present("SUPERCOMBO_INPUT_WARP_CX"))
+        replay_config.input_warp_cx = default_input_warp_cx(source.width());
+    if (!env_present("SUPERCOMBO_INPUT_WARP_CY"))
+        replay_config.input_warp_cy = default_input_warp_cy(source.height());
     const unsigned target_frames = config.max_frames > 0
         ? std::min(config.max_frames, source.frame_count())
         : source.frame_count();
     std::fprintf(stderr, "modeld replay input format=NV12 frames=%u file=%s target=%u\n",
                  source.frame_count(), config.replay_nv12_path.c_str(), target_frames);
 
-    SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode, config);
+    SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode, replay_config);
     CalibrationService calibration(config);
     LateralControlDraft lateral_control;
+    float initial_rpy[3] = {};
+    calibration.input_rpy(initial_rpy);
+    model.set_input_calibration(initial_rpy);
 
     Nv12Frame frame;
     std::vector<float> raw;
@@ -135,6 +147,9 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub)
     SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode, config);
     CalibrationService calibration(config);
     LateralControlDraft lateral_control;
+    float initial_rpy[3] = {};
+    calibration.input_rpy(initial_rpy);
+    model.set_input_calibration(initial_rpy);
     K230LatestChannel control_sub;
     bool control_sub_open = false;
     float v_ego = 0.0f;

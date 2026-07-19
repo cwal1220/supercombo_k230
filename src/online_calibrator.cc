@@ -169,6 +169,17 @@ OnlineCalibrator::UpdateResult OnlineCalibrator::update(const PoseObservation &p
     return result;
 }
 
+bool OnlineCalibrator::restore(const float rpy[3], int valid_blocks, const float spread[3])
+{
+    if (!rpy || !finite3(rpy) || !is_calibration_valid(rpy)) return false;
+    reset_to_rpy(rpy, std::max(kInputsNeeded, valid_blocks));
+    if (spread && finite3(spread)) {
+        for (int i = 0; i < 3; ++i)
+            snapshot_.spread[i] = std::max(0.0f, spread[i]);
+    }
+    return snapshot_.status == CalibrationStatus::Calibrated;
+}
+
 OnlineCalibrator::Snapshot OnlineCalibrator::snapshot() const
 {
     return snapshot_;

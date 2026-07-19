@@ -96,6 +96,13 @@ void verify_mdps_speed_spoof() {
           "MDPS CLU11 60 kph spoof");
   require(std::fabs(decoded.speed_decimal - 0.375f) < 0.001f,
           "MDPS CLU11 decimal preservation");
+
+  config.mdps_speed_spoof_kph = 72.0f;
+  const auto custom_frames = build_k7_hev_lateral_can_frames(
+      lkas, clu, command, config, true, 20.0f, false, 1);
+  std::copy_n(custom_frames[2].data.begin(), bytes.size(), bytes.begin());
+  require(std::fabs(decode_clu11(bytes).speed - 72.0f) < 0.001f,
+          "configured MDPS speed spoof");
 }
 
 void verify_lca11() {
@@ -150,6 +157,15 @@ int main(int argc, char **argv) {
     replay.open(argv[1]);
     K7LateralControllerConfig config;
     config.force_engaged = true;
+    std::string error;
+    require(load_k7_steering_params_json("params/k7_yg_steering.json",
+                                         &config.steering_params, &error),
+            "load steering params");
+    require(load_k7_driving_params_json("params/k7_yg_driving.json",
+                                        &config.driving_params, &error),
+            "load driving params");
+    require(std::fabs(config.driving_params.mdps_speed_spoof_kph - 60.0f) < 1e-6f,
+            "driving params MDPS speed");
     K7LateralController controller(config);
     K7VehicleCanState vehicle;
     const LateralPath path = replay_path();

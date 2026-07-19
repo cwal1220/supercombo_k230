@@ -64,6 +64,9 @@ int v4l2_drm_setup(struct v4l2_drm_context context[], unsigned num, struct displ
  * @param fps Array of FPS output, NULL if not used
  */
 int v4l2_drm_run(struct v4l2_drm_context ctx[], unsigned num, v4l2_drm_handler handler);
+int v4l2_drm_run_v4l2_2_drm(struct v4l2_drm_context ctx[], unsigned num,
+                            v4l2_drm_handler handler);
+extern bool v4l2_drm_run_v4l2_2_drm_need_run;
 
 int v4l2_drm_start(const struct v4l2_drm_context* context);
 int v4l2_drm_stop(const struct v4l2_drm_context* context);

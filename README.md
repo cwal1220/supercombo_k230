@@ -6,14 +6,14 @@ an identity depthwise 1x1 Conv before it.
 
 Final runtime artifact:
 
-- `models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel`
+- `models/supercombo.kmodel`
 
 The original model is available in the openpilot fork:
 
 - [supercombo.onnx](https://github.com/cwal1220/openpilot_c2/blob/master/selfdrive/modeld/models/supercombo.onnx)
 
 The rewritten ONNX is an intermediate generated artifact and is intentionally
-not tracked in this repository. See `model_tools/` for the rewrite/compile
+not tracked in this repository. See `tools/model/` for the rewrite/compile
 scripts and exact reproduction commands.
 
 Board prerequisites:
@@ -41,7 +41,7 @@ Package purpose:
 - `libdrm-dev`: DRM headers used by the overlay/display path
 - `libusb-1.0-0-dev`: optional panda USB/CAN bridge build
 - `libopencv-dev`: OpenCV headers/libraries used by the overlay renderer
-- `curl`, `ca-certificates`: `fetch_nncase_runtime.sh` download support
+- `curl`, `ca-certificates`: `scripts/fetch_nncase_runtime.sh` download support
 - `git`: fresh clone from GitHub
 - `python3`: `k230_manager.py`
 
@@ -56,11 +56,12 @@ The flashed image must already include these runtime libraries/devices:
 Build on the board:
 
 ```sh
-cd /root/supercombo_native
-./fetch_nncase_runtime.sh
+cd /root/supercombo_k230
+./scripts/fetch_nncase_runtime.sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j2
-./k230_manager.py models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel 0
+cd build/bin
+../../scripts/k230_manager.py ../../models/supercombo.kmodel 0
 ```
 
 Build the optional panda bridge when `libusb-1.0-0-dev` is installed:
@@ -79,7 +80,7 @@ build the `k230_canmv_01studio_defconfig` SDK output:
 
 ```sh
 cd /Users/chan/Documents/supercombo_k230
-./fetch_nncase_runtime.sh
+./scripts/fetch_nncase_runtime.sh
 ```
 
 Then configure and build with the SDK host wrapper and Xuantie toolchain. The
@@ -88,7 +89,7 @@ script defaults to the SDK and toolchain paths under
 `K230_XUANTIE_TOOLCHAIN_DIR` when needed:
 
 ```sh
-scripts/configure_mac_rv64.sh
+scripts/configure_k230_cross_build.sh
 
 docker run --rm --platform linux/amd64 \
   -v "$PWD":/work \
@@ -102,10 +103,16 @@ docker run --rm --platform linux/amd64 \
 Upload the rebuilt runtime files to the board:
 
 ```sh
-K230_RSYNC_RSH="sshpass -p '<password>' ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=no" \
+K230_SSH="sshpass -p '<password>' ssh" \
+K230_SCP="sshpass -p '<password>' scp" \
   scripts/upload_to_board.sh root@192.168.219.115
 ```
 
+The upload script reads binaries from `build-k230-sdk/bin` by default. Set
+`K230_BUILD_DIR=build` for an on-board build or `K230_BIN_DIR` for a custom
+binary directory.
+
+All CMake executables are written below the selected build directory in `bin/`.
 `build-k230-sdk/` is local generated output and is not tracked. Do not use a
 generic Ubuntu riscv64 compiler for board binaries: it can link against a newer
 glibc than the flashed K230 image provides.
@@ -116,11 +123,13 @@ The historical Makefile is still kept as a rollback build path:
 make -j2
 ```
 
+It also places linked executables in `build/bin/`.
+
 Openpilot-style split runtime:
 
 ```sh
-cd /root/supercombo_native
-./k230_manager.py models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel 0
+cd /root/supercombo_k230
+./scripts/k230_manager.py models/supercombo.kmodel 0
 ```
 
 The split runtime gives the model pipeline priority and keeps display work to a
@@ -151,7 +160,7 @@ minimal passive overlay subscriber:
     and several preview frames have actually been displayed
 - `k230_camerad`
   - starts after the manager sees `/tmp/k230_display_ready`
-  - captures `/dev/video2` as `NV12 512x256`
+  - captures `/dev/video2` as `NV12 640x360`
   - copies frames into `/dev/shm/k230_road_ai`, a 4-slot shared NV12 ring
   - publishes only frame metadata as `roadAiFrame`
 - `k230_modeld`
@@ -176,18 +185,19 @@ minimal passive overlay subscriber:
 
 Large AI frames are never sent through the small-message IPC. `k230_overlay`
 does not consume the shared AI frame ring for display; preview stays on the
-K230 `v4l2_drm` display path, while `k230_modeld` consumes the shared `512x256`
+K230 `v4l2_drm` display path, while `k230_modeld` consumes the shared `640x360`
 AI ring. This keeps the split runtime close to openpilot's process boundaries
 without paying the cost of Cap'n Proto/cereal in v1.
 
-The model path captures the AI stream as `NV12 512x256` through `/dev/video2`
-crop/resize, prepares the YUV6 recurrent inputs, runs nncase runtime directly,
-and publishes compact `modelState`. The overlay display process uses
+The model path captures the AI stream as `NV12 640x360` through `/dev/video2`
+crop/resize, warps its centered `512x256` medmodel view, prepares the YUV6
+recurrent inputs, runs nncase runtime directly, and publishes compact
+`modelState`. The overlay display process uses
 `/dev/video1` for preview and `/dev/video2` remains dedicated to the AI stream.
 The model input preparation always uses calibrated homography sampling followed
-by `NV12 -> YUV6` packing. The 01Studio ISP output is already normalized to the
-medmodel view, so the default source intrinsics are `fx=fy=910`, `cx=256`, and
-`cy=47.6`; zero calibration therefore preserves the ISP pixels exactly.
+by `NV12 -> YUV6` packing. The source intrinsics are scaled from the calibrated
+K230 camera matrix, so the default `640x360` path uses `fx=541.91`, `fy=528.66`,
+`cx=315.38`, and `cy=179.11`.
 `SUPERCOMBO_INPUT_WARP_FX/FY/CX/CY` can override these values for a separately
 measured camera pipeline. The medmodel transform feeds the current and previous
 frames into `input_imgs`.
@@ -221,7 +231,7 @@ cmake -S . -B /tmp/supercombo_k230_verify \
 cmake --build /tmp/supercombo_k230_verify \
   --target verify_calibration_equivalence bench_input_warp_overhead -j2
 ./verify_calibration_equivalence
-./bench_input_warp_overhead 3000
+./build/bin/bench_input_warp_overhead 3000
 ```
 
 Latest local/Pi checks:
@@ -296,13 +306,15 @@ Useful runtime options:
 - `SUPERCOMBO_CALIB_AUTO=0`
   - disables pose-based online overlay calibration and keeps the fixed
     zero/manual projection.
-- `SUPERCOMBO_PROJECTION_MODE=openpilot|legacy`
-  - selects the overlay projection math. Default is `legacy`, matching the
-    pre-refactor K230 road-frame projection. `openpilot` enables the openpilot
-    `view_from_calib` rotation for comparison.
 - `SUPERCOMBO_LOG_CALIB=1`
   - prints the online calibrator status, accepted/rejected sample counts,
     valid block count, rpy, and spread.
+- `K230_PARAMS_DIR=/path/to/params`
+  - overrides the shared runtime parameter directory. The default is
+    `params/` relative to the runtime working directory.
+  - stable online calibration is stored atomically in
+    `params/calibration.json` and restored before the first model frame.
+    Manual `SUPERCOMBO_CALIB_*` values take precedence and seed this file.
 - `SUPERCOMBO_INPUT_WARP_ROLL_DEG`, `SUPERCOMBO_INPUT_WARP_PITCH_DEG`,
   `SUPERCOMBO_INPUT_WARP_YAW_DEG`
   - optional model-input warp calibration in degrees. If unset, the input warp
@@ -312,8 +324,7 @@ Useful runtime options:
 - `SUPERCOMBO_INPUT_WARP_FX`, `SUPERCOMBO_INPUT_WARP_FY`,
   `SUPERCOMBO_INPUT_WARP_CX`, `SUPERCOMBO_INPUT_WARP_CY`
   - optional camera intrinsics for the resized source frame. Defaults are
-    derived from the calibrated OV5647 `1920x1080` matrix and the active
-    crop/resize geometry.
+    derived from the calibrated K230 `1920x1080` camera matrix.
 - `SUPERCOMBO_REPLAY_NV12=/path/to/replay.scnv12`
   - runs headless from a preconverted `512x256 NV12` replay file instead of
     opening the camera and display. This is for validating inference and online
@@ -350,11 +361,18 @@ Useful runtime options:
   - bypasses the SET/CANCEL engage latch for offline replay only. Default is
     `0` and must remain `0` in a vehicle.
 - `K230_K7_STEERING_PARAMS=/path/to/steering_params.json`
-  - optionally overrides the validated built-in K7 steering parameters.
+  - overrides the default `params/k7_yg_steering.json` file.
+- `K230_K7_DRIVING_PARAMS=/path/to/driving_params.json`
+  - overrides `params/k7_yg_driving.json`, which contains model/CAN freshness,
+    inactive release, MDPS 60 kph spoof, and lateral motion limits.
+
+The tracked JSON files in `params/` are the source of truth for K7 steering
+and driving configuration. `calibration.json` is board-specific runtime state
+and is intentionally ignored by Git and preserved by the upload script.
 
 Fixed production defaults:
 
-- AI capture is fixed at `/dev/video2`, `NV12 512x256`, full sensor crop
+- AI capture is fixed at `/dev/video2`, `NV12 640x360`, full sensor crop
   `1920x1080+0+0`.
 - Preview is fixed at `/dev/video1`; the manager waits for
   `/tmp/k230_display_ready` before opening the AI stream.
@@ -375,9 +393,8 @@ cmake --build build -j2
 CAN/panda payload checks can be run on a host before connecting the car:
 
 ```sh
-python3 benchmarks/check_k230_can_payload.py
 cmake --build build --target check_panda_can_codec -j2
-./check_panda_can_codec
+./build/bin/check_panda_can_codec
 ```
 
 Create a replay file on the host from collected openpilot logs:
@@ -392,6 +409,6 @@ python3 ../export_replay_nv12.py \
 Then copy it to the board and run:
 
 ```sh
-SUPERCOMBO_REPLAY_NV12=/root/supercombo_native/replay_120.scnv12 \
-  ./supercombo.elf models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel 0
+SUPERCOMBO_REPLAY_NV12=/root/supercombo_k230/replay_120.scnv12 \
+  ./build/bin/supercombo.elf models/supercombo.kmodel 0
 ```

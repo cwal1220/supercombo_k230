@@ -2,6 +2,7 @@
 #include "k7_lateral_controller.h"
 #include "k7_path.h"
 #include "openpilot_lateral_planner.h"
+#include "param_paths.h"
 #include "steering_params.h"
 #include "vehicle_can.h"
 
@@ -179,12 +180,23 @@ int main() {
     K7LateralControllerConfig config;
     config.enabled = env_enabled("K230_K7_CONTROL", true);
     config.force_engaged = env_enabled("K230_K7_FORCE_ENGAGED", false);
-    if (const char *params = std::getenv("K230_K7_STEERING_PARAMS")) {
-      std::string error;
-      if (!load_k7_steering_params_json(params, &config.steering_params, &error)) {
-        throw std::runtime_error("steering params: " + error);
-      }
+    const char *steering_override = std::getenv("K230_K7_STEERING_PARAMS");
+    const char *driving_override = std::getenv("K230_K7_DRIVING_PARAMS");
+    const std::string steering_path = steering_override && steering_override[0] != '\0'
+        ? steering_override : k230_param_path("k7_yg_steering.json");
+    const std::string driving_path = driving_override && driving_override[0] != '\0'
+        ? driving_override : k230_param_path("k7_yg_driving.json");
+    std::string error;
+    if (!load_k7_steering_params_json(steering_path, &config.steering_params, &error)) {
+      throw std::runtime_error("steering params " + steering_path + ": " + error);
     }
+    if (!load_k7_driving_params_json(driving_path, &config.driving_params, &error)) {
+      throw std::runtime_error("driving params " + driving_path + ": " + error);
+    }
+    std::fprintf(stderr,
+                 "k230_k7_controlsd: params steering=%s driving=%s mdpsSpoof=%.1fkph\n",
+                 steering_path.c_str(), driving_path.c_str(),
+                 config.driving_params.mdps_speed_spoof_kph);
     K7LateralController controller(config);
     LateralPlannerWorker lateral_planner(config.steering_params);
     K7VehicleCanState vehicle;
@@ -231,7 +243,9 @@ int main() {
       }
       lateral_target = lateral_planner.latest();
 
-      const LateralPath path = k7_path_from_model_state(model, k230_now_ns());
+      const LateralPath path = k7_path_from_model_state(
+          model, k230_now_ns(),
+          static_cast<unsigned long long>(config.driving_params.model_timeout_ms) * 1000000ULL);
       last_result = controller.update(path, lateral_target, vehicle, now_s,
                                       control_frame++);
 

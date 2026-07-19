@@ -14,15 +14,6 @@ std::string env_string(const char *name)
     return value && value[0] != '\0' ? std::string(value) : std::string();
 }
 
-ProjectionMode env_projection_mode()
-{
-    const char *value = std::getenv("SUPERCOMBO_PROJECTION_MODE");
-    if (!value || value[0] == '\0') return ProjectionMode::Legacy;
-    if (std::strcmp(value, "openpilot") == 0) return ProjectionMode::Openpilot;
-    if (std::strcmp(value, "legacy") == 0) return ProjectionMode::Legacy;
-    return ProjectionMode::Legacy;
-}
-
 } // namespace
 
 bool env_enabled(const char *name)
@@ -77,17 +68,6 @@ float rad_to_deg(float rad)
     return rad * 180.0f / kPi;
 }
 
-const char *projection_mode_name(ProjectionMode mode)
-{
-    switch (mode) {
-    case ProjectionMode::Openpilot:
-        return "openpilot";
-    case ProjectionMode::Legacy:
-        return "legacy";
-    }
-    return "unknown";
-}
-
 std::string AppConfig::usage(const char *program_name)
 {
     return std::string("Usage: ") + (program_name ? program_name : "supercombo.elf") +
@@ -105,6 +85,11 @@ AppConfig AppConfig::from_env_defaults()
     config.nv12_crop_width = env_unsigned("SUPERCOMBO_NV12_CROP_WIDTH", config.nv12_crop_width);
     config.nv12_crop_height = env_unsigned("SUPERCOMBO_NV12_CROP_HEIGHT", config.nv12_crop_height);
     config.model_fps = env_unsigned("SUPERCOMBO_MODEL_FPS", config.model_fps);
+
+    config.input_warp_fx = default_input_warp_fx(config.nv12_width);
+    config.input_warp_fy = default_input_warp_fy(config.nv12_height);
+    config.input_warp_cx = default_input_warp_cx(config.nv12_width);
+    config.input_warp_cy = default_input_warp_cy(config.nv12_height);
 
     config.max_frames = env_unsigned("SUPERCOMBO_MAX_FRAMES", 0);
 
@@ -128,8 +113,6 @@ AppConfig AppConfig::from_env_defaults()
     config.input_warp_roll = deg_to_rad(env_float_prefer("SUPERCOMBO_INPUT_WARP_ROLL_DEG", "SUPERCOMBO_CALIB_ROLL_DEG", 0.0f));
     config.input_warp_pitch = deg_to_rad(env_float_prefer("SUPERCOMBO_INPUT_WARP_PITCH_DEG", "SUPERCOMBO_CALIB_PITCH_DEG", 0.0f));
     config.input_warp_yaw = deg_to_rad(env_float_prefer("SUPERCOMBO_INPUT_WARP_YAW_DEG", "SUPERCOMBO_CALIB_YAW_DEG", 0.0f));
-
-    config.projection_mode = env_projection_mode();
 
     return config;
 }

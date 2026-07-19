@@ -10,14 +10,14 @@ that ELU.
 
 Required runtime artifact:
 
-- `models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel`
+- `models/supercombo.kmodel`
 
 The original ONNX is available in the openpilot fork:
 
 - [supercombo.onnx](https://github.com/cwal1220/openpilot_c2/blob/master/selfdrive/modeld/models/supercombo.onnx)
 
 The rewritten ONNX is an intermediate generated artifact and is intentionally
-not tracked in this repository. See `model_tools/` for the rewrite/compile
+not tracked in this repository. See `tools/model/` for the rewrite/compile
 scripts and exact reproduction commands.
 
 ## What must be preserved
@@ -28,7 +28,7 @@ scripts and exact reproduction commands.
 - `CMakeLists.txt`: primary board-native build recipe
 - `Makefile`: rollback board-native build recipe
 - `k230_manager.py`: minimal openpilot-style process supervisor
-- `fetch_nncase_runtime.sh`: recreates `deps/` from Kendryte nncase v2.11.0 release
+- `scripts/fetch_nncase_runtime.sh`: recreates `deps/` from Kendryte nncase v2.11.0 release
 
 Important files inside `deps/`:
 
@@ -61,7 +61,7 @@ Package purpose:
 - `g++`, `make`, `cmake`: board-native C/C++ build
 - `libdrm-dev`: DRM headers used by the overlay/display path
 - `libopencv-dev`: OpenCV headers/libraries used by the overlay renderer
-- `curl`, `ca-certificates`: `fetch_nncase_runtime.sh` download support
+- `curl`, `ca-certificates`: `scripts/fetch_nncase_runtime.sh` download support
 - `git`: fresh GitHub restore
 - `python3`: `k230_manager.py`
 
@@ -81,31 +81,32 @@ The flashed image must already include:
 From the host:
 
 ```sh
-ssh root@192.168.219.115 'rm -rf /root/supercombo_native && mkdir -p /root/supercombo_native'
-scp -r tools/k230/supercombo_native/* root@192.168.219.115:/root/supercombo_native/
+ssh root@192.168.219.115 'mkdir -p /root/supercombo_k230'
+rsync -a --exclude .git /Users/chan/Documents/supercombo_k230/ \
+  root@192.168.219.115:/root/supercombo_k230/
 ```
 
 If `deps/` was not copied, recreate it on the board:
 
 ```sh
-cd /root/supercombo_native
-./fetch_nncase_runtime.sh
+cd /root/supercombo_k230
+./scripts/fetch_nncase_runtime.sh
 ```
 
 ## Build
 
 ```sh
-cd /root/supercombo_native
+cd /root/supercombo_k230
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j2
 ```
 
 The expected output is:
 
-- `/root/supercombo_native/supercombo.elf`
-- `/root/supercombo_native/k230_overlay`
-- `/root/supercombo_native/k230_camerad`
-- `/root/supercombo_native/k230_modeld`
+- `/root/supercombo_k230/supercombo.elf`
+- `/root/supercombo_k230/k230_overlay`
+- `/root/supercombo_k230/k230_camerad`
+- `/root/supercombo_k230/k230_modeld`
 
 The Makefile remains available as a rollback build path:
 
@@ -117,8 +118,8 @@ make -j2
 ## Run
 
 ```sh
-cd /root/supercombo_native
-./k230_manager.py models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel 0
+cd /root/supercombo_k230
+./scripts/k230_manager.py models/supercombo.kmodel 0
 ```
 
 Expected split-runtime behavior:
@@ -147,7 +148,7 @@ Expected behavior:
 Optional profiling:
 
 ```sh
-SUPERCOMBO_PROFILE=1 ./supercombo.elf models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel 0
+SUPERCOMBO_PROFILE=1 ./supercombo.elf models/supercombo.kmodel 0
 ```
 
 Headless replay from collected driving logs:
@@ -159,20 +160,20 @@ python3 tools/k230/export_replay_nv12.py \
   --out tools/k230/out/replay_nv12/replay_120.scnv12 \
   --frames 120
 scp tools/k230/out/replay_nv12/replay_120.scnv12 \
-  root@192.168.219.115:/root/supercombo_native/
+  root@192.168.219.115:/root/supercombo_k230/
 
 # Board side:
-cd /root/supercombo_native
-SUPERCOMBO_REPLAY_NV12=/root/supercombo_native/replay_120.scnv12 \
-  ./supercombo.elf models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel 0
+cd /root/supercombo_k230
+SUPERCOMBO_REPLAY_NV12=/root/supercombo_k230/replay_120.scnv12 \
+  ./supercombo.elf models/supercombo.kmodel 0
 ```
 
 The split model process can also be tested headlessly:
 
 ```sh
-SUPERCOMBO_REPLAY_NV12=/root/supercombo_native/replay_120.scnv12 \
+SUPERCOMBO_REPLAY_NV12=/root/supercombo_k230/replay_120.scnv12 \
 SUPERCOMBO_MAX_FRAMES=20 \
-  ./k230_modeld models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel 0
+  ./k230_modeld models/supercombo.kmodel 0
 ```
 
 Replay mode does not open the camera or display. It feeds the same
@@ -191,7 +192,7 @@ Overlay projection can be adjusted without rebuilding:
 
 ```sh
 SUPERCOMBO_CALIB_PITCH_DEG=1.0 SUPERCOMBO_CALIB_YAW_DEG=-0.5 \
-  ./supercombo.elf models/supercombo_gemm_split3_iddwelu223_gru_splitplan_delta_int16a_uint8w_real80_noclip.kmodel 0
+  ./supercombo.elf models/supercombo.kmodel 0
 ```
 
 The pose-based online calibrator is enabled by default and only affects overlay

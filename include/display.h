@@ -20,6 +20,8 @@ enum drm_rotation{
     rotation_90 = 1,
     rotation_180 = 2,
     rotation_270 = 3,
+    rotation_reflect_x = 4,
+    rotation_reflect_y = 5,
 };
 struct display {
     int fd;
@@ -39,6 +41,9 @@ struct display {
     drmEventContext drm_event_ctx;
     enum drm_rotation drm_rotation;
     struct display_plane* planes;
+    struct display_buffer* osd_disp_buffer;
+    struct display_buffer* lvgl_disp_buffer;
+    uint32_t frame_count;
 };
 
 

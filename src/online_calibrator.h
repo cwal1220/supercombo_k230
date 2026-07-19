@@ -39,6 +39,7 @@ public:
     OnlineCalibrator();
 
     UpdateResult update(const PoseObservation &pose, float v_ego);
+    bool restore(const float rpy[3], int valid_blocks, const float spread[3] = nullptr);
     Snapshot snapshot() const;
     void output_rpy(float rpy[3]) const;
 

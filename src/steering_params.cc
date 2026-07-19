@@ -171,10 +171,6 @@ EffectiveSteerLimits K7SteeringParams::effective_steer_limits(
                                    std::max(steer_delta_up, steer_delta_up_base));
   limits.steer_delta_down = clamp_int(static_cast<int>(std::lround(next_delta_down)), 0,
                                      std::max(steer_delta_down, steer_delta_down_base));
-  limits.variable_steer_max = variable_steer_max;
-  limits.variable_steer_delta = variable_steer_delta;
-  limits.steer_more_active = steer_more_active;
-  limits.model_speed_kph = speed;
   return limits;
 }
 
@@ -195,12 +191,10 @@ void OpenpilotTorqueController::reset() {
   p_ = 0.0f;
   i_ = 0.0f;
   f_ = 0.0f;
-  sat_count_ = 0.0f;
   normalized_output_ = 0.0f;
   error_ = 0.0f;
   feedforward_ = 0.0f;
   actual_curvature_ = 0.0f;
-  saturated_ = false;
 }
 
 // openpilot LatControlTorque와 같은 형태로 조향 토크를 계산한다.
@@ -245,14 +239,6 @@ int OpenpilotTorqueController::update(bool active,
 
   const bool freeze_integrator = steering_rate_limited || steering_pressed || speed_mps < 5.0f;
   const float pid_output = pid_update(error, feedforward, freeze_integrator, params);
-  if (1.0f - std::fabs(pid_output) < 1e-3f &&
-      speed_mps > 10.0f && !steering_rate_limited && !steering_pressed) {
-    sat_count_ += kDtCtrl;
-  } else {
-    sat_count_ -= kDtCtrl;
-  }
-  sat_count_ = clamp_float(sat_count_, 0.0f, params.steer_limit_timer);
-  saturated_ = sat_count_ > params.steer_limit_timer - 1e-3f;
 
   const int sign = params.torque_output_sign >= 0 ? 1 : -1;
   normalized_output_ = clamp_float(static_cast<float>(sign) * pid_output, -1.0f, 1.0f);
@@ -393,7 +379,6 @@ bool load_k7_steering_params_json(const std::string &path,
     parse_optional_float(text, "steer_ratio", 8.0f, 25.0f, &params->steer_ratio);
     parse_optional_float(text, "tire_stiffness_factor", 0.2f, 2.0f, &params->tire_stiffness_factor);
     parse_optional_float(text, "steer_actuator_delay", 0.01f, 1.0f, &params->steer_actuator_delay);
-    parse_optional_float(text, "steer_limit_timer", 0.1f, 3.0f, &params->steer_limit_timer);
     parse_optional_float(text, "max_steering_angle_deg", 0.0f, 360.0f,
                          &params->max_steering_angle_deg);
     parse_optional_bool(text, "avoid_lkas_fault_enabled", &params->avoid_lkas_fault_enabled);

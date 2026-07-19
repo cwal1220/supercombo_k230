@@ -6,7 +6,9 @@ ARCHIVE="nncase_k230_v${VERSION}_runtime_linux.tgz"
 URL="https://github.com/kendryte/nncase/releases/download/v${VERSION}/${ARCHIVE}"
 SHA256="28680932ac879d8591fbaaaab7b8c1ee2d305c2a82471fb2f38c449316cfb91f"
 
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_DIR}"
 mkdir -p deps .cache
 
 if [ ! -f ".cache/${ARCHIVE}" ]; then

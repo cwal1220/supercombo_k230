@@ -4,14 +4,15 @@
 #include <opencv2/imgproc.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <string>
 
 namespace {
 
-cv::Scalar bgra(int b, int g, int r)
+cv::Scalar bgra(int b, int g, int r, int a = 255)
 {
-    return cv::Scalar(b, g, r, 255);
+    return cv::Scalar(b, g, r, a);
 }
 
 uint32_t argb(uint8_t a, uint8_t r, uint8_t g, uint8_t b)
@@ -180,11 +181,6 @@ private:
     bool rotate_landscape_ = false;
 };
 
-int line_width(int previous_radius)
-{
-    return std::max(1, previous_radius * 2 + 1);
-}
-
 void rotate_model_point_180(int width, int height, int *x, int *y)
 {
     *x = width - 1 - *x;
@@ -196,21 +192,39 @@ cv::Point display_point(int x, int y, int logical_height, bool rotate_landscape)
     return rotate_landscape ? cv::Point(logical_height - 1 - y, x) : cv::Point(x, y);
 }
 
-void draw_triangle_marker_180(cv::Mat &img, int cx, int cy, int radius,
-                              const cv::Scalar &color, int logical_height,
-                              bool rotate_landscape)
+void draw_lead_chevron_180(cv::Mat &img, int cx, int cy, int size,
+                           float distance_m, float relative_speed_mps,
+                           float probability, int logical_width, int logical_height,
+                           bool rotate_landscape)
 {
-    const cv::Point tip = display_point(cx, cy + radius, logical_height, rotate_landscape);
-    const cv::Point left = display_point(cx - radius, cy - radius,
-                                         logical_height, rotate_landscape);
-    const cv::Point right = display_point(cx + radius, cy - radius,
-                                          logical_height, rotate_landscape);
-    const cv::Point center = display_point(cx, cy, logical_height, rotate_landscape);
-    constexpr int kOutlineRadius = 2;
-    cv::line(img, tip, left, color, line_width(kOutlineRadius), cv::LINE_8);
-    cv::line(img, left, right, color, line_width(kOutlineRadius), cv::LINE_8);
-    cv::line(img, right, tip, color, line_width(kOutlineRadius), cv::LINE_8);
-    cv::circle(img, center, std::max(2, radius / 4), color, cv::FILLED, cv::LINE_8);
+    const int outer_half_width = size * 5 / 4;
+    cx = std::clamp(cx, outer_half_width + 4, logical_width - outer_half_width - 4);
+    cy = std::clamp(cy, size + 4, logical_height - size - 4);
+
+    const float distance_risk = std::clamp(1.0f - distance_m / 40.0f, 0.0f, 1.0f);
+    const float closing_risk = std::clamp(-relative_speed_mps / 10.0f, 0.0f, 1.0f);
+    const float risk = std::clamp(distance_risk + closing_risk, 0.0f, 1.0f);
+    const int confidence_alpha = static_cast<int>(
+        170.0f + 85.0f * std::clamp(probability, 0.0f, 1.0f));
+    const int inner_green = static_cast<int>(165.0f - 125.0f * risk);
+
+    auto fill_triangle = [&](int center_y, int half_width, int half_height,
+                             const cv::Scalar &color) {
+        std::array<cv::Point, 3> vertices = {
+            display_point(cx, center_y - half_height, logical_height, rotate_landscape),
+            display_point(cx - half_width, center_y + half_height,
+                          logical_height, rotate_landscape),
+            display_point(cx + half_width, center_y + half_height,
+                          logical_height, rotate_landscape),
+        };
+        cv::fillConvexPoly(img, vertices.data(), static_cast<int>(vertices.size()),
+                           color, cv::LINE_8);
+    };
+
+    fill_triangle(cy + 2, outer_half_width + 3, size + 3, bgra(0, 0, 0, 130));
+    fill_triangle(cy, outer_half_width, size, bgra(35, 220, 255, confidence_alpha));
+    fill_triangle(cy - 1, std::max(4, outer_half_width - 4), std::max(4, size - 4),
+                  bgra(35, inner_green, 255, confidence_alpha));
 }
 
 void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
@@ -263,34 +277,51 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
                                  hud.panda_connected && hud.panda_healthy ? "OK" : "--",
                                  hud.vehicle_fresh ? "OK" : "--"),
                      1, panda_color, col_w);
+    ui.box(left_box_x, 90, box_w, 66, control_color);
+    ui.hud_text_left(left_x, 96,
+                     format_text("ANGLE %.1F", hud.steering_angle_deg),
+                     2, control_color, col_w);
+    ui.hud_text_left(left_x, 116,
+                     format_text("TQ D %d A %d", hud.desired_torque, hud.apply_torque),
+                     2, control_color, col_w);
+    ui.hud_text_left(left_x, 136,
+                     format_text("DRIVER %d", hud.driver_torque),
+                     2, hud.services_healthy ? dim : orange, col_w);
 
     const uint32_t cpu_color = hud.cpu_percent >= 90.0f || hud.cpu_temp_c >= 85.0f ? red :
                                (hud.cpu_percent >= 75.0f || hud.cpu_temp_c >= 75.0f ? orange :
                                 (hud.cpu_percent >= 60.0f || hud.cpu_temp_c >= 65.0f ? yellow : dim));
+    const char *calibration_status = !hud.calibration_available ? "--" :
+                                     (hud.calibration_status == 1 ? "OK" :
+                                      (hud.calibration_status == 2 ? "BAD" : "WAIT"));
+    const uint32_t calibration_color = !hud.calibration_available ? dim :
+                                       (hud.calibration_status == 1 ? green :
+                                        (hud.calibration_status == 2 ? red : yellow));
     ui.box(right_box_x, 10, box_w, 72, cpu_color, true);
     ui.hud_text_left(right_x, 16,
-                     format_text("CPU %.0F%%  AI %.1F", hud.cpu_percent, hud.model_fps),
+                     format_text("CPU %.0F%% TEMP %.0FC", hud.cpu_percent, hud.cpu_temp_c),
                      2, cpu_color, col_w);
-    ui.hud_text_left(right_x, 40,
-                     format_text("CAM %.1F  HUD %.1F", hud.preview_fps, hud.overlay_fps),
-                     2, dim, col_w);
-    ui.hud_text_left(right_x, 64,
-                     format_text("MODEL %.0FMS", hud.model_execution_ms),
+    ui.hud_text_left(right_x, 42,
+                     format_text("AI %.1F FPS CAM %.1F FPS",
+                                 hud.model_fps, hud.preview_fps),
+                     1, dim, col_w);
+    ui.hud_text_left(right_x, 58,
+                     format_text("HUD %.1F FPS MEM %.0F%%",
+                                 hud.overlay_fps, hud.memory_percent),
                      1, dim, col_w);
 
-    constexpr int control_y = 420;
-    ui.box(left_box_x, control_y, width - 16, 52, status);
-    ui.hud_text_left(left_x, control_y + 8,
-                     format_text("ANGLE %.1F  TORQUE %d/%d  DRIVER %d",
-                                 hud.steering_angle_deg, hud.desired_torque,
-                                 hud.apply_torque, hud.driver_torque),
-                     2, control_color, width - 36);
-    ui.hud_text_left(left_x, control_y + 32,
-                     format_text("MODEL %s  CONTROL %s  TX %s",
-                                 output.valid ? "OK" : "--",
-                                 hud.panda_controls_allowed ? "OK" : "--",
-                                 hud.panda_tx_enabled ? "ON" : "SHADOW"),
-                     1, hud.services_healthy ? dim : orange, width - 36);
+    ui.box(right_box_x, 90, box_w, 66, calibration_color, true);
+    ui.hud_text_left(right_x, 96,
+                     format_text("CAL %s B %d", calibration_status,
+                                 std::max(0, hud.calibration_valid_blocks)),
+                     2, calibration_color, col_w);
+    ui.hud_text_left(right_x, 116,
+                     format_text("R %.2F P %.2F", hud.calibration_roll_deg,
+                                 hud.calibration_pitch_deg),
+                     2, calibration_color, col_w);
+    ui.hud_text_left(right_x, 136,
+                     format_text("Y %.2F DEG", hud.calibration_yaw_deg),
+                     2, calibration_color, col_w);
 
     std::string alert;
     uint32_t alert_color = orange;
@@ -319,32 +350,75 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     }
 }
 
-void draw_points(cv::Mat &img,
-                 const std::array<ModelPoint, kTrajectorySize> &points,
-                 float z_offset, int previous_radius, const cv::Scalar &color,
-                 const ProjectionState &projection, int logical_width, int logical_height,
-                 bool rotate_landscape)
+bool append_projected_point(std::vector<cv::Point> *vertices,
+                            const ModelPoint &point, float y_offset, float z_offset,
+                            const ProjectionState &projection,
+                            int logical_width, int logical_height,
+                            bool rotate_landscape)
 {
-    bool have_prev = false;
-    int prev_x = 0;
-    int prev_y = 0;
-    for (const ModelPoint &point : points) {
-        int px = 0;
-        int py = 0;
-        if (project_point(projection, point.x, point.y, point.z + z_offset,
-                          logical_width, logical_height, &px, &py)) {
-            rotate_model_point_180(logical_width, logical_height, &px, &py);
-            const cv::Point current = display_point(px, py, logical_height, rotate_landscape);
-            if (have_prev)
-                cv::line(img, cv::Point(prev_x, prev_y), current,
-                         color, line_width(previous_radius), cv::LINE_8);
-            prev_x = current.x;
-            prev_y = current.y;
-            have_prev = true;
-        } else {
-            have_prev = false;
-        }
+    int px = 0;
+    int py = 0;
+    if (!project_point(projection, point.x, point.y + y_offset, point.z + z_offset,
+                       logical_width, logical_height, &px, &py)) {
+        return false;
     }
+
+    rotate_model_point_180(logical_width, logical_height, &px, &py);
+    vertices->push_back(display_point(px, py, logical_height, rotate_landscape));
+    return true;
+}
+
+void draw_model_ribbon(cv::Mat &img,
+                       const std::array<ModelPoint, kTrajectorySize> &points,
+                       float half_width, float z_offset, float max_distance,
+                       const cv::Scalar &color, const ProjectionState &projection,
+                       int logical_width, int logical_height, bool rotate_landscape)
+{
+    int max_idx = 0;
+    while (max_idx + 1 < kTrajectorySize && points[max_idx + 1].x <= max_distance)
+        ++max_idx;
+
+    std::vector<cv::Point> vertices;
+    vertices.reserve(static_cast<size_t>(max_idx + 1) * 2);
+    for (int i = 0; i <= max_idx; ++i)
+        append_projected_point(&vertices, points[i], -half_width, z_offset, projection,
+                               logical_width, logical_height, rotate_landscape);
+    for (int i = max_idx; i >= 0; --i)
+        append_projected_point(&vertices, points[i], half_width, z_offset, projection,
+                               logical_width, logical_height, rotate_landscape);
+
+    if (vertices.size() >= 3) {
+        const cv::Point *polygon[] = {vertices.data()};
+        const int count[] = {static_cast<int>(vertices.size())};
+        cv::fillPoly(img, polygon, count, 1, color, cv::LINE_8);
+    }
+}
+
+cv::Scalar openpilot_path_color(const OverlayHudState &hud)
+{
+    if (!hud.controller_engaged)
+        return bgra(255, 255, 255, 150);
+
+    const float output_scale = std::clamp(std::abs(hud.normalized_output) * 0.9f,
+                                          0.0f, 1.0f);
+    const int red = static_cast<int>(output_scale * 255.0f);
+    const int green = static_cast<int>((1.0f - output_scale) * 255.0f);
+    return bgra(0, green, red, 160);
+}
+
+cv::Scalar openpilot_lane_color(float probability)
+{
+    float red = 255.0f;
+    float green = 255.0f;
+    if (probability > 0.4f)
+        red = (1.0f - (probability - 0.4f) * 2.5f) * 255.0f;
+    else
+        green = (1.0f - (0.4f - probability) * 2.5f) * 255.0f;
+
+    return bgra(0,
+                static_cast<int>(std::clamp(green, 0.0f, 255.0f)),
+                static_cast<int>(std::clamp(red, 0.0f, 255.0f)),
+                static_cast<int>(std::clamp(probability, 0.0f, 1.0f) * 230.0f));
 }
 
 } // namespace
@@ -366,42 +440,53 @@ void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &outp
     frame.setTo(cv::Scalar(0, 0, 0, 0));
 
     if (output.valid) {
+        constexpr float kMinDrawDistance = 10.0f;
+        constexpr float kMaxDrawDistance = 100.0f;
+        const float max_distance = output.plan.valid
+            ? std::clamp(output.plan.points.back().x, kMinDrawDistance, kMaxDrawDistance)
+            : kMaxDrawDistance;
+
         if (output.plan.valid) {
-            const cv::Scalar path_color = hud.controller_active
-                ? bgra(70, 230, 90)
-                : (hud.controller_engaged ? bgra(40, 210, 255) : bgra(0, 220, 255));
-            draw_points(frame, output.plan.points,
-                        kModelHeight, 4, path_color, projection,
-                        logical_width, logical_height, rotate_landscape);
+            draw_model_ribbon(frame, output.plan.points,
+                              0.9f, kModelHeight, max_distance,
+                              openpilot_path_color(hud), projection,
+                              logical_width, logical_height, rotate_landscape);
         }
 
         for (const ParsedLaneLine &lane : output.lanes) {
-            if (!lane.valid || lane.probability < 0.2f) continue;
-            const int thickness = std::max(1, static_cast<int>(1 + lane.probability * 4.0f));
-            draw_points(frame, lane.points,
-                        0.0f, thickness, bgra(80, 255, 80), projection,
-                        logical_width, logical_height, rotate_landscape);
+            if (!lane.valid || lane.probability < 0.05f) continue;
+            draw_model_ribbon(frame, lane.points,
+                              std::max(0.015f, 0.025f * lane.probability),
+                              0.0f, max_distance, openpilot_lane_color(lane.probability),
+                              projection, logical_width, logical_height, rotate_landscape);
         }
 
         for (const ParsedRoadEdge &edge : output.road_edges) {
             if (!edge.valid) continue;
-            draw_points(frame, edge.points,
-                        0.0f, 2, bgra(80, 80, 255), projection,
-                        logical_width, logical_height, rotate_landscape);
+            const float confidence = std::clamp(1.0f - edge.std, 0.0f, 1.0f);
+            if (confidence < 0.05f) continue;
+            draw_model_ribbon(frame, edge.points,
+                              0.025f, 0.0f, max_distance,
+                              bgra(60, 60, 255, static_cast<int>(confidence * 200.0f)),
+                              projection, logical_width, logical_height, rotate_landscape);
         }
 
         ParsedLeadPoint lead;
-        if (output.leads.primary(kLeadTimeIndex, kLeadProbabilityThreshold, &lead)) {
+        float lead_probability = 0.0f;
+        if (output.leads.primary(kLeadTimeIndex, kLeadProbabilityThreshold,
+                                 &lead, &lead_probability)) {
             int px = 0;
             int py = 0;
             if (project_point(projection, lead.x, lead.y, kModelHeight,
                               logical_width, logical_height, &px, &py)) {
                 rotate_model_point_180(logical_width, logical_height, &px, &py);
-                const int radius = std::max(7, std::min(15, static_cast<int>(18.0f - lead.x * 0.08f)));
-                draw_triangle_marker_180(frame, px, py, radius, bgra(255, 255, 255),
-                                         logical_height, rotate_landscape);
-                cv::circle(frame, display_point(px, py, logical_height, rotate_landscape),
-                           3, bgra(0, 0, 255), cv::FILLED, cv::LINE_8);
+                const int size = std::clamp(static_cast<int>(13.0f - lead.x * 0.05f),
+                                            7, 11);
+                const int marker_y = py + size + 3;
+                const float relative_speed_mps = lead.velocity - hud.speed_kph / 3.6f;
+                draw_lead_chevron_180(frame, px, marker_y, size, lead.x, relative_speed_mps,
+                                      lead_probability, logical_width, logical_height,
+                                      rotate_landscape);
             }
         }
     }

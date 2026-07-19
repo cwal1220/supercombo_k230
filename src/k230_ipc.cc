@@ -257,7 +257,6 @@ void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parse
     state.model_timestamp_ns = k230_now_ns();
     state.model_execution_ms = model_execution_ms;
     state.valid = parsed.valid ? 1 : 0;
-    state.projection_mode = static_cast<uint32_t>(projection.mode);
     state.best_plan = parsed.plan.best_index;
     state.plan_probability = parsed.plan.probability;
 
@@ -432,8 +431,5 @@ ParsedModelOutput k230_parsed_from_model_state(const K230ModelState &state)
 
 ProjectionState k230_projection_from_model_state(const K230ModelState &state)
 {
-    const ProjectionMode mode = state.projection_mode == static_cast<uint32_t>(ProjectionMode::Openpilot)
-        ? ProjectionMode::Openpilot
-        : ProjectionMode::Legacy;
-    return make_projection_state(mode, state.calibration.roll, state.calibration.pitch, state.calibration.yaw);
+    return make_projection_state(state.calibration.roll, state.calibration.pitch, state.calibration.yaw);
 }

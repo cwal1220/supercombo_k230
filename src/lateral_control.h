@@ -25,7 +25,7 @@ class LateralControlDraft {
 public:
     LateralControlDraft() = default;
 
-    LateralTarget update(const ParsedPlan &plan, const ProjectionState &projection);
+    LateralTarget update(const ParsedPlan &plan);
 };
 
 #endif

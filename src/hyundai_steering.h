@@ -25,4 +25,5 @@ int apply_hyundai_steer_torque_limits(int desired_torque, int last_torque, int d
                                       const HyundaiSteeringLimits &limits = HyundaiSteeringLimits{});
 
 bool steering_gate_allows(const SteeringGateInput &input);
-float mdps_speed_for_lkas(float cluster_speed, bool lkas_active, bool is_mph);
+float mdps_speed_for_lkas(float cluster_speed, bool lkas_active, bool is_mph,
+                          float spoof_speed_kph = 60.0f);

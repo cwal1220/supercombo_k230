@@ -411,6 +411,24 @@ ParsedModelOutput parsed_from_pose(const PoseObservation &pose)
 
 void test_calibration_service()
 {
+    constexpr const char *kTestParamsDir = "params/work";
+    constexpr const char *kTestCalibration = "params/work/calibration.json";
+    std::remove(kTestCalibration);
+    setenv("K230_PARAMS_DIR", kTestParamsDir, 1);
+
+    OnlineCalibrator restored_calibrator;
+    const float restored_rpy[3] = {0.0f, deg_to_rad(2.0f), deg_to_rad(-0.75f)};
+    expect_true(restored_calibrator.restore(restored_rpy, 12),
+                "valid persisted calibration restores");
+    float restored_output[3] = {};
+    restored_calibrator.output_rpy(restored_output);
+    expect_near(restored_output[1], restored_rpy[1], 1e-7,
+                "restored pitch initializes calibrator");
+    expect_near(restored_output[2], restored_rpy[2], 1e-7,
+                "restored yaw initializes calibrator");
+    expect_equal_int(restored_calibrator.snapshot().valid_blocks, 12,
+                     "restored valid block count");
+
     AppConfig auto_config;
     auto_config.calibration_auto = true;
     auto_config.manual_calibration = false;
@@ -441,13 +459,33 @@ void test_calibration_service()
     expect_near(manual_rpy[0], 0.0, 1e-7, "manual roll wins");
     expect_near(manual_rpy[1], manual_config.manual_pitch, 1e-7, "manual pitch wins");
     expect_near(manual_rpy[2], manual_config.manual_yaw, 1e-7, "manual yaw wins");
-    expect_equal_int(manual.snapshot().valid_blocks, 0, "manual override blocks online calibrator update");
+    expect_equal_int(manual.snapshot().valid_blocks, 5,
+                     "manual override is represented as persisted calibration");
 
-    std::printf("calibration_service: online feedback and manual override OK\n");
+    AppConfig restored_config;
+    restored_config.calibration_auto = true;
+    restored_config.manual_calibration = false;
+    CalibrationService restored(restored_config);
+    float persisted_rpy[3] = {};
+    restored.input_rpy(persisted_rpy);
+    expect_near(persisted_rpy[1], manual_config.manual_pitch, 1e-7,
+                "persisted pitch reloads");
+    expect_near(persisted_rpy[2], manual_config.manual_yaw, 1e-7,
+                "persisted yaw reloads");
+    expect_equal_int(static_cast<int>(restored.snapshot().status),
+                     static_cast<int>(CalibrationStatus::Calibrated),
+                     "persisted calibration reloads as calibrated");
+
+    unsetenv("K230_PARAMS_DIR");
+    std::remove(kTestCalibration);
+
+    std::printf("calibration_service: restore, online feedback and manual override OK\n");
 }
 
 void test_app_config_env_feedback()
 {
+    unsetenv("SUPERCOMBO_NV12_WIDTH");
+    unsetenv("SUPERCOMBO_NV12_HEIGHT");
     unsetenv("SUPERCOMBO_CALIB_ROLL_DEG");
     unsetenv("SUPERCOMBO_CALIB_PITCH_DEG");
     unsetenv("SUPERCOMBO_CALIB_YAW_DEG");
@@ -467,10 +505,31 @@ void test_app_config_env_feedback()
     expect_near(fallback.manual_yaw, deg_to_rad(-0.75f), 1e-7, "manual yaw env parse");
     expect_near(fallback.input_warp_pitch, fallback.manual_pitch, 1e-7, "input warp pitch falls back to manual calibration");
     expect_near(fallback.input_warp_yaw, fallback.manual_yaw, 1e-7, "input warp yaw falls back to manual calibration");
-    expect_near(fallback.input_warp_fx, kDefaultModelFx, 1e-5,
-                "ISP output defaults to medmodel fx");
-    expect_near(fallback.input_warp_cy, kDefaultModelCy, 1e-5,
-                "ISP output defaults to medmodel cy");
+    expect_equal_int(fallback.nv12_width, kDefaultAiWidth,
+                     "ISP output defaults to overscan width");
+    expect_equal_int(fallback.nv12_height, kDefaultAiHeight,
+                     "ISP output defaults to overscan height");
+    expect_near(fallback.input_warp_fx, kDefaultInputWarpFx, 1e-5,
+                "ISP output scales K230 camera fx");
+    expect_near(fallback.input_warp_fy, kDefaultInputWarpFy, 1e-5,
+                "ISP output scales K230 camera fy");
+    expect_near(fallback.input_warp_cx, kDefaultInputWarpCx, 1e-5,
+                "ISP output scales K230 camera cx");
+    expect_near(fallback.input_warp_cy, kDefaultInputWarpCy, 1e-5,
+                "ISP output scales K230 camera cy");
+    setenv("SUPERCOMBO_NV12_WIDTH", "512", 1);
+    setenv("SUPERCOMBO_NV12_HEIGHT", "256", 1);
+    AppConfig model_sized = AppConfig::from_env_defaults();
+    expect_near(model_sized.input_warp_fx, default_input_warp_fx(512), 1e-5,
+                "model-sized source scales K230 camera fx");
+    expect_near(model_sized.input_warp_fy, default_input_warp_fy(256), 1e-5,
+                "model-sized source scales K230 camera fy");
+    expect_near(model_sized.input_warp_cx, default_input_warp_cx(512), 1e-5,
+                "model-sized source scales K230 camera cx");
+    expect_near(model_sized.input_warp_cy, default_input_warp_cy(256), 1e-5,
+                "model-sized source scales K230 camera cy");
+    unsetenv("SUPERCOMBO_NV12_WIDTH");
+    unsetenv("SUPERCOMBO_NV12_HEIGHT");
 
     setenv("SUPERCOMBO_INPUT_WARP_PITCH_DEG", "0.50", 1);
     setenv("SUPERCOMBO_INPUT_WARP_FX", "433.53", 1);
@@ -715,6 +774,19 @@ DiffStats diff_stats(const std::vector<float> &a, const std::vector<float> &b)
 
 void test_projection_and_yuv6()
 {
+    AppConfig camera_config;
+    ModelInputTransform camera_transform(camera_config);
+    float camera_projection[9];
+    double camera_reference[9];
+    camera_transform.projection_matrix(camera_projection);
+    projection_reference(0.0, 0.0, 0.0, camera_config.input_warp_fx,
+                         camera_config.input_warp_fy, camera_config.input_warp_cx,
+                         camera_config.input_warp_cy, camera_config.input_warp_height,
+                         camera_reference);
+    for (int i = 0; i < 9; ++i)
+        expect_near(camera_projection[i], camera_reference[i], 1e-4,
+                    "default projection uses K230 camera intrinsics");
+
     const std::array<std::array<float, 3>, 5> cases = {{
         {{0.0f, 0.0f, 0.0f}},
         {{0.0f, deg_to_rad(1.5f), 0.0f}},
@@ -759,6 +831,10 @@ void test_projection_and_yuv6()
     expect_near(identity_diff.max, 0.0, 0.0, "zero-rpy warped YUV6 must match direct pack exactly");
 
     AppConfig pitch_config;
+    pitch_config.input_warp_fx = kDefaultModelFx;
+    pitch_config.input_warp_fy = kDefaultModelFy;
+    pitch_config.input_warp_cx = kDefaultModelCx;
+    pitch_config.input_warp_cy = kDefaultModelCy;
     pitch_config.input_warp_pitch = deg_to_rad(1.5f);
     pitch_config.input_warp_yaw = deg_to_rad(-0.6f);
     ModelInputTransform pitched(pitch_config);

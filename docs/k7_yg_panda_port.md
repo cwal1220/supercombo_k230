@@ -24,11 +24,19 @@ While steering is active below the MDPS threshold, the bus-1 `CLU11` helper
 reports 60 kph (38 mph) and preserves the source decimal-speed field. This
 matches the K7 branch in the reference openpilot controller.
 
+Runtime parameters are stored in:
+
+- `params/k7_yg_steering.json`: torque PID, steering limits, vehicle geometry,
+  angle offset, and low-speed steering settings.
+- `params/k7_yg_driving.json`: model/CAN freshness, inactive release duration,
+  MDPS speed spoof, and lateral motion limits.
+- `params/calibration.json`: generated camera calibration state. This file is
+  preserved across application and board restarts.
+
 ## Build
 
-```sh
-./scripts/build_k230_linux_sdk.sh
-```
+Use the K230 Linux SDK host-toolchain cross-build procedure in the repository
+`README.md`, then deploy with `scripts/upload_to_board.sh`.
 
 The Buildroot SDK configuration must include `BR2_PACKAGE_LIBUSB=y`.
 
@@ -56,7 +64,7 @@ and torque bounds.
 K230_ENABLE_CONTROL=1 \
 K230_PANDA_TX=0 \
 K230_PANDA_SAFETY=nooutput \
-./k230_manager.py model/supercombo.kmodel 0
+./scripts/k230_manager.py models/supercombo.kmodel 0
 ```
 
 Use `hyundaiCommunity` only after the connected vehicle fingerprint and Panda
