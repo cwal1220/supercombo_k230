@@ -461,24 +461,23 @@ void test_app_config_env_feedback()
 
     setenv("SUPERCOMBO_CALIB_PITCH_DEG", "1.25", 1);
     setenv("SUPERCOMBO_CALIB_YAW_DEG", "-0.75", 1);
-    AppConfig fallback = AppConfig::from_env_defaults("verify");
+    AppConfig fallback = AppConfig::from_env_defaults();
     expect_true(fallback.manual_calibration, "manual calibration env should enable manual override");
     expect_near(fallback.manual_pitch, deg_to_rad(1.25f), 1e-7, "manual pitch env parse");
     expect_near(fallback.manual_yaw, deg_to_rad(-0.75f), 1e-7, "manual yaw env parse");
     expect_near(fallback.input_warp_pitch, fallback.manual_pitch, 1e-7, "input warp pitch falls back to manual calibration");
     expect_near(fallback.input_warp_yaw, fallback.manual_yaw, 1e-7, "input warp yaw falls back to manual calibration");
-    expect_near(fallback.input_warp_fx,
-                kDefaultSensorFx * fallback.nv12_width / fallback.nv12_crop_width,
-                1e-5, "OV5647 fx scales into ISP output");
-    expect_near(fallback.input_warp_cy,
-                (kDefaultSensorCy - fallback.nv12_crop_y) * fallback.nv12_height /
-                    fallback.nv12_crop_height,
-                1e-5, "OV5647 cy scales into ISP output");
+    expect_near(fallback.input_warp_fx, kDefaultModelFx, 1e-5,
+                "ISP output defaults to medmodel fx");
+    expect_near(fallback.input_warp_cy, kDefaultModelCy, 1e-5,
+                "ISP output defaults to medmodel cy");
 
     setenv("SUPERCOMBO_INPUT_WARP_PITCH_DEG", "0.50", 1);
-    AppConfig explicit_input = AppConfig::from_env_defaults("verify");
+    setenv("SUPERCOMBO_INPUT_WARP_FX", "433.53", 1);
+    AppConfig explicit_input = AppConfig::from_env_defaults();
     expect_near(explicit_input.manual_pitch, deg_to_rad(1.25f), 1e-7, "manual pitch remains calibration env");
     expect_near(explicit_input.input_warp_pitch, deg_to_rad(0.50f), 1e-7, "explicit input warp pitch wins");
+    expect_near(explicit_input.input_warp_fx, 433.53, 1e-5, "explicit input warp fx wins");
 
     unsetenv("SUPERCOMBO_CALIB_ROLL_DEG");
     unsetenv("SUPERCOMBO_CALIB_PITCH_DEG");
@@ -486,22 +485,18 @@ void test_app_config_env_feedback()
     unsetenv("SUPERCOMBO_INPUT_WARP_ROLL_DEG");
     unsetenv("SUPERCOMBO_INPUT_WARP_PITCH_DEG");
     unsetenv("SUPERCOMBO_INPUT_WARP_YAW_DEG");
+    unsetenv("SUPERCOMBO_INPUT_WARP_FX");
 
     std::printf("app_config: input-warp/manual calibration env precedence OK\n");
 }
 
 void projection_reference(float roll, float pitch, float yaw, float fx, float fy, float cx, float cy,
-                          float height, ModelFrame model_frame, double *projection)
+                          float height, double *projection)
 {
     const double ground_from_medmodel_frame[9] = {
         0.00000000e+00, 0.00000000e+00, 1.00000000e+00,
        -1.09890110e-03, 0.00000000e+00, 2.81318681e-01,
        -1.84808520e-20, 9.00738606e-04, -4.28751576e-02,
-    };
-    const double ground_from_sbigmodel_frame[9] = {
-        0.00000000e+00,  7.31372216e-19,  1.00000000e+00,
-       -2.19780220e-03,  4.11497335e-19,  5.62637363e-01,
-       -5.46146580e-20,  1.80147721e-03, -2.73464241e-01,
     };
     const double k[9] = {
         fx, 0.0, cx,
@@ -540,11 +535,7 @@ void projection_reference(float roll, float pitch, float yaw, float fx, float fy
         camera_frame_from_ground[row * 3 + 1] = camera_frame_from_road[row * 4 + 1];
         camera_frame_from_ground[row * 3 + 2] = camera_frame_from_road[row * 4 + 3];
     }
-    matmul3d(camera_frame_from_ground,
-             model_frame == ModelFrame::SmallBigModel
-                 ? ground_from_sbigmodel_frame
-                 : ground_from_medmodel_frame,
-             projection);
+    matmul3d(camera_frame_from_ground, ground_from_medmodel_frame, projection);
 }
 
 void transform_scale_buffer_ref(const double *in, double scale, double *out)
@@ -737,19 +728,16 @@ void test_projection_and_yuv6()
         config.input_warp_roll = rpy[0];
         config.input_warp_pitch = rpy[1];
         config.input_warp_yaw = rpy[2];
-        for (ModelFrame frame : {ModelFrame::MedModel, ModelFrame::SmallBigModel}) {
-            ModelInputTransform transform(config, frame);
-            float actual[9];
-            double expected[9];
-            transform.projection_matrix(actual);
-            projection_reference(rpy[0], rpy[1], rpy[2], config.input_warp_fx,
-                                 config.input_warp_fy, config.input_warp_cx,
-                                 config.input_warp_cy, config.input_warp_height,
-                                 frame, expected);
-            for (int i = 0; i < 9; ++i) {
-                const double tolerance = std::max(1e-4, std::fabs(expected[i]) * 1e-5);
-                expect_near(actual[i], expected[i], tolerance, "projection matrix");
-            }
+        ModelInputTransform transform(config);
+        float actual[9];
+        double expected[9];
+        transform.projection_matrix(actual);
+        projection_reference(rpy[0], rpy[1], rpy[2], config.input_warp_fx,
+                             config.input_warp_fy, config.input_warp_cx,
+                             config.input_warp_cy, config.input_warp_height, expected);
+        for (int i = 0; i < 9; ++i) {
+            const double tolerance = std::max(1e-4, std::fabs(expected[i]) * 1e-5);
+            expect_near(actual[i], expected[i], tolerance, "projection matrix");
         }
     }
 
@@ -779,29 +767,14 @@ void test_projection_and_yuv6()
     projection_reference(0.0f, pitch_config.input_warp_pitch, pitch_config.input_warp_yaw,
                          pitch_config.input_warp_fx, pitch_config.input_warp_fy,
                          pitch_config.input_warp_cx, pitch_config.input_warp_cy,
-                         pitch_config.input_warp_height, ModelFrame::MedModel, projection_y);
+                         pitch_config.input_warp_height, projection_y);
     warp_pack_opencl_ref(nv12.data(), projection_y, ref.data());
     DiffStats warp_diff = diff_stats(ref, warped);
     expect_true(warp_diff.mean < 1.0, "non-zero warp mean abs diff vs openpilot OpenCL reference");
     expect_true(warp_diff.inner_max < 8.0, "non-zero warp inner max diff vs openpilot OpenCL reference");
 
-    std::vector<float> big_warped(kYuv6Floats, 0.0f);
-    ModelInputTransform big(pitch_config, ModelFrame::SmallBigModel);
-    big.nv12_to_yuv6_warped(nv12.data(), kModelW, kModelH, big_warped);
-    projection_reference(0.0f, pitch_config.input_warp_pitch, pitch_config.input_warp_yaw,
-                         pitch_config.input_warp_fx, pitch_config.input_warp_fy,
-                         pitch_config.input_warp_cx, pitch_config.input_warp_cy,
-                         pitch_config.input_warp_height, ModelFrame::SmallBigModel,
-                         projection_y);
-    warp_pack_opencl_ref(nv12.data(), projection_y, ref.data());
-    const DiffStats big_diff = diff_stats(ref, big_warped);
-    const DiffStats input_difference = diff_stats(warped, big_warped);
-    expect_true(big_diff.mean < 1.0, "sbigmodel warp mean abs diff vs openpilot OpenCL reference");
-    expect_true(big_diff.inner_max < 8.0, "sbigmodel warp inner max diff vs openpilot OpenCL reference");
-    expect_true(input_difference.mean > 1.0, "medmodel and sbigmodel inputs must differ");
-
-    std::printf("projection/yuv6: matrix_tol<=1e-4 identity_max=%.1f med_mean=%.3f big_mean=%.3f\n",
-                identity_diff.max, warp_diff.mean, big_diff.mean);
+    std::printf("projection/yuv6: matrix_tol<=1e-4 identity_max=%.1f med_mean=%.3f\n",
+                identity_diff.max, warp_diff.mean);
 }
 
 } // namespace

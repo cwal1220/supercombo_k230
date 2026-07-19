@@ -4,7 +4,6 @@
 #include <opencv2/imgproc.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cstdio>
 #include <string>
 
@@ -31,29 +30,32 @@ std::string format_text(const char *format, Args... args)
     return text;
 }
 
-std::string uppercase_ascii(const char *value)
-{
-    std::string text = value ? value : "";
-    for (char &c : text)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    return text;
-}
-
 class BitmapHud {
 public:
-    explicit BitmapHud(cv::Mat &frame) : frame_(frame) {}
+    BitmapHud(cv::Mat &frame, int logical_width, int logical_height, bool rotate_landscape)
+        : frame_(frame),
+          logical_width_(logical_width),
+          logical_height_(logical_height),
+          rotate_landscape_(rotate_landscape)
+    {
+    }
 
     void fill_rect(int x, int y, int w, int h, uint32_t color)
     {
         if (w <= 0 || h <= 0) return;
         const int x0 = std::max(0, x);
         const int y0 = std::max(0, y);
-        const int x1 = std::min(frame_.cols, x + w);
-        const int y1 = std::min(frame_.rows, y + h);
+        const int x1 = std::min(logical_width_, x + w);
+        const int y1 = std::min(logical_height_, y + h);
         if (x0 >= x1 || y0 >= y1) return;
-        for (int row = y0; row < y1; ++row) {
+
+        const int native_x0 = rotate_landscape_ ? logical_height_ - y1 : x0;
+        const int native_y0 = rotate_landscape_ ? x0 : y0;
+        const int native_x1 = rotate_landscape_ ? logical_height_ - y0 : x1;
+        const int native_y1 = rotate_landscape_ ? x1 : y1;
+        for (int row = native_y0; row < native_y1; ++row) {
             uint32_t *pixels = frame_.ptr<uint32_t>(row);
-            std::fill(pixels + x0, pixels + x1, color);
+            std::fill(pixels + native_x0, pixels + native_x1, color);
         }
     }
 
@@ -173,6 +175,9 @@ private:
     }
 
     cv::Mat &frame_;
+    int logical_width_ = 0;
+    int logical_height_ = 0;
+    bool rotate_landscape_ = false;
 };
 
 int line_width(int previous_radius)
@@ -180,24 +185,41 @@ int line_width(int previous_radius)
     return std::max(1, previous_radius * 2 + 1);
 }
 
-void draw_triangle_marker(cv::Mat &img, int cx, int cy, int radius, const cv::Scalar &color)
+void rotate_model_point_180(int width, int height, int *x, int *y)
 {
-    const cv::Point top(cx, cy - radius);
-    const cv::Point left(cx - radius, cy + radius);
-    const cv::Point right(cx + radius, cy + radius);
+    *x = width - 1 - *x;
+    *y = height - 1 - *y;
+}
+
+cv::Point display_point(int x, int y, int logical_height, bool rotate_landscape)
+{
+    return rotate_landscape ? cv::Point(logical_height - 1 - y, x) : cv::Point(x, y);
+}
+
+void draw_triangle_marker_180(cv::Mat &img, int cx, int cy, int radius,
+                              const cv::Scalar &color, int logical_height,
+                              bool rotate_landscape)
+{
+    const cv::Point tip = display_point(cx, cy + radius, logical_height, rotate_landscape);
+    const cv::Point left = display_point(cx - radius, cy - radius,
+                                         logical_height, rotate_landscape);
+    const cv::Point right = display_point(cx + radius, cy - radius,
+                                          logical_height, rotate_landscape);
+    const cv::Point center = display_point(cx, cy, logical_height, rotate_landscape);
     constexpr int kOutlineRadius = 2;
-    cv::line(img, top, left, color, line_width(kOutlineRadius), cv::LINE_8);
+    cv::line(img, tip, left, color, line_width(kOutlineRadius), cv::LINE_8);
     cv::line(img, left, right, color, line_width(kOutlineRadius), cv::LINE_8);
-    cv::line(img, right, top, color, line_width(kOutlineRadius), cv::LINE_8);
-    cv::circle(img, cv::Point(cx, cy), std::max(2, radius / 4), color, cv::FILLED, cv::LINE_8);
+    cv::line(img, right, tip, color, line_width(kOutlineRadius), cv::LINE_8);
+    cv::circle(img, center, std::max(2, radius / 4), color, cv::FILLED, cv::LINE_8);
 }
 
 void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
-              const ParsedModelOutput &output)
+              const ParsedModelOutput &output, int logical_width, int logical_height,
+              bool rotate_landscape)
 {
-    const int width = frame.cols;
-    const int height = frame.rows;
-    BitmapHud ui(frame);
+    const int width = logical_width;
+    const int height = logical_height;
+    BitmapHud ui(frame, logical_width, logical_height, rotate_landscape);
     const uint32_t white = argb(230, 255, 255, 255);
     const uint32_t dim = argb(170, 210, 220, 230);
     const uint32_t green = argb(230, 80, 230, 95);
@@ -218,17 +240,11 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     constexpr int left_x = left_box_x + 10;
     const int right_x = right_box_x + 10;
     constexpr int col_w = box_w - 20;
-    constexpr int row_step = 18;
 
     ui.hud_text_center(width / 2, 12,
                        format_text("%.0F", std::max(0.0f, hud.speed_kph)),
                        8, white, 220);
     ui.hud_text_center(width / 2, 80, "KPH", 2, dim, 140);
-
-    ui.box(left_box_x, 10, box_w, 104, status);
-    ui.hud_text_left(left_x, 14, "CRUISE", 1, dim, col_w);
-    ui.hud_text_left(left_x, 34, "SET ---", 3, white, col_w);
-    ui.hud_text_left(left_x, 72, "CRZ ---", 2, dim, col_w);
 
     const uint32_t control_color = hud.steering_fault ? red :
                                    (hud.controller_active ? green :
@@ -236,142 +252,45 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     const char *op_status = hud.controller_active ? "OP ACT" :
                             (hud.controller_engaged ? "OP EN" :
                              (hud.controller_enabled ? "OP RDY" : "OP OFF"));
-    ui.box(right_box_x, 10, box_w, 104, status, true);
-    ui.hud_text_left(right_x, 14, "OPENPILOT", 1, dim, col_w);
-    ui.hud_text_left(right_x, 30, op_status, 2, control_color, col_w);
-    ui.hud_text_left(right_x, 54,
-                     format_text("K7 %s", hud.vehicle_fresh ? "READY" : "NO CAR"),
-                     2, dim, col_w);
     const uint32_t panda_color = !hud.panda_connected || !hud.panda_healthy ? orange :
                                  (hud.panda_faults != 0 ? red : green);
-    const char *panda_text = !hud.panda_connected ? "PANDA --" :
-                             (!hud.ignition ? "IGN --" :
-                              (hud.panda_controls_allowed ? "CTRL OK" : "CTRL --"));
-    ui.hud_text_left(right_x, 78, panda_text, 2, panda_color, col_w);
-    ui.hud_text_left(right_x, 96,
-                     format_text("M%s CTL%s PND%s %u/%u",
-                                 output.valid ? "OK" : "--",
-                                 hud.vehicle_fresh ? "OK" : "--",
-                                 hud.panda_connected ? "OK" : "--",
-                                 hud.running_processes, hud.total_processes),
-                     1, hud.services_healthy ? dim : orange, col_w);
 
-    ui.box(left_box_x, 124, box_w, 126, blue);
-    ui.hud_text_left(left_x, 128, "ROAD", 1, dim, col_w);
-    int left_y = 144;
-    ui.hud_text_left(left_x, left_y,
-                     format_text("STR %.1F TQ %d", hud.steering_angle_deg, hud.apply_torque),
-                     2, white, col_w);
-    left_y += row_step;
-    ParsedLeadPoint lead;
-    const bool have_lead = output.valid && output.leads.primary(0, 0.5f, &lead);
-    ui.hud_text_left(left_x, left_y,
-                     have_lead ? format_text("LEAD %.0FM %+.0F", lead.x, lead.velocity * 3.6f)
-                               : "LEAD --",
-                     2, have_lead ? white : dim, col_w);
-    left_y += row_step;
-    ui.hud_text_left(left_x, left_y,
-                     format_text("LANE %.2F/%.2F", output.lanes[1].probability,
-                                 output.lanes[2].probability),
-                     2, white, col_w);
-    left_y += row_step;
-    ui.hud_text_left(left_x, left_y,
-                     format_text("CURV %.4F/%.4F", hud.desired_curvature,
-                                 hud.actual_curvature),
-                     2, dim, col_w);
-    left_y += row_step;
-    ui.hud_text_left(left_x, left_y,
-                     format_text("M %.0FMS P %.2F", hud.model_execution_ms,
-                                 output.plan.probability),
-                     2, dim, col_w);
-    left_y += row_step;
-    ui.hud_text_left(left_x, left_y,
-                     format_text("L %.1F %.1F %.1F %.1F",
-                                 output.lanes[0].probability, output.lanes[1].probability,
-                                 output.lanes[2].probability, output.lanes[3].probability),
-                     2, dim, col_w);
+    ui.box(left_box_x, 10, box_w, 72, status);
+    ui.hud_text_left(left_x, 16, "OPENPILOT", 1, dim, col_w);
+    ui.hud_text_left(left_x, 34, op_status, 3, control_color, col_w);
+    ui.hud_text_left(left_x, 62,
+                     format_text("PANDA %s  CAR %s",
+                                 hud.panda_connected && hud.panda_healthy ? "OK" : "--",
+                                 hud.vehicle_fresh ? "OK" : "--"),
+                     1, panda_color, col_w);
 
-    ui.box(right_box_x, 124, box_w, 126, green, true);
-    ui.hud_text_left(right_x, 128, "SYSTEM", 1, dim, col_w);
-    int right_y = 144;
     const uint32_t cpu_color = hud.cpu_percent >= 90.0f || hud.cpu_temp_c >= 85.0f ? red :
                                (hud.cpu_percent >= 75.0f || hud.cpu_temp_c >= 75.0f ? orange :
                                 (hud.cpu_percent >= 60.0f || hud.cpu_temp_c >= 65.0f ? yellow : dim));
-    ui.hud_text_left(right_x, right_y,
-                     hud.cpu_temp_c > 0.0f
-                         ? format_text("CPU %.0F%% %.0FC", hud.cpu_percent, hud.cpu_temp_c)
-                         : format_text("CPU %.0F%% --C", hud.cpu_percent),
+    ui.box(right_box_x, 10, box_w, 72, cpu_color, true);
+    ui.hud_text_left(right_x, 16,
+                     format_text("CPU %.0F%%  AI %.1F", hud.cpu_percent, hud.model_fps),
                      2, cpu_color, col_w);
-    right_y += row_step;
-    ui.hud_text_left(right_x, right_y,
-                     format_text("MEM %.0F%% PROC %u/%u", hud.memory_percent,
-                                 hud.running_processes, hud.total_processes),
-                     2, hud.services_healthy ? dim : orange, col_w);
-    right_y += row_step;
-    ui.hud_text_left(right_x, right_y,
-                     format_text("CAM %.1F AI %.1F", hud.preview_fps, hud.model_fps),
+    ui.hud_text_left(right_x, 40,
+                     format_text("CAM %.1F  HUD %.1F", hud.preview_fps, hud.overlay_fps),
                      2, dim, col_w);
-    right_y += row_step;
-    ui.hud_text_left(right_x, right_y,
-                     format_text("DSP %.1F HUD %.1F", hud.display_fps, hud.overlay_fps),
-                     2, dim, col_w);
-    right_y += row_step;
-    ui.hud_text_left(right_x, right_y,
-                     format_text("PANDA %s F%X", hud.panda_healthy ? "OK" : "--",
-                                 hud.panda_faults),
-                     2, panda_color, col_w);
-    right_y += row_step;
-    ui.hud_text_left(right_x, right_y,
-                     format_text("USB %s TX %s",
-                                 hud.panda_connected ? "OK" : "--",
-                                 hud.panda_tx_enabled ? "ON" : "SHADOW"),
-                     2, hud.panda_tx_enabled ? yellow : dim, col_w);
+    ui.hud_text_left(right_x, 64,
+                     format_text("MODEL %.0FMS", hud.model_execution_ms),
+                     1, dim, col_w);
 
-    ui.box(left_box_x, 262, box_w, 92, yellow);
-    ui.hud_text_left(left_x, 266, "VEHICLE", 1, dim, col_w);
-    left_y = 282;
-    ui.hud_text_left(left_x, left_y,
-                     format_text("SPD %.1F ANG %.1F", hud.speed_kph,
-                                 hud.steering_angle_deg),
-                     2, dim, col_w);
-    left_y += row_step;
-    ui.hud_text_left(left_x, left_y,
-                     format_text("TQ %d/%d DRV %d", hud.desired_torque,
+    constexpr int control_y = 420;
+    ui.box(left_box_x, control_y, width - 16, 52, status);
+    ui.hud_text_left(left_x, control_y + 8,
+                     format_text("ANGLE %.1F  TORQUE %d/%d  DRIVER %d",
+                                 hud.steering_angle_deg, hud.desired_torque,
                                  hud.apply_torque, hud.driver_torque),
-                     2, hud.steering_fault ? red : dim, col_w);
-    left_y += row_step;
-    ui.hud_text_left(left_x, left_y,
-                     format_text("IGN %s CTRL %s", hud.ignition ? "ON" : "--",
-                                 hud.panda_controls_allowed ? "OK" : "--"),
-                     2, panda_color, col_w);
-    left_y += row_step;
-    ui.hud_text_left(left_x, left_y,
-                     format_text("USB %s F%X", hud.panda_connected ? "OK" : "--",
-                                 hud.panda_faults),
-                     2, panda_color, col_w);
-
-    ui.box(right_box_x, 262, box_w, 92, yellow, true);
-    ui.hud_text_left(right_x, 266, "K7 CONTROL", 1, dim, col_w);
-    right_y = 282;
-    ui.hud_text_left(right_x, right_y,
-                     format_text("%s OUT %.2F",
-                                 hud.controller_active ? "ACTIVE" :
-                                 (hud.controller_engaged ? "ENGAGED" : "STANDBY"),
-                                 hud.normalized_output),
-                     2, control_color, col_w);
-    right_y += row_step;
-    ui.hud_text_left(right_x, right_y,
-                     format_text("CURV %.4F", hud.desired_curvature),
-                     2, dim, col_w);
-    right_y += row_step;
-    ui.hud_text_left(right_x, right_y,
-                     hud.panda_tx_enabled ? "TX ENABLED" : "TX SHADOW",
-                     2, hud.panda_tx_enabled ? yellow : dim, col_w);
-    right_y += row_step;
-    std::string block = uppercase_ascii(hud.active_block);
-    if (block.empty()) block = hud.vehicle_fresh ? "READY" : "NO VEHICLE";
-    ui.hud_text_left(right_x, right_y, block, 2,
-                     hud.controller_active ? green : dim, col_w);
+                     2, control_color, width - 36);
+    ui.hud_text_left(left_x, control_y + 32,
+                     format_text("MODEL %s  CONTROL %s  TX %s",
+                                 output.valid ? "OK" : "--",
+                                 hud.panda_controls_allowed ? "OK" : "--",
+                                 hud.panda_tx_enabled ? "ON" : "SHADOW"),
+                     1, hud.services_healthy ? dim : orange, width - 36);
 
     std::string alert;
     uint32_t alert_color = orange;
@@ -403,7 +322,8 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
 void draw_points(cv::Mat &img,
                  const std::array<ModelPoint, kTrajectorySize> &points,
                  float z_offset, int previous_radius, const cv::Scalar &color,
-                 const ProjectionState &projection)
+                 const ProjectionState &projection, int logical_width, int logical_height,
+                 bool rotate_landscape)
 {
     bool have_prev = false;
     int prev_x = 0;
@@ -412,12 +332,14 @@ void draw_points(cv::Mat &img,
         int px = 0;
         int py = 0;
         if (project_point(projection, point.x, point.y, point.z + z_offset,
-                          img.cols, img.rows, &px, &py)) {
+                          logical_width, logical_height, &px, &py)) {
+            rotate_model_point_180(logical_width, logical_height, &px, &py);
+            const cv::Point current = display_point(px, py, logical_height, rotate_landscape);
             if (have_prev)
-                cv::line(img, cv::Point(prev_x, prev_y), cv::Point(px, py),
+                cv::line(img, cv::Point(prev_x, prev_y), current,
                          color, line_width(previous_radius), cv::LINE_8);
-            prev_x = px;
-            prev_y = py;
+            prev_x = current.x;
+            prev_y = current.y;
             have_prev = true;
         } else {
             have_prev = false;
@@ -429,7 +351,8 @@ void draw_points(cv::Mat &img,
 
 void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &output,
                            const ProjectionState &projection,
-                           const OverlayHudState &hud) const
+                           const OverlayHudState &hud,
+                           bool rotate_landscape) const
 {
     constexpr float kLeadProbabilityThreshold = 0.5f;
     constexpr int kLeadTimeIndex = 0;
@@ -437,6 +360,8 @@ void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &outp
     const int width = static_cast<int>(buffer->width);
     const int height = static_cast<int>(buffer->height);
     const int stride = static_cast<int>(buffer->stride);
+    const int logical_width = rotate_landscape ? height : width;
+    const int logical_height = rotate_landscape ? width : height;
     cv::Mat frame(height, width, CV_8UC4, buffer->map, static_cast<size_t>(stride));
     frame.setTo(cv::Scalar(0, 0, 0, 0));
 
@@ -446,33 +371,40 @@ void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &outp
                 ? bgra(70, 230, 90)
                 : (hud.controller_engaged ? bgra(40, 210, 255) : bgra(0, 220, 255));
             draw_points(frame, output.plan.points,
-                        kModelHeight, 4, path_color, projection);
+                        kModelHeight, 4, path_color, projection,
+                        logical_width, logical_height, rotate_landscape);
         }
 
         for (const ParsedLaneLine &lane : output.lanes) {
             if (!lane.valid || lane.probability < 0.2f) continue;
             const int thickness = std::max(1, static_cast<int>(1 + lane.probability * 4.0f));
             draw_points(frame, lane.points,
-                        0.0f, thickness, bgra(80, 255, 80), projection);
+                        0.0f, thickness, bgra(80, 255, 80), projection,
+                        logical_width, logical_height, rotate_landscape);
         }
 
         for (const ParsedRoadEdge &edge : output.road_edges) {
             if (!edge.valid) continue;
             draw_points(frame, edge.points,
-                        0.0f, 2, bgra(80, 80, 255), projection);
+                        0.0f, 2, bgra(80, 80, 255), projection,
+                        logical_width, logical_height, rotate_landscape);
         }
 
         ParsedLeadPoint lead;
         if (output.leads.primary(kLeadTimeIndex, kLeadProbabilityThreshold, &lead)) {
             int px = 0;
             int py = 0;
-            if (project_point(projection, lead.x, lead.y, kModelHeight, width, height, &px, &py)) {
+            if (project_point(projection, lead.x, lead.y, kModelHeight,
+                              logical_width, logical_height, &px, &py)) {
+                rotate_model_point_180(logical_width, logical_height, &px, &py);
                 const int radius = std::max(7, std::min(15, static_cast<int>(18.0f - lead.x * 0.08f)));
-                draw_triangle_marker(frame, px, py, radius, bgra(255, 255, 255));
-                cv::circle(frame, cv::Point(px, py), 3, bgra(0, 0, 255), cv::FILLED, cv::LINE_8);
+                draw_triangle_marker_180(frame, px, py, radius, bgra(255, 255, 255),
+                                         logical_height, rotate_landscape);
+                cv::circle(frame, display_point(px, py, logical_height, rotate_landscape),
+                           3, bgra(0, 0, 255), cv::FILLED, cv::LINE_8);
             }
         }
     }
 
-    draw_hud(frame, hud, output);
+    draw_hud(frame, hud, output, logical_width, logical_height, rotate_landscape);
 }

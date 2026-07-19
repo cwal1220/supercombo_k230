@@ -27,14 +27,13 @@ uint64_t timeval_us(const timeval &tv)
 
 } // namespace
 
-int main(int argc, char *argv[])
+int main()
 {
-    (void)argc;
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
     try {
-        AppConfig config = AppConfig::from_env_defaults(argv[0]);
+        AppConfig config = AppConfig::from_env_defaults();
         K230LatestChannel frame_pub;
         K230FrameRing frame_ring;
 

@@ -5,10 +5,10 @@
 
 constexpr unsigned kDefaultSensorWidth = 1920;
 constexpr unsigned kDefaultSensorHeight = 1080;
-constexpr float kDefaultSensorFx = 1625.7416788144435f;
-constexpr float kDefaultSensorFy = 1585.9830269782024f;
-constexpr float kDefaultSensorCx = 946.13450988811394f;
-constexpr float kDefaultSensorCy = 537.34063862123787f;
+constexpr float kDefaultModelFx = 910.0f;
+constexpr float kDefaultModelFy = 910.0f;
+constexpr float kDefaultModelCx = 256.0f;
+constexpr float kDefaultModelCy = 47.6f;
 
 enum class ProjectionMode {
     Openpilot = 0,
@@ -16,7 +16,6 @@ enum class ProjectionMode {
 };
 
 struct AppConfig {
-    std::string program_name;
     std::string kmodel_path;
     int debug_mode = 1;
 
@@ -26,6 +25,7 @@ struct AppConfig {
     unsigned nv12_crop_y = 0;
     unsigned nv12_crop_width = kDefaultSensorWidth;
     unsigned nv12_crop_height = kDefaultSensorHeight;
+    unsigned model_fps = 20;
     unsigned max_frames = 0;
 
     std::string replay_nv12_path;
@@ -38,10 +38,10 @@ struct AppConfig {
     bool log_calibration = false;
     bool profile = false;
 
-    float input_warp_fx = kDefaultSensorFx * 512.0f / kDefaultSensorWidth;
-    float input_warp_fy = kDefaultSensorFy * 256.0f / kDefaultSensorHeight;
-    float input_warp_cx = kDefaultSensorCx * 512.0f / kDefaultSensorWidth;
-    float input_warp_cy = kDefaultSensorCy * 256.0f / kDefaultSensorHeight;
+    float input_warp_fx = kDefaultModelFx;
+    float input_warp_fy = kDefaultModelFy;
+    float input_warp_cx = kDefaultModelCx;
+    float input_warp_cy = kDefaultModelCy;
     float input_warp_height = 1.22f;
     float input_warp_roll = 0.0f;
     float input_warp_pitch = 0.0f;
@@ -50,7 +50,7 @@ struct AppConfig {
     ProjectionMode projection_mode = ProjectionMode::Legacy;
 
     static AppConfig from_env(int argc, char *argv[]);
-    static AppConfig from_env_defaults(const char *program_name);
+    static AppConfig from_env_defaults();
     static std::string usage(const char *program_name);
 
     bool replay_enabled() const { return !replay_nv12_path.empty(); }

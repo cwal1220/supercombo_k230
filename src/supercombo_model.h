@@ -28,20 +28,15 @@ private:
     static constexpr int kInputImageFloats = 12 * kHalfW * kHalfH;
     static constexpr int kRecurrentFloats = 512;
 
-    void nv12_to_yuv6(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &out);
     bool run_current_yuv6(std::vector<float> &raw_output, bool profile, uint64_t t0, uint64_t t1);
     bool write_input(size_t index, const float *data, size_t count);
     size_t shape_count(size_t index) const;
 
     std::vector<runtime_tensor> input_tensors_;
     ModelInputTransform input_transform_;
-    ModelInputTransform big_input_transform_;
     std::vector<float> prev_yuv_;
     std::vector<float> current_yuv_;
-    std::vector<float> prev_big_yuv_;
-    std::vector<float> current_big_yuv_;
     std::vector<float> input_imgs_;
-    std::vector<float> big_input_imgs_;
     std::vector<float> desire_;
     std::vector<float> prev_desire_;
     std::vector<float> traffic_convention_;

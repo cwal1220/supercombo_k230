@@ -146,6 +146,9 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub)
     unsigned missed = 0;
     uint64_t last_frame_id = 0;
     bool have_last_frame_id = false;
+    const unsigned target_fps = std::max(1U, std::min(config.model_fps, 30U));
+    const uint64_t model_interval_ns = 1000000000ULL / target_fps;
+    uint64_t next_model_start_ns = 0;
 
     timeval start {};
     timeval last {};
@@ -154,11 +157,18 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub)
     unsigned last_processed = 0;
     unsigned last_errors = 0;
 
-    std::fprintf(stderr, "modeld: live shared ring slots=%u frame=%ux%u bytes=%u\n",
+    std::fprintf(stderr, "modeld: live shared ring slots=%u frame=%ux%u bytes=%u target=%uHz\n",
                  frame_ring.slot_count(), frame_ring.width(), frame_ring.height(),
-                 frame_ring.frame_bytes());
+                 frame_ring.frame_bytes(), target_fps);
 
     while (!g_stop) {
+        const uint64_t now_ns = steady_ns();
+        if (next_model_start_ns > now_ns) {
+            const uint64_t sleep_us = (next_model_start_ns - now_ns) / 1000ULL;
+            if (sleep_us > 0) usleep(static_cast<useconds_t>(sleep_us));
+        }
+        if (g_stop) break;
+
         K230RoadAiFrame meta;
         if (!frame_sub.read_new(&last_frame_seq, &meta, sizeof(meta), 1000)) {
             std::fprintf(stderr, "modeld: waiting for roadAiFrame\n");
@@ -195,6 +205,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub)
         const uint64_t t0 = steady_ns();
         const bool ok = model.run_frame_nv12(nv12, meta.width, meta.height, raw);
         const uint64_t t1 = steady_ns();
+        next_model_start_ns = t0 + model_interval_ns;
         if (ok) {
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);
             const float model_ms = static_cast<float>((t1 - t0) / 1000000.0);

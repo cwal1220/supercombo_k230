@@ -8,6 +8,7 @@
 #include <functional>
 #include <iostream>
 #include <numeric>
+#include <stdexcept>
 
 using namespace nncase::runtime;
 
@@ -79,14 +80,10 @@ ProfileStats &profile_stats()
 
 SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const AppConfig &config)
     : AIBase(kmodel_file, "Supercombo", debug_mode),
-      input_transform_(config, ModelFrame::MedModel),
-      big_input_transform_(config, ModelFrame::SmallBigModel),
+      input_transform_(config),
       prev_yuv_(kYuv6Floats, 0.0f),
       current_yuv_(kYuv6Floats, 0.0f),
-      prev_big_yuv_(kYuv6Floats, 0.0f),
-      current_big_yuv_(kYuv6Floats, 0.0f),
       input_imgs_(kInputImageFloats, 0.0f),
-      big_input_imgs_(kInputImageFloats, 0.0f),
       desire_(8, 0.0f),
       prev_desire_(8, 0.0f),
       traffic_convention_{1.0f, 0.0f},
@@ -94,12 +91,16 @@ SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const 
 {
     for (size_t i = 0; i < input_shapes_.size(); ++i)
         input_tensors_.push_back(get_input_tensor(i));
+
+    // The final graph retains input 1 for ABI compatibility, but has no consumers.
+    const std::vector<float> zero_big_input(kInputImageFloats, 0.0f);
+    if (!write_input(1, zero_big_input.data(), zero_big_input.size()))
+        throw std::runtime_error("initialize unused big_input_imgs failed");
 }
 
 void SupercomboModel::reset_state()
 {
     std::fill(prev_yuv_.begin(), prev_yuv_.end(), 0.0f);
-    std::fill(prev_big_yuv_.begin(), prev_big_yuv_.end(), 0.0f);
     std::fill(desire_.begin(), desire_.end(), 0.0f);
     std::fill(prev_desire_.begin(), prev_desire_.end(), 0.0f);
     std::fill(recurrent_state_.begin(), recurrent_state_.end(), 0.0f);
@@ -117,7 +118,6 @@ void SupercomboModel::set_desire(int desire)
 void SupercomboModel::set_input_calibration(const float rpy[3])
 {
     input_transform_.set_calibration(rpy[0], rpy[1], rpy[2]);
-    big_input_transform_.set_calibration(rpy[0], rpy[1], rpy[2]);
 }
 
 bool SupercomboModel::run_frame_nv12(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &raw_output)
@@ -125,7 +125,6 @@ bool SupercomboModel::run_frame_nv12(const uint8_t *nv12, int src_w, int src_h, 
     const bool profile = profile_enabled();
     const uint64_t t0 = profile ? now_ns() : 0;
     input_transform_.nv12_to_yuv6_warped(nv12, src_w, src_h, current_yuv_);
-    big_input_transform_.nv12_to_yuv6_warped(nv12, src_w, src_h, current_big_yuv_);
     const uint64_t t1 = profile ? now_ns() : 0;
     return run_current_yuv6(raw_output, profile, t0, t1);
 }
@@ -134,14 +133,10 @@ bool SupercomboModel::run_current_yuv6(std::vector<float> &raw_output, bool prof
 {
     std::memcpy(input_imgs_.data(), prev_yuv_.data(), prev_yuv_.size() * sizeof(float));
     std::memcpy(input_imgs_.data() + prev_yuv_.size(), current_yuv_.data(), current_yuv_.size() * sizeof(float));
-    std::memcpy(big_input_imgs_.data(), prev_big_yuv_.data(), prev_big_yuv_.size() * sizeof(float));
-    std::memcpy(big_input_imgs_.data() + prev_big_yuv_.size(), current_big_yuv_.data(), current_big_yuv_.size() * sizeof(float));
     prev_yuv_.swap(current_yuv_);
-    prev_big_yuv_.swap(current_big_yuv_);
     const uint64_t t2 = profile ? now_ns() : 0;
 
     if (!write_input(0, input_imgs_.data(), input_imgs_.size())) return false;
-    if (!write_input(1, big_input_imgs_.data(), big_input_imgs_.size())) return false;
     if (!write_input(2, desire_.data(), desire_.size())) return false;
     if (!write_input(3, traffic_convention_.data(), traffic_convention_.size())) return false;
     if (!write_input(4, recurrent_state_.data(), recurrent_state_.size())) return false;
@@ -174,86 +169,6 @@ bool SupercomboModel::run_current_yuv6(std::vector<float> &raw_output, bool prof
     }
 
     return true;
-}
-
-void SupercomboModel::nv12_to_yuv6(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &out)
-{
-    if (src_w < kModelW || src_h < kModelH) {
-        std::fill(out.begin(), out.end(), 0.0f);
-        return;
-    }
-
-    const uint8_t *y_plane = nv12;
-    const uint8_t *uv_plane = nv12 + src_w * src_h;
-    const int plane_size = kHalfW * kHalfH;
-    float *y00_plane = out.data();
-    float *y10_plane = y00_plane + plane_size;
-    float *y01_plane = y10_plane + plane_size;
-    float *y11_plane = y01_plane + plane_size;
-    float *u_plane = y11_plane + plane_size;
-    float *v_plane = u_plane + plane_size;
-
-    if (src_w == kModelW && src_h == kModelH) {
-        for (int y2 = 0; y2 < kHalfH; ++y2) {
-            const int src_y0 = y2 * 2;
-            const uint8_t *y0 = y_plane + src_y0 * src_w;
-            const uint8_t *y1 = y0 + src_w;
-            const uint8_t *uv = uv_plane + (src_y0 / 2) * src_w;
-            float *dst_y00 = y00_plane + y2 * kHalfW;
-            float *dst_y10 = y10_plane + y2 * kHalfW;
-            float *dst_y01 = y01_plane + y2 * kHalfW;
-            float *dst_y11 = y11_plane + y2 * kHalfW;
-            float *dst_u = u_plane + y2 * kHalfW;
-            float *dst_v = v_plane + y2 * kHalfW;
-
-            for (int x2 = 0; x2 < kHalfW; ++x2) {
-                dst_y00[x2] = static_cast<float>(y0[0]);
-                dst_y10[x2] = static_cast<float>(y1[0]);
-                dst_y01[x2] = static_cast<float>(y0[1]);
-                dst_y11[x2] = static_cast<float>(y1[1]);
-                dst_u[x2] = static_cast<float>(uv[0]);
-                dst_v[x2] = static_cast<float>(uv[1]);
-                y0 += 2;
-                y1 += 2;
-                uv += 2;
-            }
-        }
-        return;
-    }
-
-    const int crop_h = std::min(src_h, src_w / 2);
-    const int crop_y = std::max(0, (src_h - crop_h) / 2);
-
-    for (int y2 = 0; y2 < kHalfH; ++y2) {
-        float *dst_y00 = y00_plane + y2 * kHalfW;
-        float *dst_y10 = y10_plane + y2 * kHalfW;
-        float *dst_y01 = y01_plane + y2 * kHalfW;
-        float *dst_y11 = y11_plane + y2 * kHalfW;
-        float *dst_u = u_plane + y2 * kHalfW;
-        float *dst_v = v_plane + y2 * kHalfW;
-        float *dst_y[4] = {dst_y00, dst_y01, dst_y10, dst_y11};
-
-        for (int x2 = 0; x2 < kHalfW; ++x2) {
-            int sum_u = 0;
-            int sum_v = 0;
-            for (int dy = 0; dy < 2; ++dy) {
-                for (int dx = 0; dx < 2; ++dx) {
-                    const int mx = x2 * 2 + dx;
-                    const int my = y2 * 2 + dy;
-                    const int sx = std::min(src_w - 1, mx * src_w / kModelW);
-                    const int sy = std::min(src_h - 1, crop_y + my * crop_h / kModelH);
-                    const uint8_t yy = y_plane[sy * src_w + sx];
-                    const int uv_x = sx & ~1;
-                    const uint8_t *uv = uv_plane + (sy / 2) * src_w + uv_x;
-                    dst_y[dy * 2 + dx][x2] = static_cast<float>(yy);
-                    sum_u += uv[0];
-                    sum_v += uv[1];
-                }
-            }
-            dst_u[x2] = static_cast<float>(sum_u / 4);
-            dst_v[x2] = static_cast<float>(sum_v / 4);
-        }
-    }
 }
 
 bool SupercomboModel::write_input(size_t index, const float *data, size_t count)

@@ -185,10 +185,12 @@ crop/resize, prepares the YUV6 recurrent inputs, runs nncase runtime directly,
 and publishes compact `modelState`. The overlay display process uses
 `/dev/video1` for preview and `/dev/video2` remains dedicated to the AI stream.
 The model input preparation always uses calibrated homography sampling followed
-by `NV12 -> YUV6` packing. Source intrinsics are derived from the OV5647
-full-resolution calibration and the configured crop/resize. Separate medmodel
-and sbigmodel transforms feed `input_imgs` and `big_input_imgs`, each with its
-own previous-frame history.
+by `NV12 -> YUV6` packing. The 01Studio ISP output is already normalized to the
+medmodel view, so the default source intrinsics are `fx=fy=910`, `cx=256`, and
+`cy=47.6`; zero calibration therefore preserves the ISP pixels exactly.
+`SUPERCOMBO_INPUT_WARP_FX/FY/CX/CY` can override these values for a separately
+measured camera pipeline. The medmodel transform feeds the current and previous
+frames into `input_imgs`.
 
 Calibration/input-warp equivalence checks:
 
@@ -202,13 +204,12 @@ Calibration/input-warp equivalence checks:
   openpilot's `get_view_frame_from_road_frame(0, pitch, yaw, model_height)`
   extrinsic matrix. `rpyCalib` may contain a tiny roll internally in openpilot,
   but that roll is not fed into `modeld`.
-- The verifier scales the OV5647 camera matrix through the configured
-  full-sensor crop and `512x256` resize, then compares both medmodel and
-  sbigmodel matrices with the original openpilot formulas.
+- The verifier checks the ISP-normalized medmodel defaults and compares its
+  matrix with the original openpilot formula.
 - Automatic calibration requires both CAN `vEgo` and camera-odometry
   `trans[0]` above 15 mph, matching openpilot's acceptance gate.
-- `big_input_imgs` uses the sbigmodel transform and temporal YUV6 history; it is
-  no longer zero-filled.
+- The final graph does not consume `big_input_imgs`; its compatibility input is
+  initialized to zero once and skipped during per-frame preprocessing.
 
 Run the host-only verifier:
 

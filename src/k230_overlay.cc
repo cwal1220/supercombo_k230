@@ -43,6 +43,7 @@ constexpr int kPreviewVideoDevice = 1;
 constexpr unsigned kDisplayReadyPreviewFrames = 30;
 constexpr unsigned kOverlayBufferCount = 2;
 constexpr uint64_t kStateFreshNs = 2000000000ULL;
+constexpr uint64_t kOverlayIntervalNs = 60000000ULL;
 
 const char *display_ready_path()
 {
@@ -151,8 +152,7 @@ K230OverlayDisplay *g_app = nullptr;
 class K230OverlayDisplay {
 public:
     explicit K230OverlayDisplay(const AppConfig &config)
-        : config_(config),
-          profile_(config.profile)
+        : profile_(config.profile)
     {
         default_projection_ = make_projection_state(config.projection_mode,
                                                     config.manual_roll,
@@ -181,7 +181,7 @@ public:
 
         v4l2_drm_context context {};
         v4l2_drm_default_context(&context);
-        context.device = static_cast<unsigned>(video_device_);
+        context.device = kPreviewVideoDevice;
         context.video_format = V4L2_PIX_FMT_NV12;
         context.display_format = 0;
 
@@ -200,27 +200,27 @@ public:
 
         overlay_plane_ = display_get_plane(display_, DRM_FORMAT_ARGB8888);
         if (!overlay_plane_) throw std::runtime_error("display_get_plane ARGB failed");
-        overlay_plane_->drm_rotation = context.drm_rotation;
+        overlay_plane_->drm_rotation = rotation_0;
         for (display_buffer *&buffer : overlay_buffers_) {
             buffer = display_allocate_buffer(overlay_plane_,
-                                             kLogicalDisplayWidth,
-                                             kLogicalDisplayHeight);
+                                             display_->width,
+                                             display_->height);
             if (!buffer) throw std::runtime_error("display_allocate_buffer ARGB failed");
             std::memset(buffer->map, 0, buffer->size);
             clean(buffer);
         }
         overlay_buffer_ = overlay_buffers_[0];
-        overlay_.draw(overlay_buffer_, ParsedModelOutput{}, default_projection_, hud_);
+        overlay_.draw(overlay_buffer_, ParsedModelOutput{}, default_projection_, hud_, true);
         clean(overlay_buffer_);
         if (display_update_buffer(overlay_buffer_, 0, 0) != 0)
             throw std::runtime_error("initial overlay update failed");
 
         std::fprintf(stderr,
-                     "k230_overlay: display=%ux%u logical=%ux%u preview=/dev/video%d %ux%u rotation=%d projection=%s\n",
+                     "k230_overlay: display=%ux%u logical=%ux%u preview=/dev/video%d %ux%u rotation=%d overlay=native-direct projection=%s\n",
                      display_->width, display_->height,
-                     kLogicalDisplayWidth, kLogicalDisplayHeight, video_device_,
+                     kLogicalDisplayWidth, kLogicalDisplayHeight, kPreviewVideoDevice,
                      context.width, context.height, static_cast<int>(context.drm_rotation),
-                     projection_mode_name(config_.projection_mode));
+                     projection_mode_name(default_projection_.mode));
         std::fprintf(stderr,
                      "k230_overlay: waiting %u displayed preview frames before ready\n",
                      kDisplayReadyPreviewFrames);
@@ -243,7 +243,8 @@ private:
     int on_frame(v4l2_drm_context *context, bool displayed)
     {
         ++poll_count_;
-        pending_redraw_ = update_model() || update_aux_state() || pending_redraw_;
+        pending_redraw_ = update_model() || pending_redraw_;
+        update_aux_state();
 
         if (displayed && overlay_buffer_) {
             display_buffer *current = nullptr;
@@ -260,10 +261,13 @@ private:
                 }
             }
 
-            if (pending_redraw_ || force_redraw_) {
-                force_redraw_ = false;
+            const uint64_t draw_now = k230_now_ns();
+            const bool overlay_due = last_overlay_draw_ns_ == 0 ||
+                draw_now - last_overlay_draw_ns_ >= kOverlayIntervalNs;
+            if (pending_redraw_ && overlay_due) {
                 pending_redraw_ = false;
                 redraw_overlay();
+                last_overlay_draw_ns_ = draw_now;
                 ++overlay_frames_;
             }
             ++display_frames_;
@@ -278,7 +282,6 @@ private:
             const double camera_fps = context[0].frame_count * 1000000.0 / duration;
             const double overlay_fps = overlay_frames_ * 1000000.0 / duration;
             const double model_fps = model_updates_ * 1000000.0 / duration;
-            hud_.display_fps = static_cast<float>(display_fps);
             hud_.preview_fps = static_cast<float>(camera_fps);
             hud_.overlay_fps = static_cast<float>(overlay_fps);
             hud_.model_fps = static_cast<float>(model_fps);
@@ -361,14 +364,12 @@ private:
         return true;
     }
 
-    bool update_aux_state()
+    void update_aux_state()
     {
-        bool visual_changed = false;
         uint64_t seq = latest_panda_seq_;
         if (panda_state_sub_.read(&latest_panda_state_, sizeof(latest_panda_state_), &seq) &&
             seq != latest_panda_seq_) {
             latest_panda_seq_ = seq;
-            visual_changed = true;
         }
 
         seq = latest_control_seq_;
@@ -381,10 +382,8 @@ private:
         if (manager_state_sub_.read(&latest_manager_state_, sizeof(latest_manager_state_), &seq) &&
             seq != latest_manager_seq_) {
             latest_manager_seq_ = seq;
-            visual_changed = true;
         }
         refresh_hud_state();
-        return visual_changed;
     }
 
     void refresh_hud_state()
@@ -409,8 +408,6 @@ private:
         hud_.panda_healthy = panda_fresh && latest_panda_state_.comms_healthy != 0;
         hud_.panda_tx_enabled = latest_panda_state_.tx_enabled != 0;
         hud_.panda_controls_allowed = panda_fresh && latest_panda_state_.controls_allowed != 0;
-        hud_.ignition = panda_fresh &&
-            (latest_panda_state_.ignition_line != 0 || latest_panda_state_.ignition_can != 0);
         hud_.panda_faults = panda_fresh ? latest_panda_state_.faults : 0;
 
         hud_.controller_enabled = control_fresh && latest_control_state_.enabled != 0;
@@ -420,23 +417,18 @@ private:
         hud_.steering_fault = control_fresh && latest_control_state_.steering_fault != 0;
         hud_.speed_kph = control_fresh ? latest_control_state_.speed_kph : 0.0f;
         hud_.steering_angle_deg = control_fresh ? latest_control_state_.steering_angle_deg : 0.0f;
-        hud_.desired_curvature = control_fresh ? latest_control_state_.desired_curvature : 0.0f;
-        hud_.actual_curvature = control_fresh ? latest_control_state_.actual_curvature : 0.0f;
-        hud_.normalized_output = control_fresh ? latest_control_state_.normalized_output : 0.0f;
         hud_.desired_torque = control_fresh ? latest_control_state_.desired_torque : 0;
         hud_.apply_torque = control_fresh ? latest_control_state_.apply_torque : 0;
         hud_.driver_torque = control_fresh ? latest_control_state_.driver_torque : 0;
-        std::snprintf(hud_.active_block, sizeof(hud_.active_block), "%s",
-                      control_fresh ? latest_control_state_.active_block : "control_stale");
 
-        hud_.running_processes = 0;
-        hud_.total_processes = manager_fresh
+        const unsigned total_processes = manager_fresh
             ? std::min<unsigned>(latest_manager_state_.process_count, kK230MaxProcesses)
             : 0;
-        for (unsigned i = 0; i < hud_.total_processes; ++i)
-            hud_.running_processes += latest_manager_state_.processes[i].running ? 1U : 0U;
-        hud_.services_healthy = manager_fresh && hud_.total_processes >= 3 &&
-            hud_.running_processes == hud_.total_processes && have_model_state_;
+        unsigned running_processes = 0;
+        for (unsigned i = 0; i < total_processes; ++i)
+            running_processes += latest_manager_state_.processes[i].running ? 1U : 0U;
+        hud_.services_healthy = manager_fresh && total_processes >= 3 &&
+            running_processes == total_processes && have_model_state_;
     }
 
     void redraw_overlay()
@@ -444,8 +436,9 @@ private:
         overlay_buffer_index_ = (overlay_buffer_index_ + 1) % kOverlayBufferCount;
         overlay_buffer_ = overlay_buffers_[overlay_buffer_index_];
         const uint64_t draw_start = profile_ ? k230_now_ns() : 0;
-        overlay_.draw(overlay_buffer_, have_model_state_ ? latest_output_ : ParsedModelOutput{},
-                      have_model_state_ ? latest_projection_ : default_projection_, hud_);
+        overlay_.draw(overlay_buffer_,
+                      have_model_state_ ? latest_output_ : ParsedModelOutput{},
+                      have_model_state_ ? latest_projection_ : default_projection_, hud_, true);
         if (profile_) overlay_stats_.add(k230_now_ns() - draw_start);
 
         const uint64_t present_start = profile_ ? k230_now_ns() : 0;
@@ -469,9 +462,7 @@ private:
                      display_ready_path(), startup_preview_frames_);
     }
 
-    AppConfig config_;
     OverlayRenderer overlay_;
-    int video_device_ = kPreviewVideoDevice;
     bool profile_ = false;
 
     K230LatestChannel model_state_sub_;
@@ -485,6 +476,7 @@ private:
     std::array<display_buffer *, kOverlayBufferCount> overlay_buffers_ {};
     unsigned overlay_buffer_index_ = 0;
     display_buffer *last_preview_buffer_ = nullptr;
+    uint64_t last_overlay_draw_ns_ = 0;
 
     uint64_t latest_model_seq_ = 0;
     uint64_t latest_panda_seq_ = 0;
@@ -498,7 +490,6 @@ private:
     ProjectionState latest_projection_ {};
     ProjectionState default_projection_ {};
     bool have_model_state_ = false;
-    bool force_redraw_ = true;
     bool pending_redraw_ = true;
     bool ready_file_written_ = false;
     unsigned startup_preview_frames_ = 0;
@@ -518,14 +509,13 @@ private:
 
 } // namespace
 
-int main(int argc, char *argv[])
+int main()
 {
-    (void)argc;
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
     try {
-        AppConfig config = AppConfig::from_env_defaults(argv[0]);
+        AppConfig config = AppConfig::from_env_defaults();
         K230OverlayDisplay app(config);
         return app.run();
     } catch (const std::exception &e) {
