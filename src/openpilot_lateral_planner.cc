@@ -54,12 +54,15 @@ private:
 
 class LanePlanner {
 public:
+  LanePlanner(double camera_offset_m, double path_offset_m)
+      : camera_offset_m_(camera_offset_m), path_offset_m_(path_offset_m) {}
+
   void parse(const K230ModelState &model) {
     for (int i = 0; i < kTrajectorySize; ++i) {
       lane_t_[i] = model.lane_t[i];
       lane_x_[i] = model.lanes[1][i].x;
-      left_y_[i] = model.lanes[1][i].y;
-      right_y_[i] = model.lanes[2][i].y;
+      left_y_[i] = model.lanes[1][i].y + camera_offset_m_;
+      right_y_[i] = model.lanes[2][i].y + camera_offset_m_;
     }
     left_prob_ = model.lane_probabilities[1];
     right_prob_ = model.lane_probabilities[2];
@@ -70,6 +73,8 @@ public:
   std::array<std::array<double, 3>, kTrajectorySize> lane_path(
       float v_ego, const std::array<double, kTrajectorySize> &path_t,
       std::array<std::array<double, 3>, kTrajectorySize> path) {
+    for (auto &point : path) point[1] += path_offset_m_;
+
     std::array<double, kTrajectorySize> width{};
     for (int i = 0; i < kTrajectorySize; ++i)
       width[i] = right_y_[i] - left_y_[i];
@@ -148,6 +153,8 @@ private:
   double right_std_ = 0.0;
   double lane_width_ = 3.7;
   double d_prob_ = 0.0;
+  double camera_offset_m_ = 0.0;
+  double path_offset_m_ = 0.0;
 };
 
 class AcadosLateralMpc {
@@ -254,7 +261,8 @@ private:
 }  // namespace
 
 struct OpenpilotLateralPlanner::Impl {
-  explicit Impl(const K7SteeringParams &steering) {
+  explicit Impl(const K7SteeringParams &steering)
+      : lane_planner(steering.camera_offset_m, steering.path_offset_m) {
     const double center_to_front = steering.center_to_front_m();
     constexpr double civic_mass = 1326.0 + 136.0;
     constexpr double civic_wheelbase = 2.70;

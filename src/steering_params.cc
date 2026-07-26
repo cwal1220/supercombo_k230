@@ -396,6 +396,8 @@ bool load_k7_steering_params_json(const std::string &path,
     parse_optional_float(text, "wheelbase_m", 2.0f, 3.5f, &params->wheelbase_m);
     parse_optional_float(text, "center_to_front_ratio", 0.2f, 0.7f, &params->center_to_front_ratio);
     parse_optional_float(text, "steer_ratio_rear", -0.5f, 0.5f, &params->steer_ratio_rear);
+    parse_optional_float(text, "camera_offset_m", -1.0f, 1.0f, &params->camera_offset_m);
+    parse_optional_float(text, "path_offset_m", -1.0f, 1.0f, &params->path_offset_m);
     parse_optional_bool(text, "invert_steer", &params->invert_steer);
     parse_optional_float(text, "min_steer_speed_mps", 0.0f, 5.0f, &params->min_steer_speed_mps);
   } catch (const std::exception &exc) {

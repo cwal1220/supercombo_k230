@@ -42,7 +42,7 @@ struct K7SteeringParams {
 
   float steer_ratio = 15.5f;
   float tire_stiffness_factor = 0.85f;
-  float steer_actuator_delay = 0.36f;
+  float steer_actuator_delay = 0.42f;
   float max_steering_angle_deg = 90.0f;
   bool avoid_lkas_fault_enabled = false;
   float avoid_lkas_fault_max_angle_deg = 85.0f;
@@ -57,6 +57,8 @@ struct K7SteeringParams {
   float wheelbase_m = 2.855f;
   float center_to_front_ratio = 0.4f;
   float steer_ratio_rear = 0.0f;
+  float camera_offset_m = -0.06f;
+  float path_offset_m = 0.0f;
   bool invert_steer = false;
   float min_steer_speed_mps = 0.3f;
 

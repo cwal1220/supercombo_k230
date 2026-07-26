@@ -55,6 +55,9 @@ public:
     uint8_t hw_type() const { return hw_type_; }
     uint8_t health_packet_version() const { return health_packet_version_; }
     uint8_t can_packet_version() const { return can_packet_version_; }
+    uint32_t usb_tx_timeouts() const { return usb_tx_timeouts_; }
+    uint32_t usb_tx_retries() const { return usb_tx_retries_; }
+    uint32_t malformed_rx_batches() const { return malformed_rx_batches_; }
 
     bool set_safety_model(uint16_t safety_model, uint16_t safety_param);
     bool send_heartbeat(bool engaged);
@@ -79,6 +82,10 @@ private:
     uint8_t health_packet_version_ = 0;
     uint8_t can_packet_version_ = 0;
     bool comms_healthy_ = true;
+    uint32_t usb_tx_timeouts_ = 0;
+    uint32_t usb_tx_retries_ = 0;
+    uint32_t malformed_rx_batches_ = 0;
+    uint32_t consecutive_malformed_rx_ = 0;
     std::vector<uint8_t> recv_buf_;
 };
 

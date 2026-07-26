@@ -75,7 +75,9 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
                                                    const LateralTarget &target,
                                                    const K7VehicleCanState &vehicle_state,
                                                    double now_s,
-                                                   int frame) {
+                                                   int frame,
+                                                   bool panda_ready,
+                                                   bool panda_controls_allowed) {
   update_button_state(vehicle_state.clu_button, now_s);
   const bool logical_engaged = config_.force_engaged || engaged_;
 
@@ -97,6 +99,7 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
   result.desired_curvature = lag_adjusted_desired_curvature(target, speed_mps);
   result.active_block = active_block_reason(path, target, vehicle_state, now_s,
                                             result.seeds_ready, result.vehicle_fresh,
+                                            panda_ready, panda_controls_allowed,
                                             result.speed_kph);
   if (logical_engaged && is_hard_disengage_block(result.active_block)) {
     engaged_ = false;
@@ -197,7 +200,7 @@ void K7LateralController::update_button_state(int button, double now_s) {
     engaged_ = false;
     reset_control_state();
     last_disengage_s_ = now_s;
-  } else if (button == kButtonSetDecel) {
+  } else if (button == 0 && last_button_ == kButtonSetDecel) {
     engaged_ = true;
   }
   last_button_ = button;
@@ -350,9 +353,13 @@ std::string K7LateralController::active_block_reason(
     double now_s,
     bool seeds_ready,
     bool vehicle_fresh,
+    bool panda_ready,
+    bool panda_controls_allowed,
     float speed_kph) const {
   if (!config_.force_engaged && !engaged_) return "not_engaged";
   if (!config_.enabled || !config_.steering_params.enabled) return "controller_disabled";
+  if (!panda_ready) return "panda_not_ready";
+  if (!panda_controls_allowed) return "panda_controls_off";
   if (!path.usable_for_steering) return "path_invalid";
   if (!target.valid || !target.mpc_solution_valid) return "lateral_plan_invalid";
   if (!seeds_ready) return "seeds_missing";
@@ -433,7 +440,7 @@ std::vector<CanFrame> K7LateralController::build_frames(
   command.apply_steer = result.apply_torque;
   command.steer_req = result.active;
   command.cut_steer_temp = result.cut_steer_temp;
-  command.sys_state = lkas_sys_state(result.active, result.left_lane, result.right_lane);
+  command.sys_state = lkas_sys_state(result.active, true, true);
   command.sys_warning = false;
   command.left_lane = result.left_lane;
   command.right_lane = result.right_lane;

@@ -136,7 +136,7 @@ batch는 현재 버리도록 되어 있으나, 연속 오류와 물리적 discon
 대상:
 
 - `src/k230_ipc.h`
-- `src/k230_latest_channel.cc`
+- `src/k230_can_queue.cc`
 - `src/k230_pandad.cc`
 - `src/k230_k7_controlsd.cc`
 - `CMakeLists.txt`
@@ -315,3 +315,95 @@ batch는 현재 버리도록 되어 있으나, 연속 오류와 물리적 discon
 
 롤백 시 이 계획을 시작하기 직전의 기준 커밋으로 복귀하고 TX를 비활성화한
 shadow mode에서 원인을 재현한다.
+
+## 구현 및 검증 현황
+
+기록 시각: 2026-07-27
+
+### 기준점
+
+- 구현 전 변경사항과 이 계획 문서를 `4d715c0` (`Checkpoint K7 steering and CAN
+  diagnostics`)으로 커밋했다.
+- 이 기준점은 원격에 push하지 않았으며, 이후 구현은 별도 커밋으로 관리한다.
+
+### 완료된 구현
+
+- 단계 1: CAN HUD lane visibility를 모델 확률과 분리했다. active는
+  `CF_Lkas_LdwsSysState=3`, inactive는 `4`를 유지한다.
+- 단계 2: `/k230_can`과 `/k230_sendcan`을 64-slot SPSC shared-memory ring
+  queue로 교체했다. full 시 overwrite하지 않으며 producer 시작 시 이전 queue
+  generation을 폐기한다.
+- 단계 3: controller가 Panda state freshness, 연결/통신/TX 상태,
+  `hyundaiCommunity:0`, heartbeat, `controls_allowed`를 확인한다. Panda가
+  허용하지 않을 때 torque와 `ActToi`가 0인 replacement frame만 생성한다.
+- 단계 3: SET release에서 engage하고 CANCEL press에서 disengage하도록
+  `openpilot_c2`와 맞췄다. 브레이크는 lateral engage를 해제하지 않는다.
+- 단계 4: `inactive_release_ms`를 3000 ms로 바꾸고 handoff 완료 뒤
+  LKAS counter seed를 다시 잡도록 했다.
+- 단계 5: RX/TX batch age를 100 ms로 제한하고, USB timeout/retry/partial
+  write 및 연속 malformed RX를 구분했다. reconnect마다 safety mode/param을
+  health에서 다시 확인한다.
+- daemon 1초 로그에 queue depth/full/stale, CAN RX/TX/FWD 오류,
+  Panda blocked, heartbeat, controls, USB timeout/retry, malformed RX 수를
+  추가했다.
+
+### 2026-07-27 실차 주행 후속 분석
+
+약 3분의 실차 주행에서 제어 루프와 CAN RX는 안정적이었지만
+`pandaBlocked`가 `144`에서 `363`까지 증가했다. 같은 구간에 `sendcan stale`이
+초당 최대 14개 발생했다.
+
+원인은 `k230_pandad`가 CAN RX 뒤에 읽어 둔 `now`를 TX freshness 검사에도
+재사용한 경쟁 조건이었다. 그 시각 이후 `controlsd`가 새 batch를 publish하면
+batch timestamp가 `now`보다 커져 실제로는 새 batch인데도 future/stale로
+폐기됐다. 누락 직후 torque가 Panda의 프레임당 `+3/-7` 제한을 건너뛰면서
+LKAS11이 safety에서 거부될 수 있었다.
+
+후속 수정:
+
+- sendcan batch를 pop한 직후 timestamp를 다시 읽어 freshness를 판정한다.
+- rejected CAN echo를 주소/버스별로 1초 로그에 기록한다.
+- libusb RX timeout에 부분 수신 바이트가 있으면 폐기하지 않고 decode한다.
+- `pandad=-10`, `controlsd=-8`로 우선순위를 올려 모델/화면 부하와 분리한다.
+
+차선 좌측 편향은 원본 `openpilot_c2`의 `CameraOffsetAdj=60 mm` 보정이 C++
+lane planner에 이식되지 않은 차이로 확인했다. 원본과 같은 `-0.06 m` lane-line
+offset을 복원했으며 사용자 path offset은 0을 유지한다. 커브 진입 반응은 torque
+rate를 변경하지 않고 actuator lookahead를 `0.36 s`에서 `0.42 s`로만 조정한다.
+
+### 완료된 자동 검증
+
+호스트 Release 빌드 후 다음 결과를 확인했다.
+
+```text
+K230_CAN_QUEUE_OK
+K7_CONTROL_SELF_TEST_OK
+check_panda_can_codec: ok
+MODEL_OUTPUT_EQUIVALENCE_OK output=6012 recurrent=512 pose_offset=6000
+```
+
+검증 범위:
+
+- queue full 비덮어쓰기, 순서, producer reopen/reset, 10,000회 push/pop
+- batch freshness 경계
+- HUD state 안정성
+- SET/CANCEL edge, Panda gate, zero torque/`ActToi`
+- 3초 handoff와 stock LKAS counter 재-seed
+- 60 km/h MDPS spoof, CAN codec, model output parser 회귀
+
+K230 Linux SDK의 RISC-V toolchain으로 `k230_pandad`,
+`k230_k7_controlsd`, `k230_overlay`의 컴파일 및 링크도 완료했다. CAN 변경부에는
+새 컴파일 경고가 없었고, overlay가 함께 빌드하면서 기존 `k230_ipc.cc`에 대한
+RISC-V GCC의 `maybe-uninitialized` 경고가 다시 출력됐다.
+
+### 남은 차량 검증
+
+현재 저장소에는 문서가 설명하는 `K230CAN1` 주행 fixture가 없으므로 실제 로그
+replay 수치 검증은 아직 실행하지 못했다. 또한 `adb devices -l`에 연결된 보드가
+없어 이 단계에서는 보드/차량 TX를 실행하지 않았다. 아래 검증은 구현 완료와
+별개인 실차 승인 gate로 남긴다.
+
+- 보드 shadow mode에서 queue full/stale와 Panda 오류 counter가 0인지 확인
+- 정차 TX에서 주소별 100/50 Hz, checksum, alive counter 연속성 확인
+- SET/CANCEL 및 3초 stock handoff 동안 계기판 상태 확인
+- 제한된 주행에서 LDWS 아이콘 점멸과 간헐 경고등 재현 여부 확인

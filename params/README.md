@@ -24,7 +24,7 @@
 |---|---:|---|---|
 | `model_timeout_ms` | 250 | ms / 50~2000 | 모델 경로가 마지막으로 갱신된 뒤 유효하다고 인정하는 시간이다. 초과하면 조향 경로를 사용할 수 없다. |
 | `vehicle_state_timeout_ms` | 500 | ms / 50~2000 | 차량 CAN 상태와 yaw-rate 신호의 freshness 제한이다. 초과하면 제어를 차단한다. |
-| `inactive_release_ms` | 250 | ms / 0~2000 | disengage 또는 일시적 비활성 직후 0 토크 해제 프레임을 계속 보내는 시간이다. |
+| `inactive_release_ms` | 3000 | ms / 0~5000 | disengage 직후 순정 LKAS로 넘기기 전에 0 토크 해제 프레임을 유지하는 시간이다. openpilot_c2의 기본 handoff 시간과 같다. |
 | `mdps_speed_spoof_kph` | 60.0 | km/h / 30~100 | 저속에서도 MDPS가 LKAS 조향을 허용하도록 MDPS 버스의 CLU11 속도를 위조하는 값이다. K7 YG HEV 기준값은 60 km/h다. |
 
 ### 운전자 조향 보호
@@ -104,13 +104,15 @@
 |---|---:|---|---|
 | `steer_ratio` | 15.5 | ratio / 8~25 | 핸들 조향각과 전륜 조향각의 비율이다. 실제 곡률 추정에 직접 사용한다. |
 | `tire_stiffness_factor` | 0.85 | 배율 / 0.2~2.0 | 기준 타이어 횡강성에 적용하는 차량별 보정 계수다. |
-| `steer_actuator_delay` | 0.36 | second / 0.01~1.0 | 현재 시점의 목표 곡률을 계산할 때 보상하는 조향 액추에이터 지연이다. |
+| `steer_actuator_delay` | 0.42 | second / 0.01~1.0 | 현재 시점의 목표 곡률을 계산할 때 보상하는 조향 액추에이터 지연이다. 값을 키우면 MPC 경로를 조금 더 앞에서 읽어 커브 진입을 선행하지만, 과도하면 조향이 빨라지거나 오버슈트할 수 있다. |
 | `angle_offset_deg` | 0.8 | degree / -10~10 | 조향각 센서의 직진 오프셋이다. 실제 곡률 추정 전에 센서 각도에서 뺀다. |
 | `roll_rad` | 0.0 | radian / -0.2~0.2 | 도로 또는 차량 roll에 의한 횡가속도와 곡률 보정값이다. |
 | `mass_kg` | 1816.0 | kg / 1000~2600 | 차량 모델과 타이어 횡강성 계산에 사용하는 차량 질량이다. |
 | `wheelbase_m` | 2.855 | m / 2.0~3.5 | 차량 축거다. |
 | `center_to_front_ratio` | 0.4 | wheelbase ratio / 0.2~0.7 | 무게중심에서 전축까지 거리의 축거 대비 비율이다. |
 | `steer_ratio_rear` | 0.0 | ratio / -0.5~0.5 | 후륜 조향 보정 계수다. K7은 후륜 조향이 없으므로 0을 사용한다. |
+| `camera_offset_m` | -0.06 | m / -1~1 | 차량 중심에 대한 카메라의 횡방향 위치를 lane line에 보정한다. 원본 `openpilot_c2`의 `CameraOffsetAdj=60 mm`와 같은 값이며, 음수는 목표 차선 중심을 우측으로 이동한다. |
+| `path_offset_m` | 0.0 | m / -1~1 | 모델 path 전체에 적용하는 사용자 횡방향 보정이다. 기본값 0을 유지하고 카메라 위치 보정과 혼용하지 않는다. |
 | `invert_steer` | false | bool | 목표 곡률 부호를 반전한다. K7에서는 사용하지 않는다. |
 | `min_steer_speed_mps` | 0.3 | m/s / 0~5 | 이 속도 미만에서는 토크 컨트롤러 출력을 0으로 만든다. |
 
@@ -148,10 +150,11 @@
 ## 권장 튜닝 순서
 
 1. 카메라 장착을 고정하고 온라인 캘리브레이션을 완료한다.
-2. `angle_offset_deg`, `steer_ratio`, 차량 제원이 실제 차량과 맞는지 확인한다.
-3. `torque_kp_raw`, `torque_ki_raw`, `torque_kf_raw`, `torque_friction_raw`을 한 항목씩 조정한다.
-4. 토크가 정상적으로 추종된 뒤 `max_lateral_jerk`, `max_lateral_accel` 제한을 조정한다.
-5. 마지막으로 운전자 토크 보호와 fault 회피 옵션을 검증한다.
+2. `camera_offset_m`, `path_offset_m`로 차선 중심 위치를 먼저 맞춘다.
+3. `angle_offset_deg`, `steer_ratio`, 차량 제원이 실제 차량과 맞는지 확인한다.
+4. `torque_kp_raw`, `torque_ki_raw`, `torque_kf_raw`, `torque_friction_raw`을 한 항목씩 조정한다.
+5. 토크가 정상적으로 추종된 뒤 `steer_actuator_delay`, `max_lateral_jerk`, `max_lateral_accel`을 조정한다.
+6. 마지막으로 운전자 토크 보호와 fault 회피 옵션을 검증한다.
 
 각 단계에서 disengage 가능 여부, 운전자 개입 시 즉시 토크가 줄어드는지, CAN 오류와
 MDPS fault가 없는지를 먼저 확인한다.

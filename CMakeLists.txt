@@ -211,6 +211,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
       src/k230_pandad.cc
       src/panda_client.cc
       src/panda_can_codec.cc
+      src/k230_can_queue.cc
       src/k230_ipc.cc
       src/model_output.cc
       src/projection.cc
@@ -220,6 +221,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
 
     add_executable(k230_k7_controlsd
       src/k230_k7_controlsd.cc
+      src/k230_can_queue.cc
       src/k230_latest_channel.cc
       src/openpilot_lateral_planner.cc
     )
@@ -258,6 +260,13 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
   )
   target_include_directories(check_panda_can_codec PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_compile_options(check_panda_can_codec PRIVATE ${PROJECT_WARNINGS})
+
+  add_executable(check_k230_can_queue
+    benchmarks/check_k230_can_queue.cc
+    src/k230_can_queue.cc
+  )
+  target_include_directories(check_k230_can_queue PRIVATE ${PROJECT_LOCAL_INCLUDES})
+  target_compile_options(check_k230_can_queue PRIVATE ${PROJECT_WARNINGS})
 
   add_executable(check_k7_control_replay
     benchmarks/check_k7_control_replay.cc

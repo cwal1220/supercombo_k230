@@ -51,7 +51,7 @@ bool load_k7_driving_params_json(const std::string &path,
                        &params->model_timeout_ms);
     parse_optional_int(text, "vehicle_state_timeout_ms", 50, 2000,
                        &params->vehicle_state_timeout_ms);
-    parse_optional_int(text, "inactive_release_ms", 0, 2000,
+    parse_optional_int(text, "inactive_release_ms", 0, 5000,
                        &params->inactive_release_ms);
     parse_optional_float(text, "mdps_speed_spoof_kph", 30.0f, 100.0f,
                          &params->mdps_speed_spoof_kph);

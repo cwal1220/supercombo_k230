@@ -142,6 +142,8 @@ struct K7VehicleCanState {
   bool seatbelt_unlatched = false;
   bool left_blinker = false;
   bool right_blinker = false;
+  double left_blinker_until_s = -1.0;
+  double right_blinker_until_s = -1.0;
   bool hazard = false;
   bool left_blindspot = false;
   bool right_blindspot = false;

@@ -23,6 +23,10 @@
 namespace {
 
 volatile sig_atomic_t g_stop = 0;
+constexpr uint32_t kExpectedPandaSafetyModel = 24;
+constexpr uint32_t kExpectedPandaSafetyParam = 0;
+constexpr uint64_t kPandaStateTimeoutNs = 1100000000ULL;
+constexpr uint64_t kMaxCanRxAgeNs = 100000000ULL;
 
 void signal_handler(int) {
   g_stop = 1;
@@ -39,6 +43,15 @@ bool open_when_ready(K230LatestChannel *channel, const char *topic,
                      size_t size, bool create) {
   while (!g_stop) {
     if (channel->open(topic, size, create)) return true;
+    std::fprintf(stderr, "k230_k7_controlsd: waiting for %s\n", topic);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+  }
+  return false;
+}
+
+bool open_when_ready(K230CanQueue *queue, const char *topic, bool create) {
+  while (!g_stop) {
+    if (queue->open(topic, kK230CanQueueSlots, create)) return true;
     std::fprintf(stderr, "k230_k7_controlsd: waiting for %s\n", topic);
     std::this_thread::sleep_for(std::chrono::seconds(1));
   }
@@ -165,17 +178,21 @@ int main() {
   signal(SIGTERM, signal_handler);
 
   try {
-    K230LatestChannel can_sub;
+    K230CanQueue can_sub;
     K230LatestChannel model_sub;
-    K230LatestChannel sendcan_pub;
+    K230LatestChannel panda_state_sub;
+    K230CanQueue sendcan_pub;
     K230LatestChannel control_state_pub;
-    if (!open_when_ready(&can_sub, kK230CanTopic, sizeof(K230CanBatch), false) ||
+    if (!open_when_ready(&can_sub, kK230CanTopic, true) ||
         !open_when_ready(&model_sub, kK230ModelStateTopic, sizeof(K230ModelState), false) ||
-        !open_when_ready(&sendcan_pub, kK230SendCanTopic, sizeof(K230CanBatch), true) ||
+        !open_when_ready(&panda_state_sub, kK230PandaStateTopic,
+                         sizeof(K230PandaState), true) ||
+        !open_when_ready(&sendcan_pub, kK230SendCanTopic, true) ||
         !open_when_ready(&control_state_pub, kK230ControlStateTopic,
                          sizeof(K230ControlState), true)) {
       return 0;
     }
+    sendcan_pub.reset();
 
     K7LateralControllerConfig config;
     config.enabled = env_enabled("K230_K7_CONTROL", true);
@@ -201,12 +218,15 @@ int main() {
     LateralPlannerWorker lateral_planner(config.steering_params);
     K7VehicleCanState vehicle;
     K230ModelState model;
+    K230PandaState panda_state;
     LateralTarget lateral_target;
-    uint64_t can_seq = 0;
     uint64_t model_seq = 0;
+    uint64_t panda_state_seq = 0;
     unsigned can_frames = 0;
     unsigned generated_frames = 0;
     unsigned publish_errors = 0;
+    unsigned send_queue_full = 0;
+    unsigned stale_can_batches = 0;
     int control_frame = 0;
 
     using Clock = std::chrono::steady_clock;
@@ -223,12 +243,14 @@ int main() {
       next_tick += std::chrono::milliseconds(10);
       const auto work_start = Clock::now();
       const double now_s = std::chrono::duration<double>(work_start - start).count();
+      const uint64_t now_ns = k230_now_ns();
 
       K230CanBatch can_batch;
-      uint64_t next_can_seq = can_seq;
-      if (can_sub.read(&can_batch, sizeof(can_batch), &next_can_seq) &&
-          next_can_seq != can_seq) {
-        can_seq = next_can_seq;
+      while (can_sub.pop(&can_batch)) {
+        if (!k230_can_batch_is_fresh(can_batch, now_ns, kMaxCanRxAgeNs)) {
+          ++stale_can_batches;
+          continue;
+        }
         apply_can_batch(can_batch, now_s, &vehicle);
         can_frames += std::min<uint32_t>(can_batch.count, kK230CanBatchMaxFrames);
       }
@@ -241,13 +263,32 @@ int main() {
             last_result.actual_curvature, last_result.active,
             last_result.normalized_output);
       }
+      uint64_t next_panda_state_seq = panda_state_seq;
+      if (panda_state_sub.read(&panda_state, sizeof(panda_state),
+                               &next_panda_state_seq) &&
+          next_panda_state_seq != panda_state_seq) {
+        panda_state_seq = next_panda_state_seq;
+      }
       lateral_target = lateral_planner.latest();
 
+      const bool panda_state_fresh =
+          panda_state.timestamp_ns != 0 && now_ns >= panda_state.timestamp_ns &&
+          now_ns - panda_state.timestamp_ns <= kPandaStateTimeoutNs;
+      const bool panda_ready =
+          config.force_engaged ||
+          (panda_state_fresh && panda_state.connected != 0 &&
+           panda_state.comms_healthy != 0 && panda_state.tx_enabled != 0 &&
+           panda_state.heartbeat_lost == 0 &&
+           panda_state.safety_mode == kExpectedPandaSafetyModel &&
+           panda_state.safety_param == kExpectedPandaSafetyParam);
+      const bool panda_controls_allowed =
+          config.force_engaged || (panda_ready && panda_state.controls_allowed != 0);
       const LateralPath path = k7_path_from_model_state(
-          model, k230_now_ns(),
+          model, now_ns,
           static_cast<unsigned long long>(config.driving_params.model_timeout_ms) * 1000000ULL);
       last_result = controller.update(path, lateral_target, vehicle, now_s,
-                                      control_frame++);
+                                      control_frame++, panda_ready,
+                                      panda_controls_allowed);
 
       K230ControlState control_state;
       control_state.timestamp_ns = k230_now_ns();
@@ -259,6 +300,8 @@ int main() {
       control_state.seeds_ready = last_result.seeds_ready ? 1U : 0U;
       control_state.vehicle_fresh = last_result.vehicle_fresh ? 1U : 0U;
       control_state.steering_fault = vehicle.steering_fault ? 1U : 0U;
+      control_state.left_blinker = vehicle.left_blinker ? 1U : 0U;
+      control_state.right_blinker = vehicle.right_blinker ? 1U : 0U;
       control_state.speed_kph = last_result.speed_kph;
       control_state.steering_angle_deg = vehicle.steering_angle_deg;
       control_state.desired_curvature = last_result.desired_curvature;
@@ -276,8 +319,9 @@ int main() {
 
       if (last_result.should_send && !last_result.frames.empty()) {
         const K230CanBatch send_batch = make_send_batch(last_result.frames);
-        if (!sendcan_pub.publish(&send_batch, sizeof(send_batch))) {
+        if (!sendcan_pub.push(send_batch)) {
           ++publish_errors;
+          ++send_queue_full;
         } else {
           generated_frames += static_cast<unsigned>(last_result.frames.size());
         }
@@ -294,19 +338,33 @@ int main() {
         const double window_s = std::chrono::duration<double>(work_end - log_start).count();
         std::fprintf(stderr,
                      "k230_k7_controlsd: hz=%.3f work_avg_us=%.1f work_max_us=%.1f "
-                     "misses=%u can=%u generated=%u errors=%u engaged=%u active=%u "
-                     "plan=%u mpc=%u desire=%d torque=%d speed=%.1f block=%s\n",
+                     "misses=%u can=%u generated=%u errors=%u txFull=%u rxStale=%u "
+                     "queue=%llu/%llu "
+                     "engaged=%u active=%u "
+                     "panda=%u/%u plan=%u mpc=%u desire=%d "
+                     "torque=%d/%d driver=%d angle=%.2f "
+                     "curve=%.6f/%.6f error=%.6f pathY=%.3f "
+                     "speed=%.1f block=%s\n",
                      ticks / window_s, work_sum_us / std::max(1U, ticks), work_max_us,
                      misses, can_frames, generated_frames, publish_errors,
+                     send_queue_full, stale_can_batches,
+                     static_cast<unsigned long long>(sendcan_pub.depth()),
+                     static_cast<unsigned long long>(can_sub.depth()),
                      last_result.engaged ? 1 : 0, last_result.active ? 1 : 0,
+                     panda_ready ? 1 : 0, panda_controls_allowed ? 1 : 0,
                      lateral_target.valid ? 1 : 0,
                      lateral_target.mpc_solution_valid ? 1 : 0,
                      lateral_target.desire,
-                     last_result.apply_torque, last_result.speed_kph,
+                     last_result.desired_torque, last_result.apply_torque,
+                     vehicle.driver_torque, vehicle.steering_angle_deg,
+                     last_result.desired_curvature, last_result.actual_curvature,
+                     last_result.curvature_error, lateral_target.target_y,
+                     last_result.speed_kph,
                      last_result.active_block.c_str());
         log_start = work_end;
         work_sum_us = work_max_us = 0.0;
-        ticks = misses = can_frames = generated_frames = publish_errors = 0;
+        ticks = misses = can_frames = generated_frames = publish_errors =
+            send_queue_full = stale_can_batches = 0;
       }
 
       if (next_tick > Clock::now()) std::this_thread::sleep_until(next_tick);

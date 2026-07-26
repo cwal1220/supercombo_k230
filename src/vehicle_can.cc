@@ -8,6 +8,7 @@
 namespace {
 
 constexpr int kMdpsToiUnavailableFaultFrames = 100;
+constexpr double kBlinkerHoldSeconds = 0.5;
 
 // openpilot K7 parser와 같은 bus에서 온 frame만 차량 상태에 반영한다.
 bool expected_openpilot_k7_bus(uint32_t address, uint8_t bus) {
@@ -231,8 +232,10 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     state->door_open = state->driver_door_open || state->passenger_door_open ||
                        state->rear_left_door_open || state->rear_right_door_open;
     state->seatbelt_unlatched = cgw.seatbelt_unlatched;
-    state->left_blinker = cgw.left_blinker;
-    state->right_blinker = cgw.right_blinker;
+    if (cgw.left_blinker) state->left_blinker_until_s = now_s + kBlinkerHoldSeconds;
+    if (cgw.right_blinker) state->right_blinker_until_s = now_s + kBlinkerHoldSeconds;
+    state->left_blinker = now_s < state->left_blinker_until_s;
+    state->right_blinker = now_s < state->right_blinker_until_s;
     state->hazard = cgw.hazard;
     state->cgw1_time_s = now_s;
   } else if (address == kHyundaiCgw2Address && length >= 8) {

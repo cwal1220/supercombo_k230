@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <map>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -18,6 +19,7 @@ namespace {
 
 volatile sig_atomic_t g_stop = 0;
 constexpr uint64_t kCanPublishIntervalNs = 10000000ULL;
+constexpr uint64_t kMaxSendCanAgeNs = 100000000ULL;
 
 void signal_handler(int)
 {
@@ -127,7 +129,12 @@ void publish_health(K230LatestChannel &state_pub, PandaClient &panda, bool tx_en
         state.safety_param = health.safety_param;
         state.can_rx_errs = health.can_rx_errs;
         state.can_send_errs = health.can_send_errs;
+        state.can_fwd_errs = health.can_fwd_errs;
         state.blocked_msg_cnt = health.blocked_msg_cnt;
+        state.heartbeat_lost = health.heartbeat_lost;
+        state.usb_tx_timeouts = panda.usb_tx_timeouts();
+        state.usb_tx_retries = panda.usb_tx_retries();
+        state.malformed_rx_batches = panda.malformed_rx_batches();
         state.faults = health.faults;
         state.fault_status = health.fault_status;
         state.voltage = health.voltage;
@@ -144,15 +151,16 @@ int main()
     signal(SIGTERM, signal_handler);
 
     try {
-        K230LatestChannel can_pub;
-        K230LatestChannel sendcan_sub;
+        K230CanQueue can_pub;
+        K230CanQueue sendcan_sub;
         K230LatestChannel panda_state_pub;
-        if (!can_pub.open(kK230CanTopic, sizeof(K230CanBatch), true))
+        if (!can_pub.open(kK230CanTopic, kK230CanQueueSlots, true))
             throw std::runtime_error("open can ipc failed");
-        if (!sendcan_sub.open(kK230SendCanTopic, sizeof(K230CanBatch), true))
+        if (!sendcan_sub.open(kK230SendCanTopic, kK230CanQueueSlots, true))
             throw std::runtime_error("open sendcan ipc failed");
         if (!panda_state_pub.open(kK230PandaStateTopic, sizeof(K230PandaState), true))
             throw std::runtime_error("open pandaState ipc failed");
+        can_pub.reset();
 
         const bool tx_enabled = env_enabled("K230_PANDA_TX", false) ||
                                 env_enabled("K230_PANDA_ENABLE_TX", false);
@@ -176,7 +184,6 @@ int main()
         }
 
         PandaClient panda;
-        uint64_t last_sendcan_seq = 0;
         uint64_t last_health_ns = 0;
         uint64_t last_heartbeat_ns = 0;
         uint64_t last_log_ns = 0;
@@ -187,9 +194,12 @@ int main()
         unsigned rx_frames = 0;
         unsigned tx_frames = 0;
         unsigned tx_batches = 0;
-        unsigned tx_batches_skipped = 0;
+        unsigned rx_queue_full = 0;
+        unsigned tx_stale = 0;
         unsigned tx_blocked = 0;
+        unsigned rx_rejected = 0;
         unsigned errors = 0;
+        std::map<std::pair<uint32_t, uint8_t>, unsigned> rejected_frames;
 
         while (!g_stop) {
             if (!panda.connected()) {
@@ -203,7 +213,20 @@ int main()
                              "k230_pandad: connected serial=%s hw_type=%u health_v=%u can_v=%u\n",
                              panda.usb_serial().c_str(), panda.hw_type(),
                              panda.health_packet_version(), panda.can_packet_version());
-                panda.set_safety_model(safety_model, safety_param);
+                PandaHealth configured_health;
+                if (!panda.set_safety_model(safety_model, safety_param) ||
+                    !panda.get_health(&configured_health) ||
+                    configured_health.safety_mode != safety_model ||
+                    configured_health.safety_param != safety_param) {
+                    std::fprintf(stderr,
+                                 "k230_pandad: safety setup failed expected=%u:%u actual=%u:%u\n",
+                                 safety_model, safety_param,
+                                 configured_health.safety_mode,
+                                 configured_health.safety_param);
+                    ++errors;
+                    panda.close();
+                    continue;
+                }
                 last_health_ns = 0;
                 last_heartbeat_ns = 0;
                 last_can_publish_ns = k230_now_ns();
@@ -217,12 +240,20 @@ int main()
             if (panda.receive(&frames, 10)) {
                 if (!frames.empty()) {
                     had_rx = true;
+                    for (const PandaCanFrame &frame : frames) {
+                        if (frame.rejected) {
+                            ++rx_rejected;
+                            ++rejected_frames[{frame.address, frame.bus}];
+                        }
+                    }
                     pending_rx.insert(pending_rx.end(), frames.begin(), frames.end());
                     rx_frames += static_cast<unsigned>(frames.size());
                     if (log_can) {
                         for (const PandaCanFrame &frame : frames) {
-                            std::fprintf(stderr, "can rx bus=%u addr=0x%x len=%u\n",
-                                         frame.bus, frame.address, frame.data_len);
+                            std::fprintf(stderr,
+                                         "can rx bus=%u addr=0x%x len=%u returned=%u rejected=%u\n",
+                                         frame.bus, frame.address, frame.data_len,
+                                         frame.returned ? 1 : 0, frame.rejected ? 1 : 0);
                         }
                     }
                 }
@@ -246,23 +277,27 @@ int main()
                 K230CanBatch batch;
                 fill_can_batch(&batch, pending_rx);
                 batch.dropped += pending_dropped;
-                if (!can_pub.publish(&batch, sizeof(batch))) ++errors;
+                if (!can_pub.push(batch)) {
+                    ++rx_queue_full;
+                    ++errors;
+                }
                 pending_rx.clear();
                 pending_dropped = 0;
                 last_can_publish_ns = now;
             }
 
             K230CanBatch send_batch;
-            uint64_t send_seq = last_sendcan_seq;
-            if (sendcan_sub.read(&send_batch, sizeof(send_batch), &send_seq) &&
-                send_seq != last_sendcan_seq) {
-                if (last_sendcan_seq != 0 && send_seq > last_sendcan_seq + 2) {
-                    tx_batches_skipped +=
-                        static_cast<unsigned>((send_seq - last_sendcan_seq) / 2 - 1);
-                }
-                last_sendcan_seq = send_seq;
+            while (sendcan_sub.pop(&send_batch)) {
                 had_sendcan = true;
                 ++tx_batches;
+                // The producer can publish after `now` was sampled above. Use a
+                // fresh timestamp here so a new batch is never mistaken for a
+                // future/stale batch and skipped from the torque sequence.
+                const uint64_t tx_now = k230_now_ns();
+                if (!k230_can_batch_is_fresh(send_batch, tx_now, kMaxSendCanAgeNs)) {
+                    ++tx_stale;
+                    continue;
+                }
                 const std::vector<PandaCanFrame> tx = frames_from_batch(send_batch);
                 if (tx_enabled) {
                     if (panda.send(tx)) {
@@ -287,18 +322,25 @@ int main()
                 PandaHealth health;
                 const bool got_health = panda.get_health(&health);
                 std::fprintf(stderr,
-                             "k230_pandad: rx=%u tx=%u batches=%u skipped=%u "
-                             "blocked=%u errors=%u canerr=%u/%u/%u pandaBlocked=%u "
-                             "heartbeatLost=%u controls=%u "
+                             "k230_pandad: rx=%u tx=%u batches=%u stale=%u "
+                             "queue=%llu/%llu rxFull=%u "
+                             "blocked=%u rejected=%u errors=%u "
+                             "canerr=%u/%u/%u pandaBlocked=%u "
+                             "heartbeatLost=%u controls=%u usb=%u/%u malformed=%u "
                              "safety=%u:%u ign=%u/%u voltage=%umV current=%umA faults=0x%x\n",
-                             rx_frames, tx_frames, tx_batches, tx_batches_skipped,
-                             tx_blocked, errors,
+                             rx_frames, tx_frames, tx_batches, tx_stale,
+                             static_cast<unsigned long long>(sendcan_sub.depth()),
+                             static_cast<unsigned long long>(can_pub.depth()),
+                             rx_queue_full,
+                             tx_blocked, rx_rejected, errors,
                              got_health ? health.can_rx_errs : 0,
                              got_health ? health.can_send_errs : 0,
                              got_health ? health.can_fwd_errs : 0,
                              got_health ? health.blocked_msg_cnt : 0,
                              got_health ? health.heartbeat_lost : 0,
                              got_health ? health.controls_allowed : 0,
+                             panda.usb_tx_timeouts(), panda.usb_tx_retries(),
+                             panda.malformed_rx_batches(),
                              got_health ? health.safety_mode : 0,
                              got_health ? health.safety_param : 0,
                              got_health ? health.ignition_line : 0,
@@ -306,8 +348,14 @@ int main()
                              got_health ? health.voltage : 0,
                              got_health ? health.current : 0,
                              got_health ? health.faults : 0);
-                rx_frames = tx_frames = tx_batches = tx_batches_skipped =
-                    tx_blocked = errors = 0;
+                for (const auto &[key, count] : rejected_frames) {
+                    std::fprintf(stderr,
+                                 "k230_pandad: rejected addr=0x%x bus=%u count=%u\n",
+                                 key.first, key.second, count);
+                }
+                rx_frames = tx_frames = tx_batches = rx_queue_full = tx_stale =
+                    tx_blocked = rx_rejected = errors = 0;
+                rejected_frames.clear();
                 last_log_ns = now;
             }
             if (!had_rx && !had_sendcan && idle_us > 0) {

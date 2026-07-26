@@ -3,13 +3,19 @@
 ## Runtime
 
 - `k230_pandad` owns Panda USB through `libusb` and publishes CAN batches to
-  `/dev/shm/k230_can`.
+  the ordered `/dev/shm/k230_can` shared-memory ring queue.
 - `k230_k7_controlsd` runs the standalone K7 controller at 100 Hz and publishes
-  generated CAN batches to `/dev/shm/k230_sendcan`.
+  generated CAN batches to the ordered `/dev/shm/k230_sendcan` ring queue.
 - `k230_pandad` is the final TX gate. `K230_PANDA_TX=0` is the default and
   prevents every generated frame from reaching USB.
 - No openpilot checkout, Python DBC extension, or acados module is required on
   the K230 board.
+
+The CAN queues have 64 slots, reject new batches instead of overwriting older
+ones when full, and are drained in sequence order. Producer startup resets its
+own queue generation, and `k230_pandad` drops TX batches older than 100 ms.
+The one-second daemon logs expose queue depth, full/stale counts, Panda CAN
+errors, blocked frames, heartbeat status, USB retries, and malformed RX batches.
 
 The controller uses the validated K7 YG HEV bus split:
 

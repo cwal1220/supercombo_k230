@@ -26,7 +26,7 @@
   "smooth_driver_angle_wait": 0.001,
   "steer_ratio": 15.5,
   "tire_stiffness_factor": 0.85,
-  "steer_actuator_delay": 0.36,
+  "steer_actuator_delay": 0.42,
   "max_steering_angle_deg": 90.0,
   "avoid_lkas_fault_enabled": false,
   "avoid_lkas_fault_max_angle_deg": 85.0,
@@ -41,6 +41,8 @@
   "wheelbase_m": 2.855,
   "center_to_front_ratio": 0.4,
   "steer_ratio_rear": 0.0,
+  "camera_offset_m": -0.06,
+  "path_offset_m": 0.0,
   "invert_steer": false,
   "min_steer_speed_mps": 0.3
 }

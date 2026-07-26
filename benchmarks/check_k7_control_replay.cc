@@ -42,8 +42,8 @@ LateralTarget replay_target() {
   return target;
 }
 
-float original_lag_adjusted_curvature(const LateralTarget &target, float speed_mps) {
-  constexpr float delay = 0.36f;
+float original_lag_adjusted_curvature(const LateralTarget &target, float speed_mps,
+                                      float delay) {
   constexpr float desired_curvature_limit = 0.1f;
   constexpr float max_lateral_jerk = 5.0f;
   constexpr float max_lateral_accel = 3.0f;
@@ -174,6 +174,121 @@ void verify_braking_does_not_disengage() {
           "DriverBraking must not disengage lateral control");
 }
 
+void verify_lkas_hud_state_stability() {
+  K7LateralControllerConfig config;
+  config.force_engaged = true;
+  K7LateralController controller(config);
+  K7VehicleCanState vehicle;
+  vehicle.has_lkas11_seed = true;
+  vehicle.has_clu11_seed = true;
+  vehicle.has_mdps12_seed = true;
+  vehicle.lkas11_time_s = 1.0;
+  vehicle.clu11_time_s = 1.0;
+  vehicle.sas11_time_s = 1.0;
+  vehicle.esp12_time_s = 1.0;
+  vehicle.mdps12_time_s = 1.0;
+  vehicle.tcs13_time_s = 1.0;
+  vehicle.tcs15_time_s = 1.0;
+  vehicle.e_ems11_time_s = 1.0;
+  vehicle.elect_gear_time_s = 1.0;
+  vehicle.cgw1_time_s = 1.0;
+  vehicle.cgw2_time_s = 1.0;
+  vehicle.gear = 5;
+
+  LateralPath no_lane_path = replay_path();
+  no_lane_path.left_valid = false;
+  no_lane_path.right_valid = false;
+  const auto active =
+      controller.update(no_lane_path, replay_target(), vehicle, 1.0, 0);
+  require(active.active && !active.frames.empty(), "active HUD test frame");
+  require(decode_lkas11(active.frames.front().data).ldws_sys_state == 3,
+          "active HUD state must remain active with fluctuating lane probability");
+
+  LateralTarget invalid_target = replay_target();
+  invalid_target.mpc_solution_valid = false;
+  const auto inactive =
+      controller.update(no_lane_path, invalid_target, vehicle, 1.01, 1);
+  require(!inactive.active && !inactive.frames.empty(), "inactive HUD test frame");
+  require(decode_lkas11(inactive.frames.front().data).ldws_sys_state == 4,
+          "inactive HUD state must remain standby with fluctuating lane probability");
+}
+
+void verify_panda_gate_and_handoff() {
+  K7LateralControllerConfig config;
+  K7LateralController controller(config);
+  K7VehicleCanState vehicle;
+  vehicle.has_lkas11_seed = true;
+  vehicle.has_clu11_seed = true;
+  vehicle.has_mdps12_seed = true;
+  vehicle.lkas11_time_s = 1.0;
+  vehicle.clu11_time_s = 1.0;
+  vehicle.sas11_time_s = 1.0;
+  vehicle.esp12_time_s = 1.0;
+  vehicle.mdps12_time_s = 1.0;
+  vehicle.tcs13_time_s = 1.0;
+  vehicle.tcs15_time_s = 1.0;
+  vehicle.e_ems11_time_s = 1.0;
+  vehicle.elect_gear_time_s = 1.0;
+  vehicle.cgw1_time_s = 1.0;
+  vehicle.cgw2_time_s = 1.0;
+  vehicle.gear = 5;
+
+  vehicle.clu_button = 2;
+  const auto set_press =
+      controller.update(replay_path(), replay_target(), vehicle, 1.0, 0, true, true);
+  require(!set_press.engaged, "SET press must not engage before release");
+
+  vehicle.clu_button = 0;
+  const auto panda_blocked =
+      controller.update(replay_path(), replay_target(), vehicle, 1.01, 1, true, false);
+  require(panda_blocked.engaged && !panda_blocked.active &&
+              panda_blocked.active_block == "panda_controls_off",
+          "Panda controls gate");
+  require(panda_blocked.should_send && !panda_blocked.frames.empty(),
+          "Panda mismatch must keep zero replacement stream");
+  const HyundaiLkas11Values zero_lkas =
+      decode_lkas11(panda_blocked.frames.front().data);
+  require(zero_lkas.steer_torque == 0 && !zero_lkas.steer_req,
+          "Panda controls off must generate zero LKAS");
+
+  const auto active =
+      controller.update(replay_path(), replay_target(), vehicle, 1.02, 2, true, true);
+  require(active.engaged && active.active, "Panda controls on must activate");
+
+  vehicle.clu_button = 4;
+  const auto cancel =
+      controller.update(replay_path(), replay_target(), vehicle, 1.03, 3, true, false);
+  require(!cancel.engaged && cancel.should_send,
+          "CANCEL press must start zero-frame handoff");
+  const auto release_tail =
+      controller.update(replay_path(), replay_target(), vehicle, 4.02, 302, true, false);
+  require(release_tail.should_send, "handoff must last for 3000 ms");
+  const auto stock_handoff =
+      controller.update(replay_path(), replay_target(), vehicle, 4.04, 304, true, false);
+  require(!stock_handoff.should_send, "handoff must stop after 3000 ms");
+
+  vehicle.lkas11_seed[4] = 9U << 4;
+  vehicle.lkas11_time_s = 4.05;
+  vehicle.clu11_time_s = 4.05;
+  vehicle.sas11_time_s = 4.05;
+  vehicle.esp12_time_s = 4.05;
+  vehicle.mdps12_time_s = 4.05;
+  vehicle.tcs13_time_s = 4.05;
+  vehicle.tcs15_time_s = 4.05;
+  vehicle.e_ems11_time_s = 4.05;
+  vehicle.elect_gear_time_s = 4.05;
+  vehicle.cgw1_time_s = 4.05;
+  vehicle.cgw2_time_s = 4.05;
+  vehicle.clu_button = 2;
+  controller.update(replay_path(), replay_target(), vehicle, 4.05, 305, true, true);
+  vehicle.clu_button = 0;
+  const auto reengaged =
+      controller.update(replay_path(), replay_target(), vehicle, 4.06, 306, true, true);
+  require(reengaged.active && !reengaged.frames.empty(), "re-engage after handoff");
+  require(decode_lkas11(reengaged.frames.front().data).msg_count == 10,
+          "re-engage must seed LKAS counter from stock camera");
+}
+
 void verify_model_path_adapter() {
   K230ModelState state;
   state.valid = 1;
@@ -202,12 +317,18 @@ void verify_model_path_adapter() {
 
 int main(int argc, char **argv) {
   try {
-    if (argc != 2) throw std::runtime_error("usage: check_k7_control_replay fixture.k230can");
     verify_mdps_speed_spoof();
     verify_lca11();
     verify_mdps_fault_filter();
     verify_braking_does_not_disengage();
+    verify_lkas_hud_state_stability();
+    verify_panda_gate_and_handoff();
     verify_model_path_adapter();
+    if (argc == 1) {
+      std::puts("K7_CONTROL_SELF_TEST_OK");
+      return 0;
+    }
+    if (argc != 2) throw std::runtime_error("usage: check_k7_control_replay [fixture.k230can]");
 
     CanReplaySource replay;
     replay.open(argv[1]);
@@ -252,7 +373,8 @@ int main(int argc, char **argv) {
       const float speed_kph = vehicle.cluster_speed *
           (vehicle.speed_unit_mph ? 1.609344f : 1.0f);
       const float expected_curvature = original_lag_adjusted_curvature(
-          target, std::max(0.0f, speed_kph / 3.6f));
+          target, std::max(0.0f, speed_kph / 3.6f),
+          config.steering_params.steer_actuator_delay);
       max_curvature_error = std::max(
           max_curvature_error, std::fabs(result.desired_curvature - expected_curvature));
       if (result.active) ++active_ticks;

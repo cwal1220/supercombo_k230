@@ -170,8 +170,8 @@ minimal passive overlay subscriber:
 - `k230_pandad` (optional)
   - enabled with `K230_ENABLE_PANDA=1` when built with
     `-DSUPERCOMBO_BUILD_PANDA=ON`
-  - connects to panda over `libusb`, publishes compact panda health and CAN
-    receive batches, and can relay raw `sendcan` batches
+  - connects to panda over `libusb`, publishes compact panda health and ordered
+    CAN receive batches, and can relay ordered `sendcan` batches
   - defaults to shadow mode: `K230_PANDA_TX=0`, so no CAN frames are transmitted
 - `k230_k7_controlsd` (optional K7 controller)
   - enabled with `K230_ENABLE_CONTROL=1`
@@ -345,7 +345,7 @@ Useful runtime options:
     Use `K230_PANDA_SAFETY=hyundaiCommunity` for shadow/TX experiments unless
     a newer fingerprint proves otherwise.
 - `K230_PANDA_TX=1`
-  - allows `k230_pandad` to relay raw `/dev/shm/k230_sendcan` batches to panda.
+  - allows `k230_pandad` to relay ordered `/dev/shm/k230_sendcan` batches to panda.
     Default is `0`; shadow mode blocks transmission.
 - `K230_PANDA_ENGAGED=1`
   - sends panda heartbeat as engaged, only meaningful with `K230_PANDA_TX=1`.
@@ -379,7 +379,7 @@ Fixed production defaults:
 - The ready barrier waits for 30 displayed preview frames and times out after
   7000 ms.
 - Child process priorities are fixed as `camerad=0`, `modeld=-5`,
-  `overlay=10`, optional `pandad=10`, optional `controlsd=5`.
+  `overlay=10`, optional `pandad=-10`, optional `controlsd=-8`.
 - The front-vehicle marker is always enabled with probability threshold `0.5`.
 
 Benchmark and diagnostic utilities live under `benchmarks/` and are not built

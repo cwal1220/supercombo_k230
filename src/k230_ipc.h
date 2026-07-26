@@ -15,6 +15,8 @@
 constexpr uint32_t kK230IpcMagic = 0x4b323349;
 constexpr uint32_t kK230IpcVersion = 1;
 constexpr uint32_t kK230FrameRingMagic = 0x4b465249;
+constexpr uint32_t kK230CanQueueMagic = 0x4b435151;
+constexpr uint32_t kK230CanQueueVersion = 1;
 constexpr unsigned kK230FrameSlots = 4;
 constexpr unsigned kK230MaxProcesses = 6;
 constexpr unsigned kK230AiWidth = kDefaultAiWidth;
@@ -29,6 +31,7 @@ constexpr char kK230PandaStateTopic[] = "/k230_panda_state";
 constexpr char kK230ControlStateTopic[] = "/k230_control_state";
 constexpr char kK230RoadAiFrameRing[] = "/k230_road_ai";
 constexpr unsigned kK230CanBatchMaxFrames = 256;
+constexpr unsigned kK230CanQueueSlots = 64;
 
 uint64_t k230_now_ns();
 
@@ -178,6 +181,20 @@ struct K230CanBatch {
     K230CanFrame frames[kK230CanBatchMaxFrames] = {};
 };
 
+bool k230_can_batch_is_fresh(const K230CanBatch &batch, uint64_t now_ns,
+                             uint64_t max_age_ns);
+
+struct K230CanQueueHeader {
+    uint32_t magic = kK230CanQueueMagic;
+    uint32_t version = kK230CanQueueVersion;
+    uint32_t slot_count = kK230CanQueueSlots;
+    uint32_t reserved0 = 0;
+    std::atomic<uint64_t> write_seq{0};
+    std::atomic<uint64_t> read_seq{0};
+    uint64_t reserved1 = 0;
+    uint64_t reserved2 = 0;
+};
+
 struct K230PandaState {
     uint64_t timestamp_ns = 0;
     uint32_t connected = 0;
@@ -191,7 +208,12 @@ struct K230PandaState {
     uint32_t panda_type = 0;
     uint32_t can_rx_errs = 0;
     uint32_t can_send_errs = 0;
+    uint32_t can_fwd_errs = 0;
     uint32_t blocked_msg_cnt = 0;
+    uint32_t heartbeat_lost = 0;
+    uint32_t usb_tx_timeouts = 0;
+    uint32_t usb_tx_retries = 0;
+    uint32_t malformed_rx_batches = 0;
     uint32_t faults = 0;
     uint32_t fault_status = 0;
     uint32_t voltage = 0;
@@ -208,6 +230,8 @@ struct K230ControlState {
     uint32_t seeds_ready = 0;
     uint32_t vehicle_fresh = 0;
     uint32_t steering_fault = 0;
+    uint32_t left_blinker = 0;
+    uint32_t right_blinker = 0;
     float speed_kph = 0.0f;
     float steering_angle_deg = 0.0f;
     float desired_curvature = 0.0f;
@@ -238,6 +262,29 @@ private:
     size_t map_size_ = 0;
     K230IpcHeader *header_ = nullptr;
     uint8_t *payload_ = nullptr;
+};
+
+class K230CanQueue {
+public:
+    K230CanQueue() = default;
+    ~K230CanQueue();
+
+    bool open(const char *name, unsigned slot_count = kK230CanQueueSlots,
+              bool create = true);
+    void close();
+    void reset();
+    bool push(const K230CanBatch &batch);
+    bool pop(K230CanBatch *batch);
+    uint64_t depth() const;
+    unsigned capacity() const { return header_ ? header_->slot_count : 0; }
+    bool valid() const { return header_ != nullptr; }
+
+private:
+    std::string name_;
+    int fd_ = -1;
+    size_t map_size_ = 0;
+    K230CanQueueHeader *header_ = nullptr;
+    K230CanBatch *slots_ = nullptr;
 };
 
 class K230FrameRing {

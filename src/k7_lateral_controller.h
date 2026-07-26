@@ -50,7 +50,9 @@ public:
                                 const LateralTarget &target,
                                 const K7VehicleCanState &vehicle_state,
                                 double now_s,
-                                int frame);
+                                int frame,
+                                bool panda_ready = true,
+                                bool panda_controls_allowed = true);
 
   // 현재 engage 상태를 반환한다.
   bool engaged() const;
@@ -69,6 +71,8 @@ private:
                                   double now_s,
                                   bool seeds_ready,
                                   bool vehicle_fresh,
+                                  bool panda_ready,
+                                  bool panda_controls_allowed,
                                   float speed_kph) const;
 
   // 방향지시등 기반 수동 조향 차단 타이머를 갱신한다.

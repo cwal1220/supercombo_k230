@@ -192,6 +192,68 @@ cv::Point display_point(int x, int y, int logical_height, bool rotate_landscape)
     return rotate_landscape ? cv::Point(logical_height - 1 - y, x) : cv::Point(x, y);
 }
 
+void draw_turn_chevron(cv::Mat &frame, int inner_x, int center_y, bool points_left,
+                       int alpha, int logical_height, bool rotate_landscape)
+{
+    constexpr int kChevronWidth = 24;
+    constexpr int kChevronHalfHeight = 34;
+    const int direction = points_left ? -1 : 1;
+    const int shoulder_x = inner_x + direction * (kChevronWidth / 2);
+    const int tip_x = inner_x + direction * kChevronWidth;
+
+    std::array<cv::Point, 6> vertices = {
+        display_point(inner_x, center_y - kChevronHalfHeight,
+                      logical_height, rotate_landscape),
+        display_point(shoulder_x, center_y - kChevronHalfHeight,
+                      logical_height, rotate_landscape),
+        display_point(tip_x, center_y, logical_height, rotate_landscape),
+        display_point(shoulder_x, center_y + kChevronHalfHeight,
+                      logical_height, rotate_landscape),
+        display_point(inner_x, center_y + kChevronHalfHeight,
+                      logical_height, rotate_landscape),
+        display_point(shoulder_x, center_y, logical_height, rotate_landscape),
+    };
+    const cv::Point *points = vertices.data();
+    const int point_count = static_cast<int>(vertices.size());
+    cv::fillPoly(frame, &points, &point_count, 1, bgra(70, 230, 255, alpha),
+                 cv::LINE_8);
+}
+
+void draw_turn_signals(cv::Mat &frame, const OverlayHudState &hud,
+                       int blinking_rate, int logical_width, int logical_height,
+                       bool rotate_landscape)
+{
+    if (!hud.left_blinker && !hud.right_blinker) return;
+
+    constexpr int kCenterY = 130;
+    constexpr int kInnerOffset = 74;
+    constexpr int kChevronStep = 28;
+    const int center_x = logical_width / 2;
+
+    auto draw_side = [&](bool active, bool points_left) {
+        if (!active) return;
+        const int direction = points_left ? -1 : 1;
+        const int first_inner_x = center_x + direction * kInnerOffset;
+        if (blinking_rate <= 120 && blinking_rate >= 50) {
+            draw_turn_chevron(frame, first_inner_x, kCenterY, points_left, 70,
+                              logical_height, rotate_landscape);
+        }
+        if (blinking_rate <= 100 && blinking_rate >= 50) {
+            draw_turn_chevron(frame, first_inner_x + direction * kChevronStep,
+                              kCenterY, points_left, 140,
+                              logical_height, rotate_landscape);
+        }
+        if (blinking_rate <= 80 && blinking_rate >= 50) {
+            draw_turn_chevron(frame, first_inner_x + direction * (2 * kChevronStep),
+                              kCenterY, points_left, 210,
+                              logical_height, rotate_landscape);
+        }
+    };
+
+    draw_side(hud.left_blinker, true);
+    draw_side(hud.right_blinker, false);
+}
+
 void draw_lead_chevron_180(cv::Mat &img, int cx, int cy, int size,
                            float distance_m, float relative_speed_mps,
                            float probability, int logical_width, int logical_height,
@@ -491,5 +553,21 @@ void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &outp
         }
     }
 
+    if (hud.left_blinker != previous_left_blinker_ ||
+        hud.right_blinker != previous_right_blinker_) {
+        blinker_blinking_rate_ = 120;
+    }
+    draw_turn_signals(frame, hud, blinker_blinking_rate_,
+                      logical_width, logical_height, rotate_landscape);
     draw_hud(frame, hud, output, logical_width, logical_height, rotate_landscape);
+
+    if (hud.left_blinker || hud.right_blinker) {
+        blinker_blinking_rate_ -= 5;
+        if (blinker_blinking_rate_ < 0)
+            blinker_blinking_rate_ = 120;
+    } else {
+        blinker_blinking_rate_ = 120;
+    }
+    previous_left_blinker_ = hud.left_blinker;
+    previous_right_blinker_ = hud.right_blinker;
 }

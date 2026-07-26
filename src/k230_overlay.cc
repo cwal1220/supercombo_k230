@@ -438,6 +438,8 @@ private:
         hud_.controller_active = control_fresh && latest_control_state_.active != 0;
         hud_.vehicle_fresh = control_fresh && latest_control_state_.vehicle_fresh != 0;
         hud_.steering_fault = control_fresh && latest_control_state_.steering_fault != 0;
+        hud_.left_blinker = control_fresh && latest_control_state_.left_blinker != 0;
+        hud_.right_blinker = control_fresh && latest_control_state_.right_blinker != 0;
         hud_.speed_kph = control_fresh ? latest_control_state_.speed_kph : 0.0f;
         hud_.steering_angle_deg = control_fresh ? latest_control_state_.steering_angle_deg : 0.0f;
         hud_.normalized_output = control_fresh ? latest_control_state_.normalized_output : 0.0f;

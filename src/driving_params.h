@@ -5,7 +5,7 @@
 struct K7DrivingParams {
   int model_timeout_ms = 250;
   int vehicle_state_timeout_ms = 500;
-  int inactive_release_ms = 250;
+  int inactive_release_ms = 3000;
   float mdps_speed_spoof_kph = 60.0f;
   float lane_change_min_speed_kph = 30.0f;
   int manual_steer_disable_frames = 50;

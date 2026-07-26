@@ -15,6 +15,8 @@ struct OverlayHudState {
     bool controller_active = false;
     bool vehicle_fresh = false;
     bool steering_fault = false;
+    bool left_blinker = false;
+    bool right_blinker = false;
     bool services_healthy = false;
     unsigned panda_faults = 0;
     float speed_kph = 0.0f;
@@ -45,6 +47,11 @@ public:
               const ProjectionState &projection,
               const OverlayHudState &hud = OverlayHudState{},
               bool rotate_landscape = false) const;
+
+private:
+    mutable bool previous_left_blinker_ = false;
+    mutable bool previous_right_blinker_ = false;
+    mutable int blinker_blinking_rate_ = 120;
 };
 
 #endif

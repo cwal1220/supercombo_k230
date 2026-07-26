@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <unistd.h>
 
 namespace {
 
@@ -18,6 +19,8 @@ constexpr uint8_t kExpectedHealthPacketVersion = 7;
 constexpr uint8_t kExpectedCanPacketVersion = 2;
 constexpr int kRecvSize = 0x4000;
 constexpr int kUsbTxSoftLimit = 0x100;
+constexpr int kUsbBulkWriteRetries = 3;
+constexpr uint32_t kMaxConsecutiveMalformedRx = 3;
 
 struct __attribute__((packed)) PandaHealthPacket {
     uint32_t uptime_pkt;
@@ -131,6 +134,7 @@ bool PandaClient::connect(const std::string &serial)
     if (control_read(0xc1, 0, 0, &hw_query, sizeof(hw_query)))
         hw_type_ = hw_query;
     comms_healthy_ = true;
+    consecutive_malformed_rx_ = 0;
     return true;
 }
 
@@ -182,7 +186,11 @@ int PandaClient::bulk_read(uint8_t endpoint, uint8_t *data, int length, unsigned
     if (!dev_handle_) return 0;
     int transferred = 0;
     const int err = libusb_bulk_transfer(dev_handle_, endpoint, data, length, &transferred, timeout_ms);
-    if (err == LIBUSB_ERROR_TIMEOUT) return 0;
+    if (err == LIBUSB_ERROR_TIMEOUT) {
+        // libusb may return a timeout after transferring part of the requested
+        // buffer. Those bytes are a valid prefix of the Panda CAN stream.
+        return transferred;
+    }
     if (err == LIBUSB_ERROR_OVERFLOW) {
         comms_healthy_ = false;
         std::fprintf(stderr, "panda: CAN receive overflow transferred=%d\n", transferred);
@@ -198,15 +206,41 @@ int PandaClient::bulk_read(uint8_t endpoint, uint8_t *data, int length, unsigned
 int PandaClient::bulk_write(uint8_t endpoint, const uint8_t *data, int length, unsigned timeout_ms)
 {
     if (!dev_handle_) return 0;
-    int transferred = 0;
-    const int err = libusb_bulk_transfer(dev_handle_, endpoint, const_cast<uint8_t *>(data),
-                                         length, &transferred, timeout_ms);
-    if (err == LIBUSB_ERROR_TIMEOUT) return 0;
-    if (err != 0) {
+    int total_transferred = 0;
+    for (int attempt = 0;
+         attempt <= kUsbBulkWriteRetries && total_transferred < length;
+         ++attempt) {
+        int transferred = 0;
+        const int err = libusb_bulk_transfer(
+            dev_handle_, endpoint,
+            const_cast<uint8_t *>(data + total_transferred),
+            length - total_transferred, &transferred, timeout_ms);
+        total_transferred += transferred;
+        if (err == 0) {
+            if (transferred == 0 && total_transferred < length) {
+                std::fprintf(stderr, "panda: zero-length successful bulk write\n");
+                comms_healthy_ = false;
+                return -1;
+            }
+            continue;
+        }
+        if (err == LIBUSB_ERROR_TIMEOUT) {
+            ++usb_tx_timeouts_;
+            return total_transferred;
+        }
+        const bool retryable =
+            err == LIBUSB_ERROR_IO || err == LIBUSB_ERROR_OVERFLOW ||
+            err == LIBUSB_ERROR_INTERRUPTED || err == LIBUSB_ERROR_BUSY;
+        if (retryable && attempt < kUsbBulkWriteRetries &&
+            total_transferred < length) {
+            ++usb_tx_retries_;
+            usleep(1000);
+            continue;
+        }
         mark_usb_error(err, "bulk_write");
-        return 0;
+        return -1;
     }
-    return transferred;
+    return total_transferred;
 }
 
 void PandaClient::mark_usb_error(int err, const char *where)
@@ -286,12 +320,19 @@ bool PandaClient::unpack_can_buffer(const uint8_t *data, int size, std::vector<P
 {
     std::string error;
     if (!panda_can_unpack_buffer(data, size, &recv_buf_, frames, &error)) {
+        ++malformed_rx_batches_;
+        ++consecutive_malformed_rx_;
         std::fprintf(stderr, "panda: dropping malformed CAN USB batch: %s\n",
                      error.c_str());
         recv_buf_.clear();
         frames->clear();
+        if (consecutive_malformed_rx_ >= kMaxConsecutiveMalformedRx) {
+            comms_healthy_ = false;
+            return false;
+        }
         return true;
     }
+    consecutive_malformed_rx_ = 0;
     return true;
 }
 
