@@ -77,12 +77,12 @@
 | 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
 |---|---:|---|---|
 | `torque_max_lat_accel_raw` | 27 | 0.1 m/s^2 / 1~80 | 토크 컨트롤러가 정규화에 사용하는 최대 횡가속도다. |
-| `torque_kp_raw` | 10 | raw / 0~100 | 횡가속도 오차의 비례 이득이다. |
-| `torque_kf_raw` | 10 | raw / 0~100 | 목표 횡가속도 feed-forward 이득이다. 0이어도 내부에서 최소값으로 제한한다. |
+| `torque_kp_raw` | 12 | raw / 0~100 | 횡가속도 오차의 비례 이득이다. |
+| `torque_kf_raw` | 11 | raw / 0~100 | 목표 횡가속도 feed-forward 이득이다. 0이어도 내부에서 최소값으로 제한한다. |
 | `torque_ki_raw` | 1 | raw / 0~100 | 횡가속도 오차의 적분 이득이다. |
-| `torque_friction_raw` | 65 | 0.001 m/s^2 / 0~300 | 조향계 마찰을 넘기 위한 feed-forward 보상값이다. 현재값은 0.065다. |
+| `torque_friction_raw` | 75 | 0.001 m/s^2 / 0~300 | 조향계 마찰을 넘기 위한 feed-forward 보상값이다. 현재값은 0.075다. |
 | `torque_use_angle` | true | bool | `true`면 조향각 기반 실제 곡률을 사용한다. `false`면 유효한 ESP yaw-rate가 필요하며 두 값을 속도에 따라 혼합한다. |
-| `torque_angle_deadzone_raw` | 10 | 0.1 degree / 0~50 | 조향각 기반 오차 deadzone이다. 현재값은 1.0도다. `torque_use_angle=true`일 때 적용된다. |
+| `torque_angle_deadzone_raw` | 8 | 0.1 degree / 0~50 | 조향각 기반 오차 deadzone이다. 현재값은 0.8도다. `torque_use_angle=true`일 때 적용된다. |
 | `torque_output_sign` | -1 | 부호 / -1 또는 1 | 토크 출력 방향이다. K7 YG HEV에서는 -1을 사용한다. 잘못 바꾸면 반대 방향으로 조향할 수 있다. |
 
 ### Smooth steer

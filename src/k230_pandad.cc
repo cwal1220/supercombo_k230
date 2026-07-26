@@ -17,6 +17,7 @@
 namespace {
 
 volatile sig_atomic_t g_stop = 0;
+constexpr uint64_t kCanPublishIntervalNs = 10000000ULL;
 
 void signal_handler(int)
 {
@@ -179,8 +180,14 @@ int main()
         uint64_t last_health_ns = 0;
         uint64_t last_heartbeat_ns = 0;
         uint64_t last_log_ns = 0;
+        uint64_t last_can_publish_ns = 0;
+        std::vector<PandaCanFrame> pending_rx;
+        pending_rx.reserve(kK230CanBatchMaxFrames);
+        unsigned pending_dropped = 0;
         unsigned rx_frames = 0;
         unsigned tx_frames = 0;
+        unsigned tx_batches = 0;
+        unsigned tx_batches_skipped = 0;
         unsigned tx_blocked = 0;
         unsigned errors = 0;
 
@@ -199,6 +206,9 @@ int main()
                 panda.set_safety_model(safety_model, safety_param);
                 last_health_ns = 0;
                 last_heartbeat_ns = 0;
+                last_can_publish_ns = k230_now_ns();
+                pending_rx.clear();
+                pending_dropped = 0;
             }
 
             std::vector<PandaCanFrame> frames;
@@ -207,9 +217,7 @@ int main()
             if (panda.receive(&frames, 10)) {
                 if (!frames.empty()) {
                     had_rx = true;
-                    K230CanBatch batch;
-                    fill_can_batch(&batch, frames);
-                    if (!can_pub.publish(&batch, sizeof(batch))) ++errors;
+                    pending_rx.insert(pending_rx.end(), frames.begin(), frames.end());
                     rx_frames += static_cast<unsigned>(frames.size());
                     if (log_can) {
                         for (const PandaCanFrame &frame : frames) {
@@ -220,16 +228,41 @@ int main()
                 }
             } else {
                 ++errors;
+                pending_rx.clear();
+                pending_dropped = 0;
                 panda.close();
                 continue;
+            }
+
+            const uint64_t now = k230_now_ns();
+            if (!pending_rx.empty() &&
+                (now - last_can_publish_ns >= kCanPublishIntervalNs ||
+                 pending_rx.size() >= kK230CanBatchMaxFrames)) {
+                if (pending_rx.size() > kK230CanBatchMaxFrames) {
+                    const size_t overflow = pending_rx.size() - kK230CanBatchMaxFrames;
+                    pending_rx.erase(pending_rx.begin(), pending_rx.begin() + overflow);
+                    pending_dropped += static_cast<unsigned>(overflow);
+                }
+                K230CanBatch batch;
+                fill_can_batch(&batch, pending_rx);
+                batch.dropped += pending_dropped;
+                if (!can_pub.publish(&batch, sizeof(batch))) ++errors;
+                pending_rx.clear();
+                pending_dropped = 0;
+                last_can_publish_ns = now;
             }
 
             K230CanBatch send_batch;
             uint64_t send_seq = last_sendcan_seq;
             if (sendcan_sub.read(&send_batch, sizeof(send_batch), &send_seq) &&
                 send_seq != last_sendcan_seq) {
+                if (last_sendcan_seq != 0 && send_seq > last_sendcan_seq + 2) {
+                    tx_batches_skipped +=
+                        static_cast<unsigned>((send_seq - last_sendcan_seq) / 2 - 1);
+                }
                 last_sendcan_seq = send_seq;
                 had_sendcan = true;
+                ++tx_batches;
                 const std::vector<PandaCanFrame> tx = frames_from_batch(send_batch);
                 if (tx_enabled) {
                     if (panda.send(tx)) {
@@ -242,7 +275,6 @@ int main()
                 }
             }
 
-            const uint64_t now = k230_now_ns();
             if (now - last_heartbeat_ns >= 500000000ULL) {
                 panda.send_heartbeat(heartbeat_engaged && tx_enabled);
                 last_heartbeat_ns = now;
@@ -255,9 +287,17 @@ int main()
                 PandaHealth health;
                 const bool got_health = panda.get_health(&health);
                 std::fprintf(stderr,
-                             "k230_pandad: rx=%u tx=%u blocked=%u errors=%u controls=%u "
+                             "k230_pandad: rx=%u tx=%u batches=%u skipped=%u "
+                             "blocked=%u errors=%u canerr=%u/%u/%u pandaBlocked=%u "
+                             "heartbeatLost=%u controls=%u "
                              "safety=%u:%u ign=%u/%u voltage=%umV current=%umA faults=0x%x\n",
-                             rx_frames, tx_frames, tx_blocked, errors,
+                             rx_frames, tx_frames, tx_batches, tx_batches_skipped,
+                             tx_blocked, errors,
+                             got_health ? health.can_rx_errs : 0,
+                             got_health ? health.can_send_errs : 0,
+                             got_health ? health.can_fwd_errs : 0,
+                             got_health ? health.blocked_msg_cnt : 0,
+                             got_health ? health.heartbeat_lost : 0,
                              got_health ? health.controls_allowed : 0,
                              got_health ? health.safety_mode : 0,
                              got_health ? health.safety_param : 0,
@@ -266,7 +306,8 @@ int main()
                              got_health ? health.voltage : 0,
                              got_health ? health.current : 0,
                              got_health ? health.faults : 0);
-                rx_frames = tx_frames = tx_blocked = errors = 0;
+                rx_frames = tx_frames = tx_batches = tx_batches_skipped =
+                    tx_blocked = errors = 0;
                 last_log_ns = now;
             }
             if (!had_rx && !had_sendcan && idle_us > 0) {

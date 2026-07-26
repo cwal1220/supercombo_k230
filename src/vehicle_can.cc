@@ -199,8 +199,7 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     state->mdps_toi_unavailable = mdps.toi_unavailable;
     state->mdps_error_count = mdps.toi_unavailable ? state->mdps_error_count + 1 : 0;
     state->mdps_hard_fault = mdps.toi_fault || mdps.fail_state || mdps.sensor_error;
-    state->steering_fault =
-        state->mdps_hard_fault || state->mdps_error_count > kMdpsToiUnavailableFaultFrames;
+    state->steering_fault = state->mdps_error_count > kMdpsToiUnavailableFaultFrames;
     state->mdps12_time_s = now_s;
   } else if (address == kHyundaiScc12Address && length >= 8) {
     state->acc_mode = static_cast<int>(get_signal_le(data.data(), 13, 2));

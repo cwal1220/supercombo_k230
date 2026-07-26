@@ -286,9 +286,11 @@ bool PandaClient::unpack_can_buffer(const uint8_t *data, int size, std::vector<P
 {
     std::string error;
     if (!panda_can_unpack_buffer(data, size, &recv_buf_, frames, &error)) {
-        std::fprintf(stderr, "panda: %s\n", error.c_str());
-        comms_healthy_ = false;
-        return false;
+        std::fprintf(stderr, "panda: dropping malformed CAN USB batch: %s\n",
+                     error.c_str());
+        recv_buf_.clear();
+        frames->clear();
+        return true;
     }
     return true;
 }

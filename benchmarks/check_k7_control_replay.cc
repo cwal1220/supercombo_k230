@@ -120,6 +120,60 @@ void verify_lca11() {
           "LCA11 vehicle-state update");
 }
 
+void verify_mdps_fault_filter() {
+  K7VehicleCanState vehicle;
+  std::array<uint8_t, 8> bytes{};
+  bytes[1] = (1U << 6) | (1U << 7);
+  update_k7_vehicle_can_state(&vehicle, kHyundaiMdps12Address, bytes,
+                              bytes.size(), kK7MdpsBus, 1.0);
+  require(vehicle.mdps_hard_fault && !vehicle.steering_fault,
+          "transient MDPS ToiFlt/FailStat must match openpilot filtering");
+
+  bytes[1] = 1U << 4;
+  for (int frame = 0; frame < 100; ++frame) {
+    update_k7_vehicle_can_state(&vehicle, kHyundaiMdps12Address, bytes,
+                                bytes.size(), kK7MdpsBus, 1.0 + frame * 0.02);
+  }
+  require(!vehicle.steering_fault, "MDPS unavailable debounce threshold");
+  update_k7_vehicle_can_state(&vehicle, kHyundaiMdps12Address, bytes,
+                              bytes.size(), kK7MdpsBus, 3.0);
+  require(vehicle.steering_fault, "sustained MDPS unavailable fault");
+}
+
+void verify_braking_does_not_disengage() {
+  K7LateralControllerConfig config;
+  config.force_engaged = true;
+  K7LateralController controller(config);
+  K7VehicleCanState vehicle;
+  vehicle.has_lkas11_seed = true;
+  vehicle.has_clu11_seed = true;
+  vehicle.has_mdps12_seed = true;
+  vehicle.lkas11_time_s = 1.0;
+  vehicle.clu11_time_s = 1.0;
+  vehicle.sas11_time_s = 1.0;
+  vehicle.esp12_time_s = 1.0;
+  vehicle.mdps12_time_s = 1.0;
+  vehicle.tcs13_time_s = 1.0;
+  vehicle.tcs15_time_s = 1.0;
+  vehicle.e_ems11_time_s = 1.0;
+  vehicle.elect_gear_time_s = 1.0;
+  vehicle.cgw1_time_s = 1.0;
+  vehicle.cgw2_time_s = 1.0;
+  vehicle.gear = 5;
+  vehicle.brake_light = true;
+
+  const auto brake_light_result =
+      controller.update(replay_path(), replay_target(), vehicle, 1.0, 0);
+  require(brake_light_result.active,
+          "brake light without DriverBraking must remain active");
+
+  vehicle.brake_pressed = true;
+  const auto brake_pressed_result =
+      controller.update(replay_path(), replay_target(), vehicle, 1.01, 1);
+  require(brake_pressed_result.active,
+          "DriverBraking must not disengage lateral control");
+}
+
 void verify_model_path_adapter() {
   K230ModelState state;
   state.valid = 1;
@@ -151,6 +205,8 @@ int main(int argc, char **argv) {
     if (argc != 2) throw std::runtime_error("usage: check_k7_control_replay fixture.k230can");
     verify_mdps_speed_spoof();
     verify_lca11();
+    verify_mdps_fault_filter();
+    verify_braking_does_not_disengage();
     verify_model_path_adapter();
 
     CanReplaySource replay;

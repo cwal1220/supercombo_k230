@@ -18,8 +18,7 @@ float clamp_float(float value, float lo, float hi) {
 }
 
 bool is_hard_disengage_block(const std::string &block) {
-  return block == "brake_pressed" ||
-         block == "gear_not_drive" ||
+  return block == "gear_not_drive" ||
          block == "mdps_fault" ||
          block == "controller_disabled" ||
          block == "door_open" ||
@@ -378,7 +377,6 @@ std::string K7LateralController::active_block_reason(
   }
   const std::string angle_block = steering_angle_block(vehicle_state, speed_kph);
   if (!angle_block.empty()) return angle_block;
-  if (vehicle_state.brake_pressed || vehicle_state.brake_light) return "brake_pressed";
   if (vehicle_state.steering_fault) return "mdps_fault";
   const std::string manual_block = manual_blinker_block_reason();
   if (!manual_block.empty()) return manual_block;
