@@ -9,7 +9,7 @@ The current cleaned final artifact package is:
 
 Use `../../models/README.md` for the exact final ONNX, PTQ, compile
 commands, hashes, and input contract. That package is the source of truth for
-the current no-GRU, no-big-tower, input-compatible K230 model.
+the current no-GRU, full dual-image-input K230 model.
 
 ## Scripts
 
@@ -38,7 +38,7 @@ the current no-GRU, no-big-tower, input-compatible K230 model.
 ## Current final model summary
 
 - Final ONNX:
-  - `../../models/onnx/supercombo_gemm_split3_iddwelu223_nogru_splitplan_delta_nobig_keepinput_foldzero.onnx`
+  - `../../models/onnx/supercombo_gemm_split3_iddwelu223_nogru_splitplan_delta.onnx`
 - Final kmodel:
   - `../../models/supercombo.kmodel`
 - PTQ data:
@@ -47,4 +47,4 @@ the current no-GRU, no-big-tower, input-compatible K230 model.
   - INT16 activations, UINT8 weights, `NoClip`, 80 balanced samples.
 - Runtime compatibility:
   - Keeps `input_imgs`, `big_input_imgs`, `desire`, `traffic_convention`, and
-    `initial_state` inputs.
+    `initial_state` inputs, with both image towers active.

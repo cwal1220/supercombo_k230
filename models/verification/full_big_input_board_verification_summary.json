@@ -1,0 +1,85 @@
+{
+  "model": {
+    "path": "models/supercombo.kmodel",
+    "sha256": "38f771be302871244c7daf74f57c1a7471c7b3af2bdfbea09bdf65402c9e7b4d",
+    "size_bytes": 28590784,
+    "source_onnx_sha256": "1c25f80c26c2b3dd162d837be5bd6e131e1626e087183a4fbb6d0d005f5c6e82",
+    "quantization": "int16 activation, uint8 weight, NoClip",
+    "ptq_samples": 80
+  },
+  "runtime_inputs": {
+    "input_imgs": "medmodel virtual camera, independent previous/current YUV6",
+    "big_input_imgs": "sbigmodel virtual camera, independent previous/current YUV6",
+    "source": "same 640x360 NV12 camera frame",
+    "intrinsics": {
+      "fx": 541.91,
+      "fy": 528.66,
+      "cx": 315.38,
+      "cy": 179.11
+    }
+  },
+  "board": {
+    "address": "192.168.219.111",
+    "target_model_fps": 20,
+    "steady_model_fps": "19.9-20.0",
+    "camera_fps": 30.0,
+    "errors": 0,
+    "verified_live_frames": 1710,
+    "pre_optimization_profile_average_ms_after_300_frames": {
+      "preprocess": 14.687,
+      "pack": 0.897,
+      "input": 1.090,
+      "run": 29.917,
+      "output": 0.043,
+      "total": 46.635
+    },
+    "optimized_profile_average_ms_after_1710_frames": {
+      "source_copy": 0.100,
+      "preprocess": 9.988,
+      "input": 0.172,
+      "run": 30.017,
+      "history": 0.447,
+      "output": 0.042,
+      "total": 40.766
+    },
+    "optimization": {
+      "lut_bytes_per_sample": {
+        "legacy": 24,
+        "compact": 16
+      },
+      "image_input": "direct write to current half of nncase tensor; current-to-previous half copy after inference",
+      "source_copy": "one 345600-byte copy per frame before RVV because C908 indexed vector loads fault on the shared camera-ring mapping"
+    },
+    "bit_exact_verification": {
+      "compact_lut_vs_legacy_lut": {
+        "result": true,
+        "comparison": "full memcmp",
+        "pose_cases": 12
+      },
+      "direct_history_vs_legacy_pack": {
+        "result": true,
+        "comparison": "full memcmp over [previous,current]"
+      },
+      "c908_rvv_vs_scalar": {
+        "result": true,
+        "comparison": "full memcmp",
+        "medmodel_floats": 196608,
+        "sbigmodel_floats": 196608
+      },
+      "full_model_raw_output_scalar_vs_rvv": {
+        "result": true,
+        "replay_frames": 4,
+        "hashes": [
+          "2367f41ce38ad108",
+          "219f383ddf8d7a80",
+          "968a5f7f8daf3c0a",
+          "8da659b48d4a60ee"
+        ]
+      }
+    },
+    "temperature_c": {
+      "observed_min": 59.0,
+      "observed_max": 60.5
+    }
+  }
+}

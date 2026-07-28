@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <string>
 #include <vector>
@@ -550,12 +551,18 @@ void test_app_config_env_feedback()
 }
 
 void projection_reference(float roll, float pitch, float yaw, float fx, float fy, float cx, float cy,
-                          float height, double *projection)
+                          float height, double *projection,
+                          ModelFrame model_frame = ModelFrame::MedModel)
 {
     const double ground_from_medmodel_frame[9] = {
         0.00000000e+00, 0.00000000e+00, 1.00000000e+00,
        -1.09890110e-03, 0.00000000e+00, 2.81318681e-01,
        -1.84808520e-20, 9.00738606e-04, -4.28751576e-02,
+    };
+    const double ground_from_sbigmodel_frame[9] = {
+        0.00000000e+00,  7.31372216e-19,  1.00000000e+00,
+       -2.19780220e-03,  4.11497335e-19,  5.62637363e-01,
+       -5.46146580e-20,  1.80147721e-03, -2.73464241e-01,
     };
     const double k[9] = {
         fx, 0.0, cx,
@@ -594,7 +601,10 @@ void projection_reference(float roll, float pitch, float yaw, float fx, float fy
         camera_frame_from_ground[row * 3 + 1] = camera_frame_from_road[row * 4 + 1];
         camera_frame_from_ground[row * 3 + 2] = camera_frame_from_road[row * 4 + 3];
     }
-    matmul3d(camera_frame_from_ground, ground_from_medmodel_frame, projection);
+    const double *ground_from_model_frame = model_frame == ModelFrame::SmallBigModel
+        ? ground_from_sbigmodel_frame
+        : ground_from_medmodel_frame;
+    matmul3d(camera_frame_from_ground, ground_from_model_frame, projection);
 }
 
 void transform_scale_buffer_ref(const double *in, double scale, double *out)
@@ -612,6 +622,135 @@ void transform_scale_buffer_ref(const double *in, double scale, double *out)
     double tmp[9];
     matmul3d(in, transform_out, tmp);
     matmul3d(transform_in, tmp, out);
+}
+
+struct LegacyBilinearSample {
+    uint32_t offset[4] = {};
+    uint16_t weight[4] = {};
+};
+
+void matmul3f_ref(const float *a, const float *b, float *out)
+{
+    for (int row = 0; row < 3; ++row) {
+        for (int col = 0; col < 3; ++col) {
+            float sum = 0.0f;
+            for (int k = 0; k < 3; ++k)
+                sum += a[row * 3 + k] * b[k * 3 + col];
+            out[row * 3 + col] = sum;
+        }
+    }
+}
+
+void transform_scale_buffer_fixed12(const float *in, float scale, float *out)
+{
+    const float transform_out[9] = {
+        1.0f / scale, 0.0f, 0.5f,
+        0.0f, 1.0f / scale, 0.5f,
+        0.0f, 0.0f, 1.0f,
+    };
+    const float transform_in[9] = {
+        scale, 0.0f, -0.5f * scale,
+        0.0f, scale, -0.5f * scale,
+        0.0f, 0.0f, 1.0f,
+    };
+    float tmp[9];
+    matmul3f_ref(in, transform_out, tmp);
+    matmul3f_ref(transform_in, tmp, out);
+}
+
+void build_legacy_sample_map(const float *projection, int src_w, int src_h,
+                             int dst_w, int dst_h, int src_stride_pixels,
+                             int bytes_per_pixel,
+                             std::vector<LegacyBilinearSample> &map)
+{
+    constexpr int kWeightScale = 1 << 12;
+    map.resize(static_cast<size_t>(dst_w) * dst_h);
+    for (int y = 0; y < dst_h; ++y) {
+        for (int x = 0; x < dst_w; ++x) {
+            LegacyBilinearSample sample;
+            const float x0 = projection[0] * x + projection[1] * y + projection[2];
+            const float y0 = projection[3] * x + projection[4] * y + projection[5];
+            const float w0 = projection[6] * x + projection[7] * y + projection[8];
+            if (std::fabs(w0) > 1e-6f) {
+                const float sx = x0 / w0;
+                const float sy = y0 / w0;
+                const int ix = static_cast<int>(std::floor(sx));
+                const int iy = static_cast<int>(std::floor(sy));
+                const float ax = sx - ix;
+                const float ay = sy - iy;
+                const float weights_f[4] = {
+                    (1.0f - ax) * (1.0f - ay),
+                    ax * (1.0f - ay),
+                    (1.0f - ax) * ay,
+                    ax * ay,
+                };
+                const int xs[4] = {ix, ix + 1, ix, ix + 1};
+                const int ys[4] = {iy, iy, iy + 1, iy + 1};
+                for (int i = 0; i < 4; ++i) {
+                    if (xs[i] >= 0 && xs[i] < src_w && ys[i] >= 0 && ys[i] < src_h) {
+                        sample.offset[i] = static_cast<uint32_t>(
+                            (ys[i] * src_stride_pixels + xs[i]) * bytes_per_pixel);
+                        sample.weight[i] = static_cast<uint16_t>(
+                            std::max(0.0f, std::min(static_cast<float>(kWeightScale),
+                                std::round(weights_f[i] * kWeightScale))));
+                    }
+                }
+            }
+            map[static_cast<size_t>(y) * dst_w + x] = sample;
+        }
+    }
+}
+
+uint8_t sample_legacy_fixed12(const uint8_t *base,
+                              const LegacyBilinearSample &sample,
+                              int channel)
+{
+    constexpr int kWeightBits = 12;
+    constexpr int kWeightScale = 1 << kWeightBits;
+    int sum = 0;
+    for (int i = 0; i < 4; ++i)
+        sum += static_cast<int>(base[sample.offset[i] + channel]) * sample.weight[i];
+    const int rounded = (sum + kWeightScale / 2) >> kWeightBits;
+    return static_cast<uint8_t>(std::min(255, std::max(0, rounded)));
+}
+
+void legacy_warp_fixed12(const uint8_t *nv12, int src_w, int src_h,
+                         const float *projection_y, float *out)
+{
+    float projection_uv[9];
+    transform_scale_buffer_fixed12(projection_y, 0.5f, projection_uv);
+    std::vector<LegacyBilinearSample> y_map;
+    std::vector<LegacyBilinearSample> uv_map;
+    build_legacy_sample_map(projection_y, src_w, src_h, kModelW, kModelH,
+                            src_w, 1, y_map);
+    build_legacy_sample_map(projection_uv, src_w / 2, src_h / 2, kHalfW, kHalfH,
+                            src_w / 2, 2, uv_map);
+
+    const uint8_t *y_src = nv12;
+    const uint8_t *uv_src = nv12 + src_w * src_h;
+    float *planes[6] = {
+        out,
+        out + kPlaneSize,
+        out + 2 * kPlaneSize,
+        out + 3 * kPlaneSize,
+        out + 4 * kPlaneSize,
+        out + 5 * kPlaneSize,
+    };
+    for (int y = 0; y < kHalfH; ++y) {
+        for (int x = 0; x < kHalfW; ++x) {
+            const int ox = x * 2;
+            const int oy = y * 2;
+            const size_t dst = static_cast<size_t>(y) * kHalfW + x;
+            const size_t y00 = static_cast<size_t>(oy) * kModelW + ox;
+            const size_t y10 = y00 + kModelW;
+            planes[0][dst] = sample_legacy_fixed12(y_src, y_map[y00], 0);
+            planes[1][dst] = sample_legacy_fixed12(y_src, y_map[y10], 0);
+            planes[2][dst] = sample_legacy_fixed12(y_src, y_map[y00 + 1], 0);
+            planes[3][dst] = sample_legacy_fixed12(y_src, y_map[y10 + 1], 0);
+            planes[4][dst] = sample_legacy_fixed12(uv_src, uv_map[dst], 0);
+            planes[5][dst] = sample_legacy_fixed12(uv_src, uv_map[dst], 1);
+        }
+    }
 }
 
 uint8_t clamp_u8(int value)
@@ -659,18 +798,18 @@ uint8_t warp_sample_opencl_ref(const uint8_t *src, int src_w, int src_h, int str
     return clamp_u8(static_cast<int>((sum + (1 << (kCoefBits - 1))) >> kCoefBits));
 }
 
-void fill_nv12(std::vector<uint8_t> &nv12)
+void fill_nv12(std::vector<uint8_t> &nv12, int width, int height)
 {
     uint8_t *y_plane = nv12.data();
-    uint8_t *uv_plane = y_plane + kModelW * kModelH;
-    for (int y = 0; y < kModelH; ++y) {
-        for (int x = 0; x < kModelW; ++x)
-            y_plane[y * kModelW + x] = static_cast<uint8_t>((x * 3 + y * 5 + (x * y) / 17) & 0xff);
+    uint8_t *uv_plane = y_plane + width * height;
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x)
+            y_plane[y * width + x] = static_cast<uint8_t>((x * 3 + y * 5 + (x * y) / 17) & 0xff);
     }
-    for (int y = 0; y < kHalfH; ++y) {
-        for (int x = 0; x < kHalfW; ++x) {
-            uv_plane[y * kModelW + x * 2 + 0] = static_cast<uint8_t>((64 + x * 2 + y * 3) & 0xff);
-            uv_plane[y * kModelW + x * 2 + 1] = static_cast<uint8_t>((192 + x * 5 + y) & 0xff);
+    for (int y = 0; y < height / 2; ++y) {
+        for (int x = 0; x < width / 2; ++x) {
+            uv_plane[y * width + x * 2] = static_cast<uint8_t>((64 + x * 2 + y * 3) & 0xff);
+            uv_plane[y * width + x * 2 + 1] = static_cast<uint8_t>((192 + x * 5 + y) & 0xff);
         }
     }
 }
@@ -702,13 +841,14 @@ void pack_direct_openpilot_order(const uint8_t *nv12, float *out)
     }
 }
 
-void warp_pack_opencl_ref(const uint8_t *nv12, const double *projection_y, float *out)
+void warp_pack_opencl_ref(const uint8_t *nv12, int src_w, int src_h,
+                          const double *projection_y, float *out)
 {
     double projection_uv[9];
     transform_scale_buffer_ref(projection_y, 0.5, projection_uv);
 
     const uint8_t *y_src = nv12;
-    const uint8_t *uv_src = nv12 + kModelW * kModelH;
+    const uint8_t *uv_src = nv12 + src_w * src_h;
     float *y00_plane = out;
     float *y10_plane = y00_plane + kPlaneSize;
     float *y01_plane = y10_plane + kPlaneSize;
@@ -721,17 +861,17 @@ void warp_pack_opencl_ref(const uint8_t *nv12, const double *projection_y, float
             const int dst = y2 * kHalfW + x2;
             const int ox = x2 * 2;
             const int oy = y2 * 2;
-            y00_plane[dst] = warp_sample_opencl_ref(y_src, kModelW, kModelH, kModelW, 1, 0,
+            y00_plane[dst] = warp_sample_opencl_ref(y_src, src_w, src_h, src_w, 1, 0,
                                                     projection_y, ox, oy);
-            y10_plane[dst] = warp_sample_opencl_ref(y_src, kModelW, kModelH, kModelW, 1, 0,
+            y10_plane[dst] = warp_sample_opencl_ref(y_src, src_w, src_h, src_w, 1, 0,
                                                     projection_y, ox, oy + 1);
-            y01_plane[dst] = warp_sample_opencl_ref(y_src, kModelW, kModelH, kModelW, 1, 0,
+            y01_plane[dst] = warp_sample_opencl_ref(y_src, src_w, src_h, src_w, 1, 0,
                                                     projection_y, ox + 1, oy);
-            y11_plane[dst] = warp_sample_opencl_ref(y_src, kModelW, kModelH, kModelW, 1, 0,
+            y11_plane[dst] = warp_sample_opencl_ref(y_src, src_w, src_h, src_w, 1, 0,
                                                     projection_y, ox + 1, oy + 1);
-            u_plane[dst] = warp_sample_opencl_ref(uv_src, kHalfW, kHalfH, kModelW, 2, 0,
+            u_plane[dst] = warp_sample_opencl_ref(uv_src, src_w / 2, src_h / 2, src_w, 2, 0,
                                                   projection_uv, x2, y2);
-            v_plane[dst] = warp_sample_opencl_ref(uv_src, kHalfW, kHalfH, kModelW, 2, 1,
+            v_plane[dst] = warp_sample_opencl_ref(uv_src, src_w / 2, src_h / 2, src_w, 2, 1,
                                                   projection_uv, x2, y2);
         }
     }
@@ -787,6 +927,18 @@ void test_projection_and_yuv6()
         expect_near(camera_projection[i], camera_reference[i], 1e-4,
                     "default projection uses K230 camera intrinsics");
 
+    ModelInputTransform sbig_camera_transform(camera_config, ModelFrame::SmallBigModel);
+    float sbig_camera_projection[9];
+    double sbig_camera_reference[9];
+    sbig_camera_transform.projection_matrix(sbig_camera_projection);
+    projection_reference(0.0, 0.0, 0.0, camera_config.input_warp_fx,
+                         camera_config.input_warp_fy, camera_config.input_warp_cx,
+                         camera_config.input_warp_cy, camera_config.input_warp_height,
+                         sbig_camera_reference, ModelFrame::SmallBigModel);
+    for (int i = 0; i < 9; ++i)
+        expect_near(sbig_camera_projection[i], sbig_camera_reference[i], 1e-4,
+                    "sbig projection uses openpilot virtual camera");
+
     const std::array<std::array<float, 3>, 5> cases = {{
         {{0.0f, 0.0f, 0.0f}},
         {{0.0f, deg_to_rad(1.5f), 0.0f}},
@@ -817,7 +969,9 @@ void test_projection_and_yuv6()
     std::vector<float> direct(kYuv6Floats, 0.0f);
     std::vector<float> warped(kYuv6Floats, 0.0f);
     std::vector<float> ref(kYuv6Floats, 0.0f);
-    fill_nv12(nv12);
+    std::vector<float> sbig_warped(kYuv6Floats, 0.0f);
+    std::vector<float> sbig_ref(kYuv6Floats, 0.0f);
+    fill_nv12(nv12, kModelW, kModelH);
     pack_direct_openpilot_order(nv12.data(), direct.data());
 
     AppConfig identity_config;
@@ -844,13 +998,128 @@ void test_projection_and_yuv6()
                          pitch_config.input_warp_fx, pitch_config.input_warp_fy,
                          pitch_config.input_warp_cx, pitch_config.input_warp_cy,
                          pitch_config.input_warp_height, projection_y);
-    warp_pack_opencl_ref(nv12.data(), projection_y, ref.data());
+    warp_pack_opencl_ref(nv12.data(), kModelW, kModelH, projection_y, ref.data());
     DiffStats warp_diff = diff_stats(ref, warped);
     expect_true(warp_diff.mean < 1.0, "non-zero warp mean abs diff vs openpilot OpenCL reference");
     expect_true(warp_diff.inner_max < 8.0, "non-zero warp inner max diff vs openpilot OpenCL reference");
 
-    std::printf("projection/yuv6: matrix_tol<=1e-4 identity_max=%.1f med_mean=%.3f\n",
-                identity_diff.max, warp_diff.mean);
+    ModelInputTransform sbig_pitched(pitch_config, ModelFrame::SmallBigModel);
+    sbig_pitched.nv12_to_yuv6_warped(nv12.data(), kModelW, kModelH, sbig_warped);
+    projection_reference(0.0f, pitch_config.input_warp_pitch, pitch_config.input_warp_yaw,
+                         pitch_config.input_warp_fx, pitch_config.input_warp_fy,
+                         pitch_config.input_warp_cx, pitch_config.input_warp_cy,
+                         pitch_config.input_warp_height, projection_y,
+                         ModelFrame::SmallBigModel);
+    warp_pack_opencl_ref(nv12.data(), kModelW, kModelH, projection_y, sbig_ref.data());
+    DiffStats sbig_warp_diff = diff_stats(sbig_ref, sbig_warped);
+    expect_true(sbig_warp_diff.mean < 1.0, "sbig warp mean abs diff vs openpilot OpenCL reference");
+    expect_true(sbig_warp_diff.inner_max < 8.0, "sbig warp inner max diff vs openpilot OpenCL reference");
+
+    constexpr int kSourceW = 640;
+    constexpr int kSourceH = 360;
+    std::vector<uint8_t> source_nv12(kSourceW * kSourceH * 3 / 2);
+    std::vector<float> compact(kYuv6Floats, 0.0f);
+    std::vector<float> legacy(kYuv6Floats, 0.0f);
+    std::vector<float> opencl(kYuv6Floats, 0.0f);
+    fill_nv12(source_nv12, kSourceW, kSourceH);
+    AppConfig source_config;
+    const std::array<std::array<float, 3>, 6> rpy_cases = {{
+        {{0.0f, 0.0f, 0.0f}},
+        {{0.0f, deg_to_rad(-0.75f), deg_to_rad(1.1f)}},
+        {{deg_to_rad(0.5f), deg_to_rad(2.0f), deg_to_rad(-2.5f)}},
+        {{deg_to_rad(-0.5f), deg_to_rad(-3.0f), deg_to_rad(3.5f)}},
+        {{0.0f, deg_to_rad(8.0f), deg_to_rad(-3.9f)}},
+        {{0.0f, deg_to_rad(-5.0f), deg_to_rad(3.9f)}},
+    }};
+    bool compact_legacy_exact = true;
+    DiffStats opencl_worst;
+    for (ModelFrame frame : {ModelFrame::MedModel, ModelFrame::SmallBigModel}) {
+        ModelInputTransform transform(source_config, frame);
+        for (const auto &rpy : rpy_cases) {
+            transform.set_calibration(rpy[0], rpy[1], rpy[2]);
+            float projection[9];
+            transform.projection_matrix(projection);
+            transform.nv12_to_yuv6_warped_scalar(
+                source_nv12.data(), kSourceW, kSourceH, compact.data());
+            legacy_warp_fixed12(
+                source_nv12.data(), kSourceW, kSourceH, projection, legacy.data());
+            const bool exact = std::memcmp(
+                compact.data(), legacy.data(), compact.size() * sizeof(float)) == 0;
+            compact_legacy_exact &= exact;
+            expect_true(exact,
+                        frame == ModelFrame::MedModel
+                            ? "compact medmodel LUT is bit-exact with legacy LUT"
+                            : "compact sbigmodel LUT is bit-exact with legacy LUT");
+
+            double projection_opencl[9];
+            for (int i = 0; i < 9; ++i)
+                projection_opencl[i] = projection[i];
+            warp_pack_opencl_ref(source_nv12.data(), kSourceW, kSourceH,
+                                 projection_opencl, opencl.data());
+            const DiffStats opencl_diff = diff_stats(compact, opencl);
+            opencl_worst.mean = std::max(opencl_worst.mean, opencl_diff.mean);
+            opencl_worst.max = std::max(opencl_worst.max, opencl_diff.max);
+            opencl_worst.inner_mean =
+                std::max(opencl_worst.inner_mean, opencl_diff.inner_mean);
+            opencl_worst.inner_max =
+                std::max(opencl_worst.inner_max, opencl_diff.inner_max);
+        }
+    }
+    expect_true(opencl_worst.mean < 1.0,
+                "fixed12 warp mean abs diff vs openpilot OpenCL reference");
+    expect_true(opencl_worst.inner_max < 8.0,
+                "fixed12 warp inner max diff vs openpilot OpenCL reference");
+
+    std::vector<float> frame_a(kYuv6Floats, 0.0f);
+    std::vector<float> frame_b(kYuv6Floats, 0.0f);
+    ModelInputTransform history_transform(source_config);
+    history_transform.set_calibration(0.0f, deg_to_rad(-0.75f), deg_to_rad(1.1f));
+    history_transform.nv12_to_yuv6_warped_scalar(
+        source_nv12.data(), kSourceW, kSourceH, frame_a.data());
+    history_transform.set_calibration(0.0f, deg_to_rad(1.25f), deg_to_rad(-0.8f));
+    history_transform.nv12_to_yuv6_warped_scalar(
+        source_nv12.data(), kSourceW, kSourceH, frame_b.data());
+
+    std::vector<float> legacy_previous(kYuv6Floats, 0.0f);
+    std::vector<float> legacy_packed(2 * kYuv6Floats, 0.0f);
+    std::vector<float> direct_input(2 * kYuv6Floats, 0.0f);
+    auto pack_legacy = [&](const std::vector<float> &current) {
+        std::memcpy(legacy_packed.data(), legacy_previous.data(),
+                    kYuv6Floats * sizeof(float));
+        std::memcpy(legacy_packed.data() + kYuv6Floats, current.data(),
+                    kYuv6Floats * sizeof(float));
+    };
+
+    pack_legacy(frame_a);
+    std::memcpy(direct_input.data() + kYuv6Floats, frame_a.data(),
+                kYuv6Floats * sizeof(float));
+    bool direct_history_exact = std::memcmp(
+        legacy_packed.data(), direct_input.data(),
+        direct_input.size() * sizeof(float)) == 0;
+
+    legacy_previous = frame_a;
+    std::memcpy(direct_input.data(), direct_input.data() + kYuv6Floats,
+                kYuv6Floats * sizeof(float));
+    pack_legacy(frame_b);
+    std::memcpy(direct_input.data() + kYuv6Floats, frame_b.data(),
+                kYuv6Floats * sizeof(float));
+    direct_history_exact &= std::memcmp(
+        legacy_packed.data(), direct_input.data(),
+        direct_input.size() * sizeof(float)) == 0;
+    expect_true(direct_history_exact,
+                "direct [previous,current] image input is bit-exact with legacy packing");
+
+    std::printf("projection/yuv6: med_sbig_matrix_tol<=1e-4 identity_max=%.1f med_mean=%.3f sbig_mean=%.3f\n",
+                identity_diff.max, warp_diff.mean, sbig_warp_diff.mean);
+    std::printf("bit_exact: compact_vs_legacy=%d cases=%zu direct_history_vs_pack=%d\n",
+                compact_legacy_exact ? 1 : 0,
+                rpy_cases.size() * 2,
+                direct_history_exact ? 1 : 0);
+    std::printf("opencl_compat_640x360: cases=%zu worst_mean=%.3f worst_max=%.1f "
+                "worst_inner_mean=%.3f worst_inner_max=%.1f\n",
+                rpy_cases.size() * 2,
+                opencl_worst.mean, opencl_worst.max,
+                opencl_worst.inner_mean, opencl_worst.inner_max);
 }
 
 } // namespace

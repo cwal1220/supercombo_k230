@@ -3,7 +3,13 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <stdexcept>
+
+#if defined(__riscv_vector)
+#include <riscv_vector.h>
+#endif
 
 namespace {
 
@@ -79,9 +85,27 @@ void transform_scale_buffer(const float *in, float scale, float *out)
     matmul3(transform_in, tmp, out);
 }
 
+bool scalar_warp_forced()
+{
+    static const bool forced = [] {
+        const char *value = std::getenv("SUPERCOMBO_WARP_SCALAR");
+        return value && value[0] != '\0' && std::strcmp(value, "0") != 0;
+    }();
+    return forced;
+}
+
 } // namespace
 
-ModelInputTransform::ModelInputTransform(const AppConfig &config)
+void ModelInputTransform::SampleMap::resize(size_t size)
+{
+    offset.resize(size);
+    x_step.resize(size);
+    y_step.resize(size);
+    for (auto &weights : weight)
+        weights.resize(size);
+}
+
+ModelInputTransform::ModelInputTransform(const AppConfig &config, ModelFrame model_frame)
     : fx_(config.input_warp_fx),
       fy_(config.input_warp_fy),
       cx_(config.input_warp_cx),
@@ -89,7 +113,8 @@ ModelInputTransform::ModelInputTransform(const AppConfig &config)
       height_(config.input_warp_height),
       roll_(config.input_warp_roll),
       pitch_(config.input_warp_pitch),
-      yaw_(config.input_warp_yaw)
+      yaw_(config.input_warp_yaw),
+      model_frame_(model_frame)
 {
 }
 
@@ -108,24 +133,17 @@ void ModelInputTransform::set_calibration(float roll, float pitch, float yaw)
     map_valid_ = false;
 }
 
-uint8_t ModelInputTransform::sample_luma(const uint8_t *base, const BilinearSample &sample)
+uint8_t ModelInputTransform::sample(const uint8_t *base, const SampleMap &map,
+                                    size_t index, int channel)
 {
-    int sum = 0;
-    sum += static_cast<int>(base[sample.offset[0]]) * sample.weight[0];
-    sum += static_cast<int>(base[sample.offset[1]]) * sample.weight[1];
-    sum += static_cast<int>(base[sample.offset[2]]) * sample.weight[2];
-    sum += static_cast<int>(base[sample.offset[3]]) * sample.weight[3];
-    const int rounded = (sum + (kWeightScale / 2)) >> kWeightBits;
-    return static_cast<uint8_t>(std::min(255, std::max(0, rounded)));
-}
-
-uint8_t ModelInputTransform::sample_chroma(const uint8_t *base, const BilinearSample &sample, int channel)
-{
-    int sum = 0;
-    sum += static_cast<int>(base[sample.offset[0] + channel]) * sample.weight[0];
-    sum += static_cast<int>(base[sample.offset[1] + channel]) * sample.weight[1];
-    sum += static_cast<int>(base[sample.offset[2] + channel]) * sample.weight[2];
-    sum += static_cast<int>(base[sample.offset[3] + channel]) * sample.weight[3];
+    const uint32_t offset = map.offset[index] + static_cast<uint32_t>(channel);
+    const uint32_t x_step = map.x_step[index];
+    const uint32_t y_step = map.y_step[index];
+    uint32_t sum = 0;
+    sum += static_cast<uint32_t>(base[offset]) * map.weight[0][index];
+    sum += static_cast<uint32_t>(base[offset + x_step]) * map.weight[1][index];
+    sum += static_cast<uint32_t>(base[offset + y_step]) * map.weight[2][index];
+    sum += static_cast<uint32_t>(base[offset + y_step + x_step]) * map.weight[3][index];
     const int rounded = (sum + (kWeightScale / 2)) >> kWeightBits;
     return static_cast<uint8_t>(std::min(255, std::max(0, rounded)));
 }
@@ -137,6 +155,11 @@ void ModelInputTransform::projection_matrix(float *projection) const
         0.00000000e+00f, 0.00000000e+00f, 1.00000000e+00f,
        -1.09890110e-03f, 0.00000000e+00f, 2.81318681e-01f,
        -1.84808520e-20f, 9.00738606e-04f, -4.28751576e-02f,
+    };
+    const float ground_from_sbigmodel_frame[9] = {
+        0.00000000e+00f,  7.31372216e-19f,  1.00000000e+00f,
+       -2.19780220e-03f,  4.11497335e-19f,  5.62637363e-01f,
+       -5.46146580e-20f,  1.80147721e-03f, -2.73464241e-01f,
     };
     const float k[9] = {
         fx_, 0.0f, cx_,
@@ -178,25 +201,35 @@ void ModelInputTransform::projection_matrix(float *projection) const
         camera_frame_from_ground[row * 3 + 2] = camera_frame_from_road[row * 4 + 3];
     }
 
-    matmul3(camera_frame_from_ground, ground_from_medmodel_frame, projection);
+    const float *ground_from_model_frame = model_frame_ == ModelFrame::SmallBigModel
+        ? ground_from_sbigmodel_frame
+        : ground_from_medmodel_frame;
+    matmul3(camera_frame_from_ground, ground_from_model_frame, projection);
 }
 
 void ModelInputTransform::build_sample_map(const float *projection, int src_w, int src_h,
                                            int dst_w, int dst_h, int src_stride_pixels,
-                                           int bytes_per_pixel, std::vector<BilinearSample> &map) const
+                                           int bytes_per_pixel, int dst_scale,
+                                           int dst_x_offset, int dst_y_offset,
+                                           SampleMap &map) const
 {
-    map.resize(static_cast<size_t>(dst_w) * dst_h);
+    const size_t sample_count = static_cast<size_t>(dst_w) * dst_h;
+    map.resize(sample_count);
     for (int y = 0; y < dst_h; ++y) {
         for (int x = 0; x < dst_w; ++x) {
-            BilinearSample sample;
-            const float x0 = projection[0] * x + projection[1] * y + projection[2];
-            const float y0 = projection[3] * x + projection[4] * y + projection[5];
-            const float w0 = projection[6] * x + projection[7] * y + projection[8];
+            const int dst_x = x * dst_scale + dst_x_offset;
+            const int dst_y = y * dst_scale + dst_y_offset;
+            const float x0 = projection[0] * dst_x + projection[1] * dst_y + projection[2];
+            const float y0 = projection[3] * dst_x + projection[4] * dst_y + projection[5];
+            const float w0 = projection[6] * dst_x + projection[7] * dst_y + projection[8];
+            const size_t index = static_cast<size_t>(y) * dst_w + x;
+            int ix = -2;
+            int iy = -2;
             if (std::fabs(w0) > 1e-6f) {
                 const float sx = x0 / w0;
                 const float sy = y0 / w0;
-                const int ix = static_cast<int>(std::floor(sx));
-                const int iy = static_cast<int>(std::floor(sy));
+                ix = static_cast<int>(std::floor(sx));
+                iy = static_cast<int>(std::floor(sy));
                 const float ax = sx - ix;
                 const float ay = sy - iy;
                 const float weights_f[4] = {
@@ -209,13 +242,27 @@ void ModelInputTransform::build_sample_map(const float *projection, int src_w, i
                 const int ys[4] = {iy, iy, iy + 1, iy + 1};
                 for (int i = 0; i < 4; ++i) {
                     if (xs[i] >= 0 && xs[i] < src_w && ys[i] >= 0 && ys[i] < src_h) {
-                        sample.offset[i] = static_cast<uint32_t>((ys[i] * src_stride_pixels + xs[i]) * bytes_per_pixel);
-                        sample.weight[i] = static_cast<uint16_t>(
+                        map.weight[i][index] = static_cast<uint16_t>(
                             std::max(0.0f, std::min(static_cast<float>(kWeightScale), std::round(weights_f[i] * kWeightScale))));
+                    } else {
+                        map.weight[i][index] = 0;
                     }
                 }
+            } else {
+                for (auto &weights : map.weight)
+                    weights[index] = 0;
             }
-            map[static_cast<size_t>(y) * dst_w + x] = sample;
+
+            const int base_x = std::max(0, std::min(src_w - 1, ix));
+            const int base_y = std::max(0, std::min(src_h - 1, iy));
+            map.offset[index] = static_cast<uint32_t>(
+                (base_y * src_stride_pixels + base_x) * bytes_per_pixel);
+            map.x_step[index] = ix >= 0 && ix + 1 < src_w
+                ? static_cast<uint16_t>(bytes_per_pixel)
+                : 0;
+            map.y_step[index] = iy >= 0 && iy + 1 < src_h
+                ? static_cast<uint16_t>(src_stride_pixels * bytes_per_pixel)
+                : 0;
         }
     }
 }
@@ -230,8 +277,14 @@ void ModelInputTransform::rebuild_maps(int src_w, int src_h)
     projection_matrix(projection_y);
     transform_scale_buffer(projection_y, 0.5f, projection_uv);
 
-    build_sample_map(projection_y, src_w, src_h, kModelW, kModelH, src_w, 1, y_map_);
-    build_sample_map(projection_uv, src_w / 2, src_h / 2, kHalfW, kHalfH, src_w / 2, 2, uv_map_);
+    constexpr int x_offsets[4] = {0, 0, 1, 1};
+    constexpr int y_offsets[4] = {0, 1, 0, 1};
+    for (int plane = 0; plane < 4; ++plane) {
+        build_sample_map(projection_y, src_w, src_h, kHalfW, kHalfH, src_w, 1,
+                         2, x_offsets[plane], y_offsets[plane], y_maps_[plane]);
+    }
+    build_sample_map(projection_uv, src_w / 2, src_h / 2, kHalfW, kHalfH,
+                     src_w / 2, 2, 1, 0, 0, uv_map_);
 
     map_src_w_ = src_w;
     map_src_h_ = src_h;
@@ -240,43 +293,141 @@ void ModelInputTransform::rebuild_maps(int src_w, int src_h)
     std::fprintf(stderr,
                  "input warp=on frame=%s source=%dx%d intrinsics=(fx=%.2f fy=%.2f cx=%.2f cy=%.2f) "
                  "rpy_deg=(%.3f %.3f %.3f)\n",
-                 "medmodel", src_w, src_h, fx_, fy_, cx_, cy_,
+                 model_frame_ == ModelFrame::SmallBigModel ? "sbigmodel" : "medmodel",
+                 src_w, src_h, fx_, fy_, cx_, cy_,
                  rad_to_deg(roll_), rad_to_deg(pitch_), rad_to_deg(yaw_));
 }
 
-void ModelInputTransform::nv12_to_yuv6_warped(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &out)
+bool ModelInputTransform::rvv_available()
 {
-    if (!map_valid_ || src_w != map_src_w_ || src_h != map_src_h_)
-        rebuild_maps(src_w, src_h);
+#if defined(__riscv_vector)
+    return true;
+#else
+    return false;
+#endif
+}
 
+void ModelInputTransform::warp_scalar(const uint8_t *nv12, int src_w, int src_h,
+                                      float *out) const
+{
     const uint8_t *y_src = nv12;
     const uint8_t *uv_src = nv12 + src_w * src_h;
     const int plane_size = kHalfW * kHalfH;
 
-    float *y00_plane = out.data();
-    float *y10_plane = y00_plane + plane_size;
-    float *y01_plane = y10_plane + plane_size;
-    float *y11_plane = y01_plane + plane_size;
-    float *u_plane = y11_plane + plane_size;
-    float *v_plane = u_plane + plane_size;
-
-    for (int y2 = 0; y2 < kHalfH; ++y2) {
-        for (int x2 = 0; x2 < kHalfW; ++x2) {
-            const int ox = x2 * 2;
-            const int oy = y2 * 2;
-            const int dst_idx = y2 * kHalfW + x2;
-            const size_t y_idx00 = static_cast<size_t>(oy) * kModelW + ox;
-            const size_t y_idx01 = y_idx00 + 1;
-            const size_t y_idx10 = y_idx00 + kModelW;
-            const size_t y_idx11 = y_idx10 + 1;
-            const size_t uv_idx = static_cast<size_t>(y2) * kHalfW + x2;
-
-            y00_plane[dst_idx] = static_cast<float>(sample_luma(y_src, y_map_[y_idx00]));
-            y10_plane[dst_idx] = static_cast<float>(sample_luma(y_src, y_map_[y_idx10]));
-            y01_plane[dst_idx] = static_cast<float>(sample_luma(y_src, y_map_[y_idx01]));
-            y11_plane[dst_idx] = static_cast<float>(sample_luma(y_src, y_map_[y_idx11]));
-            u_plane[dst_idx] = static_cast<float>(sample_chroma(uv_src, uv_map_[uv_idx], 0));
-            v_plane[dst_idx] = static_cast<float>(sample_chroma(uv_src, uv_map_[uv_idx], 1));
-        }
+    for (int plane = 0; plane < 4; ++plane) {
+        float *dst = out + plane * plane_size;
+        const SampleMap &map = y_maps_[plane];
+        for (size_t i = 0; i < map.size(); ++i)
+            dst[i] = static_cast<float>(sample(y_src, map, i, 0));
     }
+
+    float *u_plane = out + 4 * plane_size;
+    float *v_plane = out + 5 * plane_size;
+    for (size_t i = 0; i < uv_map_.size(); ++i) {
+        u_plane[i] = static_cast<float>(sample(uv_src, uv_map_, i, 0));
+        v_plane[i] = static_cast<float>(sample(uv_src, uv_map_, i, 1));
+    }
+}
+
+void ModelInputTransform::warp_rvv(const uint8_t *nv12, int src_w, int src_h,
+                                   float *out) const
+{
+#if defined(__riscv_vector)
+    const uint8_t *y_src = nv12;
+    const uint8_t *uv_src = nv12 + src_w * src_h;
+    const size_t plane_size = static_cast<size_t>(kHalfW) * kHalfH;
+
+    auto sample_plane = [](const uint8_t *src, const SampleMap &map,
+                           int channel, float *dst) {
+        size_t offset_index = 0;
+        while (offset_index < map.size()) {
+            const size_t vl = __riscv_vsetvl_e32m4(map.size() - offset_index);
+            vuint32m4_t offset = __riscv_vle32_v_u32m4(
+                map.offset.data() + offset_index, vl);
+            if (channel != 0)
+                offset = __riscv_vadd_vx_u32m4(offset, static_cast<uint32_t>(channel), vl);
+            const vuint16m2_t x_step16 = __riscv_vle16_v_u16m2(
+                map.x_step.data() + offset_index, vl);
+            const vuint16m2_t y_step16 = __riscv_vle16_v_u16m2(
+                map.y_step.data() + offset_index, vl);
+            const vuint32m4_t x_step = __riscv_vzext_vf2_u32m4(x_step16, vl);
+            const vuint32m4_t y_step = __riscv_vzext_vf2_u32m4(y_step16, vl);
+            const vuint32m4_t offset_x = __riscv_vadd_vv_u32m4(offset, x_step, vl);
+            const vuint32m4_t offset_y = __riscv_vadd_vv_u32m4(offset, y_step, vl);
+            const vuint32m4_t offset_xy = __riscv_vadd_vv_u32m4(offset_y, x_step, vl);
+
+            const vuint8m1_t pixel0 = __riscv_vluxei32_v_u8m1(src, offset, vl);
+            const vuint8m1_t pixel1 = __riscv_vluxei32_v_u8m1(src, offset_x, vl);
+            const vuint8m1_t pixel2 = __riscv_vluxei32_v_u8m1(src, offset_y, vl);
+            const vuint8m1_t pixel3 = __riscv_vluxei32_v_u8m1(src, offset_xy, vl);
+            const vuint16m2_t weight0 = __riscv_vle16_v_u16m2(
+                map.weight[0].data() + offset_index, vl);
+            const vuint16m2_t weight1 = __riscv_vle16_v_u16m2(
+                map.weight[1].data() + offset_index, vl);
+            const vuint16m2_t weight2 = __riscv_vle16_v_u16m2(
+                map.weight[2].data() + offset_index, vl);
+            const vuint16m2_t weight3 = __riscv_vle16_v_u16m2(
+                map.weight[3].data() + offset_index, vl);
+
+            vuint32m4_t sum = __riscv_vwmulu_vv_u32m4(
+                __riscv_vzext_vf2_u16m2(pixel0, vl), weight0, vl);
+            sum = __riscv_vwmaccu_vv_u32m4(
+                sum, __riscv_vzext_vf2_u16m2(pixel1, vl), weight1, vl);
+            sum = __riscv_vwmaccu_vv_u32m4(
+                sum, __riscv_vzext_vf2_u16m2(pixel2, vl), weight2, vl);
+            sum = __riscv_vwmaccu_vv_u32m4(
+                sum, __riscv_vzext_vf2_u16m2(pixel3, vl), weight3, vl);
+            sum = __riscv_vadd_vx_u32m4(sum, kWeightScale / 2, vl);
+            sum = __riscv_vsrl_vx_u32m4(sum, kWeightBits, vl);
+            sum = __riscv_vminu_vx_u32m4(sum, 255, vl);
+            const vfloat32m4_t result = __riscv_vfcvt_f_xu_v_f32m4(sum, vl);
+            __riscv_vse32_v_f32m4(dst + offset_index, result, vl);
+            offset_index += vl;
+        }
+    };
+
+    for (int plane = 0; plane < 4; ++plane)
+        sample_plane(y_src, y_maps_[plane], 0, out + plane * plane_size);
+    sample_plane(uv_src, uv_map_, 0, out + 4 * plane_size);
+    sample_plane(uv_src, uv_map_, 1, out + 5 * plane_size);
+#else
+    warp_scalar(nv12, src_w, src_h, out);
+#endif
+}
+
+void ModelInputTransform::nv12_to_yuv6_warped_scalar(const uint8_t *nv12,
+                                                     int src_w, int src_h,
+                                                     float *out)
+{
+    if (!map_valid_ || src_w != map_src_w_ || src_h != map_src_h_)
+        rebuild_maps(src_w, src_h);
+    warp_scalar(nv12, src_w, src_h, out);
+}
+
+void ModelInputTransform::nv12_to_yuv6_warped_rvv(const uint8_t *nv12,
+                                                  int src_w, int src_h,
+                                                  float *out)
+{
+    if (!map_valid_ || src_w != map_src_w_ || src_h != map_src_h_)
+        rebuild_maps(src_w, src_h);
+    warp_rvv(nv12, src_w, src_h, out);
+}
+
+void ModelInputTransform::nv12_to_yuv6_warped(const uint8_t *nv12,
+                                              int src_w, int src_h,
+                                              float *out)
+{
+    if (rvv_available() && !scalar_warp_forced())
+        nv12_to_yuv6_warped_rvv(nv12, src_w, src_h, out);
+    else
+        nv12_to_yuv6_warped_scalar(nv12, src_w, src_h, out);
+}
+
+void ModelInputTransform::nv12_to_yuv6_warped(const uint8_t *nv12,
+                                              int src_w, int src_h,
+                                              std::vector<float> &out)
+{
+    if (out.size() < static_cast<size_t>(6 * kHalfW * kHalfH))
+        out.resize(6 * kHalfW * kHalfH);
+    nv12_to_yuv6_warped(nv12, src_w, src_h, out.data());
 }

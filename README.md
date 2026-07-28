@@ -190,36 +190,54 @@ AI ring. This keeps the split runtime close to openpilot's process boundaries
 without paying the cost of Cap'n Proto/cereal in v1.
 
 The model path captures the AI stream as `NV12 640x360` through `/dev/video2`
-crop/resize, warps its centered `512x256` medmodel view, prepares the YUV6
-recurrent inputs, runs nncase runtime directly, and publishes compact
+crop/resize, samples independent `512x256` medmodel and sbigmodel views from
+the same source frame, prepares both YUV6 recurrent inputs, runs nncase runtime
+directly, and publishes compact
 `modelState`. The overlay display process uses
 `/dev/video1` for preview and `/dev/video2` remains dedicated to the AI stream.
-The model input preparation always uses calibrated homography sampling followed
-by `NV12 -> YUV6` packing. The source intrinsics are scaled from the calibrated
-K230 camera matrix, so the default `640x360` path uses `fx=541.91`, `fy=528.66`,
+The model input preparation always uses calibrated homography sampling fused
+with `NV12 -> YUV6` conversion. Compact fixed-point lookup tables and a C908
+RVV indexed-gather kernel write the current frame directly into the second half
+of each nncase image tensor; after inference, that half is copied to the
+previous-frame half. The shared camera frame is copied once into a cacheable
+buffer because C908 `vluxei32.v` is not reliable on the `/dev/shm` ring mapping.
+No warped image, YUV6 staging tensor, or full `[previous,current]` pack buffer is
+created. The source intrinsics are scaled from the calibrated K230 camera
+matrix, so the default `640x360` path uses `fx=541.91`, `fy=528.66`,
 `cx=315.38`, and `cy=179.11`.
 `SUPERCOMBO_INPUT_WARP_FX/FY/CX/CY` can override these values for a separately
 measured camera pipeline. The medmodel transform feeds the current and previous
-frames into `input_imgs`.
+frames into `input_imgs`; the wider C2 sbigmodel transform independently feeds
+its current and previous frames into `big_input_imgs`.
 
 Calibration/input-warp equivalence checks:
 
 - `benchmarks/verify_calibration_equivalence.cc` is a host-only verifier for
   the openpilot-derived calibration and input-warp math. It checks the
   pose-based calibration state machine, manual-vs-online feedback policy,
-  medmodel homography matrix, UV `transform_scale_buffer(0.5)` handling, and
-  YUV6 plane order (`Y00, Y10, Y01, Y11, U, V`) without requiring nncase or K230
-  display libraries.
+  medmodel/sbigmodel homography matrices, UV `transform_scale_buffer(0.5)`
+  handling, and YUV6 plane order (`Y00, Y10, Y01, Y11, U, V`) without requiring
+  nncase or K230 display libraries.
 - The verifier intentionally treats model-input feedback as roll-free, matching
   openpilot's `get_view_frame_from_road_frame(0, pitch, yaw, model_height)`
   extrinsic matrix. `rpyCalib` may contain a tiny roll internally in openpilot,
   but that roll is not fed into `modeld`.
 - The verifier checks the ISP-normalized medmodel defaults and compares its
   matrix with the original openpilot formula.
+- The verifier compares every output byte from the compact lookup tables with
+  the previous 24-byte/sample lookup format across 12 medmodel/sbigmodel pose
+  cases. It also checks two-frame direct tensor history against the previous
+  pack path with a full-buffer `memcmp`.
+- Against openpilot's OpenCL interpolation on the actual `640x360` K230 source,
+  the worst 12-case mean absolute pixel difference is `0.314/255` and the worst
+  absolute difference is `7/255`. The paths use the same projection and YUV6
+  layout, but are not bit-exact because openpilot quantizes coordinates to
+  1/32 pixel with 15-bit coefficients while K230 uses 12-bit coefficients.
 - Automatic calibration requires both CAN `vEgo` and camera-odometry
   `trans[0]` above 15 mph, matching openpilot's acceptance gate.
-- The final graph does not consume `big_input_imgs`; its compatibility input is
-  initialized to zero once and skipped during per-frame preprocessing.
+- The final graph keeps both visual towers live. `input_imgs` uses the
+  910-pixel-focal medmodel virtual camera and `big_input_imgs` uses the
+  455-pixel-focal sbigmodel virtual camera, matching the single-camera C2 path.
 
 Run the host-only verifier:
 
@@ -237,6 +255,21 @@ cmake --build /tmp/supercombo_k230_verify \
 Latest local/Pi checks:
 
 - macOS host: `verify_calibration_equivalence: PASS`
+- K230 C908: scalar and RVV medmodel/sbigmodel output buffers are bit-exact.
+- K230 full model replay: four recurrent frames produced identical scalar/RVV
+  raw-output hashes.
+- Original FP32 ONNX vs rewritten FP32 ONNX: all 6519 non-plan-probability
+  outputs are exact, and the intentional common-offset removal preserves plan
+  argmax in all 8 checked samples.
+- Original FP32 ONNX vs quantized Kmodel over 80 independent saved PTQ samples:
+  non-plan-probability MAE `0.0572`, recurrent-state MAE `0.00593`, and plan
+  argmax agreement `60/80`. This is quantization error, not an input-pipeline
+  optimization difference. Full results are in
+  `models/verification/openpilot_c2_master_comparison.json`.
+- K230 live pipeline over 1710 frames: `19.9-20.0 model FPS`, zero model errors,
+  and a `40.766 ms` average model path. Input work was `0.100 ms` source copy,
+  `9.988 ms` preprocessing, `0.172 ms` input sync/write, and `0.447 ms` history.
+  The prior staging/pack path averaged `46.635 ms` total.
 - Raspberry Pi 4 aarch64: `verify_calibration_equivalence: PASS`
 - Raspberry Pi 4 warp timing over 3000 frames:
   direct pack `0.251 ms`, identity warp `1.821 ms`, pitch `1.836 ms`, so the
@@ -257,7 +290,9 @@ Runtime structure:
 - `src/model_input_transform.*`
   - direct `NV12 -> calibrated warped YUV6` input transform. It fuses
     homography sampling and openpilot-compatible YUV6 packing without creating
-    an intermediate RGB or warped image buffer.
+    an intermediate RGB or warped image buffer. Its compact fixed-point LUT is
+    16 bytes/sample instead of 24, and the K230 build uses an exact C908 RVV
+    kernel with a scalar fallback.
 - `src/calibration_service.*`
   - wraps pose-based online calibration, manual override, projection policy, and
     the model-input calibration feedback loop.
@@ -325,6 +360,9 @@ Useful runtime options:
   `SUPERCOMBO_INPUT_WARP_CX`, `SUPERCOMBO_INPUT_WARP_CY`
   - optional camera intrinsics for the resized source frame. Defaults are
     derived from the calibrated K230 `1920x1080` camera matrix.
+- `SUPERCOMBO_WARP_SCALAR=1`
+  - disables the C908 RVV input-warp kernel for diagnostics and uses the
+    bit-exact scalar fallback.
 - `SUPERCOMBO_REPLAY_NV12=/path/to/replay.scnv12`
   - runs headless from a preconverted `512x256 NV12` replay file instead of
     opening the camera and display. This is for validating inference and online
