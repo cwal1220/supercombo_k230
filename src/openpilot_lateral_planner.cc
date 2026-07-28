@@ -57,6 +57,11 @@ public:
   LanePlanner(double camera_offset_m, double path_offset_m)
       : camera_offset_m_(camera_offset_m), path_offset_m_(path_offset_m) {}
 
+  void update_offsets(double camera_offset_m, double path_offset_m) {
+    camera_offset_m_ = camera_offset_m;
+    path_offset_m_ = path_offset_m;
+  }
+
   void parse(const K230ModelState &model) {
     for (int i = 0; i < kTrajectorySize; ++i) {
       lane_t_[i] = model.lane_t[i];
@@ -263,6 +268,11 @@ private:
 struct OpenpilotLateralPlanner::Impl {
   explicit Impl(const K7SteeringParams &steering)
       : lane_planner(steering.camera_offset_m, steering.path_offset_m) {
+    update_params(steering);
+  }
+
+  void update_params(const K7SteeringParams &steering) {
+    lane_planner.update_offsets(steering.camera_offset_m, steering.path_offset_m);
     const double center_to_front = steering.center_to_front_m();
     constexpr double civic_mass = 1326.0 + 136.0;
     constexpr double civic_wheelbase = 2.70;
@@ -472,6 +482,10 @@ OpenpilotLateralPlanner::OpenpilotLateralPlanner(const K7SteeringParams &params)
     : impl_(std::make_unique<Impl>(params)) {}
 
 OpenpilotLateralPlanner::~OpenpilotLateralPlanner() = default;
+
+void OpenpilotLateralPlanner::update_params(const K7SteeringParams &params) {
+  impl_->update_params(params);
+}
 
 LateralTarget OpenpilotLateralPlanner::update(const K230ModelState &model,
                                               const K7VehicleCanState &vehicle,

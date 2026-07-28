@@ -31,6 +31,52 @@ std::string format_text(const char *format, Args... args)
     return text;
 }
 
+const char *gear_text(int gear)
+{
+    switch (gear) {
+    case 0: return "P";
+    case 5: return "D";
+    case 6: return "N";
+    case 7: return "R";
+    case 8: return "S";
+    default: return "--";
+    }
+}
+
+std::string active_block_text(const OverlayHudState &hud)
+{
+    if (hud.controller_active) return "ACTIVE";
+
+    const std::string block = hud.active_block;
+    if (block.empty()) return hud.controller_engaged ? "READY" : "STANDBY";
+    if (block == "not_engaged") return "STANDBY";
+    if (block == "controller_disabled") return "CONTROL OFF";
+    if (block == "door_open") return "DOOR OPEN";
+    if (block == "esp_disabled") return "ESP OFF";
+    if (block == "esp_stale") return "ESP STALE";
+    if (block == "gear_not_drive") return "GEAR NOT D";
+    if (block == "lanechange_manual") return "MANUAL TURN";
+    if (block == "lateral_plan_invalid") return "PLAN INVALID";
+    if (block == "mdps_fault") return "MDPS FAULT";
+    if (block == "no_smart_mdps_low_speed") return "LOW SPEED";
+    if (block == "panda_controls_off") return "PANDA CTRL OFF";
+    if (block == "panda_not_ready") return "PANDA NOT READY";
+    if (block == "park_brake") return "PARK BRAKE";
+    if (block == "path_invalid") return "PATH INVALID";
+    if (block == "seatbelt_unlatched") return "SEATBELT";
+    if (block == "seeds_missing") return "CAN SEEDS";
+    if (block == "speed_invalid") return "SPEED INVALID";
+    if (block == "steering_angle_limit") return "ANGLE LIMIT";
+    if (block == "vehicle_state_stale") return "CAR STALE";
+    if (block == "yaw_rate_invalid") return "YAW INVALID";
+    if (block == "brake_error") return "BRAKE ERROR";
+    if (block == "control_stale") return "CONTROL STALE";
+
+    std::string label = block;
+    std::replace(label.begin(), label.end(), '_', ' ');
+    return label;
+}
+
 class BitmapHud {
 public:
     BitmapHud(cv::Mat &frame, int logical_width, int logical_height, bool rotate_landscape)
@@ -359,7 +405,9 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     const uint32_t calibration_color = !hud.calibration_available ? dim :
                                        (hud.calibration_status == 1 ? green :
                                         (hud.calibration_status == 2 ? red : yellow));
-    ui.box(right_box_x, 10, box_w, 72, cpu_color, true);
+    const uint32_t network_color = !hud.network_connected ? orange :
+        (hud.wifi_signal_dbm != 0 && hud.wifi_signal_dbm <= -75 ? yellow : green);
+    ui.box(right_box_x, 10, box_w, 80, cpu_color, true);
     ui.hud_text_left(right_x, 16,
                      format_text("CPU %.0F%% TEMP %.0FC", hud.cpu_percent, hud.cpu_temp_c),
                      2, cpu_color, col_w);
@@ -371,19 +419,75 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
                      format_text("HUD %.1F FPS MEM %.0F%%",
                                  hud.overlay_fps, hud.memory_percent),
                      1, dim, col_w);
+    ui.hud_text_left(right_x, 74,
+                     hud.network_connected
+                         ? (hud.wifi_signal_dbm != 0
+                                ? format_text("NET %s %s %dDBM",
+                                              hud.network_interface,
+                                              hud.network_ipv4,
+                                              hud.wifi_signal_dbm)
+                                : format_text("NET %s %s",
+                                              hud.network_interface,
+                                              hud.network_ipv4))
+                         : "NET OFFLINE",
+                     1, network_color, col_w);
 
-    ui.box(right_box_x, 90, box_w, 66, calibration_color, true);
-    ui.hud_text_left(right_x, 96,
+    constexpr int calibration_box_y = 98;
+    ui.box(right_box_x, calibration_box_y, box_w, 66, calibration_color, true);
+    ui.hud_text_left(right_x, calibration_box_y + 6,
                      format_text("CAL %s B %d", calibration_status,
                                  std::max(0, hud.calibration_valid_blocks)),
                      2, calibration_color, col_w);
-    ui.hud_text_left(right_x, 116,
+    ui.hud_text_left(right_x, calibration_box_y + 26,
                      format_text("R %.2F P %.2F", hud.calibration_roll_deg,
                                  hud.calibration_pitch_deg),
                      2, calibration_color, col_w);
-    ui.hud_text_left(right_x, 136,
+    ui.hud_text_left(right_x, calibration_box_y + 46,
                      format_text("Y %.2F DEG", hud.calibration_yaw_deg),
                      2, calibration_color, col_w);
+
+    constexpr int drive_box_y = 164;
+    constexpr int drive_box_h = 66;
+    const bool set_speed_valid = std::isfinite(hud.cruise_set_speed_kph) &&
+                                 hud.cruise_set_speed_kph > 0.0f;
+    ui.box(left_box_x, drive_box_y, box_w, drive_box_h, control_color);
+    ui.hud_text_left(left_x, drive_box_y + 6, "DRIVE", 1, dim, col_w);
+    ui.hud_text_left(left_x, drive_box_y + 24,
+                     set_speed_valid
+                         ? format_text("GEAR %s SET %.0F", gear_text(hud.gear),
+                                       hud.cruise_set_speed_kph)
+                         : format_text("GEAR %s SET --", gear_text(hud.gear)),
+                     2, control_color, col_w);
+    ui.hud_text_left(left_x, drive_box_y + 48,
+                     format_text("CRZ %s  %s",
+                                 hud.cruise_active ? "ON" : "OFF",
+                                 active_block_text(hud).c_str()),
+                     1, control_color, col_w);
+
+    ParsedLeadPoint lead;
+    float lead_probability = 0.0f;
+    const bool have_lead = output.valid &&
+                           output.leads.primary(0, 0.5f, &lead, &lead_probability);
+    const float relative_speed_kph =
+        have_lead ? (lead.velocity - hud.speed_kph / 3.6f) * 3.6f : 0.0f;
+    const uint32_t lead_color = !have_lead ? dim :
+        ((lead.x < 15.0f || relative_speed_kph < -20.0f) ? orange : blue);
+    constexpr int lead_box_y = 172;
+    ui.box(right_box_x, lead_box_y, box_w, drive_box_h, lead_color, true);
+    ui.hud_text_left(right_x, lead_box_y + 6, "LEAD", 1, dim, col_w);
+    if (have_lead) {
+        ui.hud_text_left(right_x, lead_box_y + 24,
+                         format_text("DIST %.0FM P %.0F%%",
+                                     std::max(0.0f, lead.x),
+                                     lead_probability * 100.0f),
+                         2, lead_color, col_w);
+        ui.hud_text_left(right_x, lead_box_y + 46,
+                         format_text("REL %+.0F KPH", relative_speed_kph),
+                         2, lead_color, col_w);
+    } else {
+        ui.hud_text_left(right_x, lead_box_y + 24, "NO LEAD", 2, dim, col_w);
+        ui.hud_text_left(right_x, lead_box_y + 46, "REL -- KPH", 2, dim, col_w);
+    }
 
     std::string alert;
     uint32_t alert_color = orange;
@@ -460,6 +564,8 @@ cv::Scalar openpilot_path_color(const OverlayHudState &hud)
 {
     if (!hud.controller_engaged)
         return bgra(255, 255, 255, 150);
+    if (!hud.controller_active)
+        return bgra(0, 210, 255, 160);
 
     const float output_scale = std::clamp(std::abs(hud.normalized_output) * 0.9f,
                                           0.0f, 1.0f);

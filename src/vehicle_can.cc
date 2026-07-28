@@ -17,6 +17,7 @@ bool expected_openpilot_k7_bus(uint32_t address, uint8_t bus) {
       return bus == kK7CameraBus;
     case kHyundaiClu11Address:
     case kHyundaiEsp12Address:
+    case kHyundaiScc11Address:
     case kHyundaiScc12Address:
     case kHyundaiTcs13Address:
     case kHyundaiTcs15Address:
@@ -99,6 +100,13 @@ Esp12Values decode_esp12(const std::array<uint8_t, 8> &data) {
   values.yaw_rate_valid = get_signal_le(data.data(), 54, 1) == 0;
   values.lat_accel_mps2 =
       static_cast<float>(get_signal_le(data.data(), 0, 11)) * 0.01f - 10.23f;
+  return values;
+}
+
+Scc11Values decode_scc11(const std::array<uint8_t, 8> &data) {
+  Scc11Values values;
+  values.main_mode = get_signal_le(data.data(), 0, 1) != 0;
+  values.set_speed = static_cast<float>(get_signal_le(data.data(), 8, 8));
   return values;
 }
 
@@ -202,6 +210,11 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     state->mdps_hard_fault = mdps.toi_fault || mdps.fail_state || mdps.sensor_error;
     state->steering_fault = state->mdps_error_count > kMdpsToiUnavailableFaultFrames;
     state->mdps12_time_s = now_s;
+  } else if (address == kHyundaiScc11Address && length >= 8) {
+    const Scc11Values scc = decode_scc11(data);
+    state->cruise_main = scc.main_mode;
+    state->cruise_set_speed = scc.set_speed;
+    state->scc11_time_s = now_s;
   } else if (address == kHyundaiScc12Address && length >= 8) {
     state->acc_mode = static_cast<int>(get_signal_le(data.data(), 13, 2));
     state->cruise_active = state->acc_mode != 0;
@@ -269,4 +282,9 @@ bool k7_vehicle_state_fresh(const K7VehicleCanState &state, double now_s,
 
 bool k7_seed_frames_ready(const K7VehicleCanState &state) {
   return state.has_lkas11_seed && state.has_clu11_seed && state.has_mdps12_seed;
+}
+
+float k7_cruise_set_speed_kph(const K7VehicleCanState &state) {
+  if (state.cruise_set_speed <= 0.0f || state.cruise_set_speed >= 255.0f) return 0.0f;
+  return state.cruise_set_speed * (state.speed_unit_mph ? 1.609344f : 1.0f);
 }

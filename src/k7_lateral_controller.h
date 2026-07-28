@@ -45,6 +45,10 @@ class K7LateralController {
 public:
   explicit K7LateralController(K7LateralControllerConfig config = K7LateralControllerConfig{});
 
+  // 제어 상태를 유지한 채 런타임 파라미터를 즉시 교체한다.
+  void update_params(const K7SteeringParams &steering_params,
+                     const K7DrivingParams &driving_params);
+
   // 차량 버튼/상태와 lane path를 바탕으로 LKAS 제어 결과와 CAN frame을 만든다.
   K7LateralControlResult update(const LateralPath &path,
                                 const LateralTarget &target,
@@ -95,6 +99,9 @@ private:
   // LKAS fault 회피를 위한 임시 cut-steer 상태를 갱신한다.
   bool update_cut_steer_state(bool active, const K7VehicleCanState &vehicle_state);
 
+  // 노이즈가 있는 운전자 조향 토크를 openpilot 방식으로 필터링한다.
+  bool update_steering_pressed(int driver_torque);
+
   // 운전자 조향 토크 감지 타이머를 openpilot K7 방식으로 갱신한다.
   void update_driver_steering_guard(const K7VehicleCanState &vehicle_state,
                                     float speed_mps);
@@ -136,6 +143,7 @@ private:
   int cut_steer_frames_ = 0;
   bool cut_steer_ = false;
   int lanechange_manual_timer_ = 0;
+  int steering_pressed_counter_ = 0;
   int driver_steering_torque_above_timer_ = 100;
   float steer_timer_apply_torque_ = 1.0f;
   bool lkas11_counter_valid_ = false;

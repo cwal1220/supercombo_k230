@@ -17,9 +17,14 @@ struct OverlayHudState {
     bool steering_fault = false;
     bool left_blinker = false;
     bool right_blinker = false;
+    bool cruise_active = false;
     bool services_healthy = false;
+    bool network_connected = false;
     unsigned panda_faults = 0;
+    int gear = 0;
+    int wifi_signal_dbm = 0;
     float speed_kph = 0.0f;
+    float cruise_set_speed_kph = 0.0f;
     float steering_angle_deg = 0.0f;
     float normalized_output = 0.0f;
     int desired_torque = 0;
@@ -37,6 +42,9 @@ struct OverlayHudState {
     float calibration_roll_deg = 0.0f;
     float calibration_pitch_deg = 0.0f;
     float calibration_yaw_deg = 0.0f;
+    char active_block[32] = {};
+    char network_interface[16] = {};
+    char network_ipv4[16] = {};
 };
 
 class OverlayRenderer {

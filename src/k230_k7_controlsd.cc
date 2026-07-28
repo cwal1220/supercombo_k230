@@ -7,6 +7,7 @@
 #include "vehicle_can.h"
 
 #include <signal.h>
+#include <sys/stat.h>
 
 #include <algorithm>
 #include <array>
@@ -23,13 +24,75 @@
 namespace {
 
 volatile sig_atomic_t g_stop = 0;
+volatile sig_atomic_t g_reload_params = 0;
 constexpr uint32_t kExpectedPandaSafetyModel = 24;
 constexpr uint32_t kExpectedPandaSafetyParam = 0;
 constexpr uint64_t kPandaStateTimeoutNs = 1100000000ULL;
 constexpr uint64_t kMaxCanRxAgeNs = 100000000ULL;
+constexpr int kParamPollIntervalMs = 100;
 
-void signal_handler(int) {
+void stop_signal_handler(int) {
   g_stop = 1;
+}
+
+void reload_signal_handler(int) {
+  g_reload_params = 1;
+}
+
+struct FileStamp {
+  bool valid = false;
+  unsigned long long device = 0;
+  unsigned long long inode = 0;
+  unsigned long long size = 0;
+  long long modified_sec = 0;
+  long long modified_nsec = 0;
+};
+
+bool operator!=(const FileStamp &left, const FileStamp &right) {
+  return left.valid != right.valid ||
+         left.device != right.device ||
+         left.inode != right.inode ||
+         left.size != right.size ||
+         left.modified_sec != right.modified_sec ||
+         left.modified_nsec != right.modified_nsec;
+}
+
+FileStamp file_stamp(const std::string &path) {
+  struct stat info = {};
+  FileStamp stamp;
+  if (stat(path.c_str(), &info) != 0) return stamp;
+  stamp.valid = true;
+  stamp.device = static_cast<unsigned long long>(info.st_dev);
+  stamp.inode = static_cast<unsigned long long>(info.st_ino);
+  stamp.size = static_cast<unsigned long long>(info.st_size);
+#if defined(__APPLE__)
+  stamp.modified_sec = static_cast<long long>(info.st_mtimespec.tv_sec);
+  stamp.modified_nsec = static_cast<long long>(info.st_mtimespec.tv_nsec);
+#else
+  stamp.modified_sec = static_cast<long long>(info.st_mtim.tv_sec);
+  stamp.modified_nsec = static_cast<long long>(info.st_mtim.tv_nsec);
+#endif
+  return stamp;
+}
+
+bool load_runtime_params(const std::string &steering_path,
+                         const std::string &driving_path,
+                         K7LateralControllerConfig *config,
+                         std::string *error) {
+  K7SteeringParams steering = config->steering_params;
+  K7DrivingParams driving = config->driving_params;
+  std::string load_error;
+  if (!load_k7_steering_params_json(steering_path, &steering, &load_error)) {
+    if (error) *error = "steering " + steering_path + ": " + load_error;
+    return false;
+  }
+  if (!load_k7_driving_params_json(driving_path, &driving, &load_error)) {
+    if (error) *error = "driving " + driving_path + ": " + load_error;
+    return false;
+  }
+  config->steering_params = steering;
+  config->driving_params = driving;
+  return true;
 }
 
 bool env_enabled(const char *name, bool default_value = false) {
@@ -99,7 +162,8 @@ float vehicle_speed_mps(const K7VehicleCanState &vehicle) {
 class LateralPlannerWorker {
 public:
   explicit LateralPlannerWorker(const K7SteeringParams &params)
-      : planner_(params), thread_(&LateralPlannerWorker::run, this) {}
+      : planner_(params), pending_params_(params),
+        thread_(&LateralPlannerWorker::run, this) {}
 
   ~LateralPlannerWorker() {
     {
@@ -126,6 +190,15 @@ public:
     condition_.notify_one();
   }
 
+  void update_params(const K7SteeringParams &params) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      pending_params_ = params;
+      params_pending_ = true;
+    }
+    condition_.notify_one();
+  }
+
   LateralTarget latest() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return latest_;
@@ -144,13 +217,28 @@ private:
   void run() {
     while (true) {
       Request request;
+      K7SteeringParams params;
+      bool has_request = false;
+      bool apply_params = false;
       {
         std::unique_lock<std::mutex> lock(mutex_);
-        condition_.wait(lock, [this] { return stop_ || pending_; });
+        condition_.wait(lock, [this] {
+          return stop_ || pending_ || params_pending_;
+        });
         if (stop_) return;
-        request = request_;
-        pending_ = false;
+        if (params_pending_) {
+          params = pending_params_;
+          params_pending_ = false;
+          apply_params = true;
+        }
+        if (pending_) {
+          request = request_;
+          pending_ = false;
+          has_request = true;
+        }
       }
+      if (apply_params) planner_.update_params(params);
+      if (!has_request) continue;
       const LateralTarget result = planner_.update(
           request.model, request.vehicle, request.v_ego,
           request.measured_curvature, request.active, request.output_scale);
@@ -165,8 +253,10 @@ private:
   mutable std::mutex mutex_;
   std::condition_variable condition_;
   Request request_;
+  K7SteeringParams pending_params_;
   LateralTarget latest_;
   bool pending_ = false;
+  bool params_pending_ = false;
   bool stop_ = false;
   std::thread thread_;
 };
@@ -174,8 +264,9 @@ private:
 }  // namespace
 
 int main() {
-  signal(SIGINT, signal_handler);
-  signal(SIGTERM, signal_handler);
+  signal(SIGINT, stop_signal_handler);
+  signal(SIGTERM, stop_signal_handler);
+  signal(SIGHUP, reload_signal_handler);
 
   try {
     K230CanQueue can_sub;
@@ -204,12 +295,8 @@ int main() {
     const std::string driving_path = driving_override && driving_override[0] != '\0'
         ? driving_override : k230_param_path("k7_yg_driving.json");
     std::string error;
-    if (!load_k7_steering_params_json(steering_path, &config.steering_params, &error)) {
-      throw std::runtime_error("steering params " + steering_path + ": " + error);
-    }
-    if (!load_k7_driving_params_json(driving_path, &config.driving_params, &error)) {
-      throw std::runtime_error("driving params " + driving_path + ": " + error);
-    }
+    if (!load_runtime_params(steering_path, driving_path, &config, &error))
+      throw std::runtime_error(error);
     std::fprintf(stderr,
                  "k230_k7_controlsd: params steering=%s driving=%s mdpsSpoof=%.1fkph\n",
                  steering_path.c_str(), driving_path.c_str(),
@@ -233,6 +320,11 @@ int main() {
     const auto start = Clock::now();
     auto next_tick = start;
     auto log_start = start;
+    auto next_param_check =
+        start + std::chrono::milliseconds(kParamPollIntervalMs);
+    FileStamp steering_stamp = file_stamp(steering_path);
+    FileStamp driving_stamp = file_stamp(driving_path);
+    unsigned param_generation = 1;
     double work_sum_us = 0.0;
     double work_max_us = 0.0;
     unsigned ticks = 0;
@@ -244,6 +336,37 @@ int main() {
       const auto work_start = Clock::now();
       const double now_s = std::chrono::duration<double>(work_start - start).count();
       const uint64_t now_ns = k230_now_ns();
+
+      const bool reload_requested = g_reload_params != 0;
+      if (reload_requested) g_reload_params = 0;
+      if (reload_requested || work_start >= next_param_check) {
+        next_param_check =
+            work_start + std::chrono::milliseconds(kParamPollIntervalMs);
+        const FileStamp current_steering_stamp = file_stamp(steering_path);
+        const FileStamp current_driving_stamp = file_stamp(driving_path);
+        if (reload_requested || current_steering_stamp != steering_stamp ||
+            current_driving_stamp != driving_stamp) {
+          K7LateralControllerConfig candidate = config;
+          if (load_runtime_params(steering_path, driving_path, &candidate, &error)) {
+            config.steering_params = candidate.steering_params;
+            config.driving_params = candidate.driving_params;
+            controller.update_params(config.steering_params, config.driving_params);
+            lateral_planner.update_params(config.steering_params);
+            ++param_generation;
+            std::fprintf(stderr,
+                         "k230_k7_controlsd: params reloaded generation=%u "
+                         "mdpsSpoof=%.1fkph\n",
+                         param_generation,
+                         config.driving_params.mdps_speed_spoof_kph);
+          } else {
+            std::fprintf(stderr,
+                         "k230_k7_controlsd: params reload rejected: %s\n",
+                         error.c_str());
+          }
+          steering_stamp = current_steering_stamp;
+          driving_stamp = current_driving_stamp;
+        }
+      }
 
       K230CanBatch can_batch;
       while (can_sub.pop(&can_batch)) {
@@ -302,7 +425,10 @@ int main() {
       control_state.steering_fault = vehicle.steering_fault ? 1U : 0U;
       control_state.left_blinker = vehicle.left_blinker ? 1U : 0U;
       control_state.right_blinker = vehicle.right_blinker ? 1U : 0U;
+      control_state.cruise_active = vehicle.cruise_active ? 1U : 0U;
+      control_state.gear = vehicle.gear;
       control_state.speed_kph = last_result.speed_kph;
+      control_state.cruise_set_speed_kph = k7_cruise_set_speed_kph(vehicle);
       control_state.steering_angle_deg = vehicle.steering_angle_deg;
       control_state.desired_curvature = last_result.desired_curvature;
       control_state.actual_curvature = last_result.actual_curvature;
@@ -339,7 +465,7 @@ int main() {
         std::fprintf(stderr,
                      "k230_k7_controlsd: hz=%.3f work_avg_us=%.1f work_max_us=%.1f "
                      "misses=%u can=%u generated=%u errors=%u txFull=%u rxStale=%u "
-                     "queue=%llu/%llu "
+                     "queue=%llu/%llu params=%u "
                      "engaged=%u active=%u "
                      "panda=%u/%u plan=%u mpc=%u desire=%d "
                      "torque=%d/%d driver=%d angle=%.2f "
@@ -350,6 +476,7 @@ int main() {
                      send_queue_full, stale_can_batches,
                      static_cast<unsigned long long>(sendcan_pub.depth()),
                      static_cast<unsigned long long>(can_sub.depth()),
+                     param_generation,
                      last_result.engaged ? 1 : 0, last_result.active ? 1 : 0,
                      panda_ready ? 1 : 0, panda_controls_allowed ? 1 : 0,
                      lateral_target.valid ? 1 : 0,

@@ -7,7 +7,10 @@
 #include "v4l2-drm.h"
 
 #include <drm/drm_fourcc.h>
+#include <arpa/inet.h>
+#include <ifaddrs.h>
 #include <linux/videodev2.h>
+#include <net/if.h>
 #include <signal.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -15,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -81,6 +85,7 @@ public:
         sample_cpu(&hud->cpu_percent);
         sample_memory(&hud->memory_percent);
         sample_temperature(&hud->cpu_temp_c);
+        sample_network(hud);
     }
 
 private:
@@ -164,6 +169,70 @@ private:
             if (value > 0.0f && value < 200.0f) maximum = std::max(maximum, value);
         }
         *temperature_c = maximum;
+    }
+
+    void sample_network(OverlayHudState *hud)
+    {
+        hud->network_connected = false;
+        hud->wifi_signal_dbm = 0;
+        hud->network_interface[0] = '\0';
+        hud->network_ipv4[0] = '\0';
+
+        ifaddrs *addresses = nullptr;
+        if (getifaddrs(&addresses) != 0) return;
+
+        int best_score = -1;
+        for (const ifaddrs *address = addresses; address; address = address->ifa_next) {
+            if (!address->ifa_addr || address->ifa_addr->sa_family != AF_INET) continue;
+            if ((address->ifa_flags & IFF_UP) == 0 ||
+                (address->ifa_flags & IFF_LOOPBACK) != 0) {
+                continue;
+            }
+
+            const char *name = address->ifa_name ? address->ifa_name : "";
+            const int score = std::strcmp(name, "wlan0") == 0 ? 3 :
+                              (std::strncmp(name, "wlan", 4) == 0 ? 2 : 1);
+            if (score <= best_score) continue;
+
+            char ipv4[INET_ADDRSTRLEN] = {};
+            const sockaddr_in *socket_address =
+                reinterpret_cast<const sockaddr_in *>(address->ifa_addr);
+            if (!inet_ntop(AF_INET, &socket_address->sin_addr,
+                           ipv4, sizeof(ipv4))) {
+                continue;
+            }
+
+            best_score = score;
+            hud->network_connected = true;
+            std::snprintf(hud->network_interface, sizeof(hud->network_interface),
+                          "%s", name);
+            std::snprintf(hud->network_ipv4, sizeof(hud->network_ipv4),
+                          "%s", ipv4);
+        }
+        freeifaddrs(addresses);
+
+        if (!hud->network_connected ||
+            std::strncmp(hud->network_interface, "wlan", 4) != 0) {
+            return;
+        }
+
+        FILE *file = std::fopen("/proc/net/wireless", "r");
+        if (!file) return;
+        char line[160];
+        while (std::fgets(line, sizeof(line), file)) {
+            char interface_name[16] = {};
+            unsigned status = 0;
+            float link = 0.0f;
+            float level = 0.0f;
+            float noise = 0.0f;
+            if (std::sscanf(line, " %15[^:]: %x %f %f %f",
+                            interface_name, &status, &link, &level, &noise) == 5 &&
+                std::strcmp(interface_name, hud->network_interface) == 0) {
+                hud->wifi_signal_dbm = static_cast<int>(std::lround(level));
+                break;
+            }
+        }
+        std::fclose(file);
     }
 
     uint64_t previous_total_ = 0;
@@ -440,12 +509,18 @@ private:
         hud_.steering_fault = control_fresh && latest_control_state_.steering_fault != 0;
         hud_.left_blinker = control_fresh && latest_control_state_.left_blinker != 0;
         hud_.right_blinker = control_fresh && latest_control_state_.right_blinker != 0;
+        hud_.cruise_active = control_fresh && latest_control_state_.cruise_active != 0;
+        hud_.gear = control_fresh ? latest_control_state_.gear : 0;
         hud_.speed_kph = control_fresh ? latest_control_state_.speed_kph : 0.0f;
+        hud_.cruise_set_speed_kph =
+            control_fresh ? latest_control_state_.cruise_set_speed_kph : 0.0f;
         hud_.steering_angle_deg = control_fresh ? latest_control_state_.steering_angle_deg : 0.0f;
         hud_.normalized_output = control_fresh ? latest_control_state_.normalized_output : 0.0f;
         hud_.desired_torque = control_fresh ? latest_control_state_.desired_torque : 0;
         hud_.apply_torque = control_fresh ? latest_control_state_.apply_torque : 0;
         hud_.driver_torque = control_fresh ? latest_control_state_.driver_torque : 0;
+        std::snprintf(hud_.active_block, sizeof(hud_.active_block), "%s",
+                      control_fresh ? latest_control_state_.active_block : "control_stale");
 
         hud_.calibration_available = model_fresh;
         hud_.calibration_status = latest_model_state_.calibration.status;

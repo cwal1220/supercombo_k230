@@ -353,6 +353,8 @@ bool load_k7_steering_params_json(const std::string &path,
     parse_optional_int(text, "steer_driver_allowance", 0, 300, &params->steer_driver_allowance);
     parse_optional_int(text, "steer_driver_multiplier", 0, 10, &params->steer_driver_multiplier);
     parse_optional_int(text, "steer_driver_factor", 0, 5, &params->steer_driver_factor);
+    parse_optional_int(text, "steering_pressed_threshold", 0, 500,
+                       &params->steering_pressed_threshold);
     parse_optional_bool(text, "variable_steer_max", &params->variable_steer_max);
     parse_optional_bool(text, "variable_steer_delta", &params->variable_steer_delta);
     parse_optional_int(text, "steer_max_base", 0, 384, &params->steer_max_base);

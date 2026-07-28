@@ -120,6 +120,26 @@ void verify_lca11() {
           "LCA11 vehicle-state update");
 }
 
+void verify_scc11() {
+  std::array<uint8_t, 8> bytes{};
+  bytes[0] = 1;
+  bytes[1] = 88;
+  const Scc11Values decoded = decode_scc11(bytes);
+  require(decoded.main_mode && std::fabs(decoded.set_speed - 88.0f) < 0.001f,
+          "SCC11 cruise state decoding");
+
+  K7VehicleCanState vehicle;
+  update_k7_vehicle_can_state(&vehicle, kHyundaiScc11Address, bytes,
+                              bytes.size(), kK7PowertrainBus, 1.0);
+  require(vehicle.cruise_main && std::fabs(vehicle.cruise_set_speed - 88.0f) < 0.001f,
+          "SCC11 vehicle-state update");
+  require(std::fabs(k7_cruise_set_speed_kph(vehicle) - 88.0f) < 0.001f,
+          "SCC11 metric set speed");
+  vehicle.speed_unit_mph = true;
+  require(std::fabs(k7_cruise_set_speed_kph(vehicle) - 141.622272f) < 0.001f,
+          "SCC11 imperial set speed conversion");
+}
+
 void verify_mdps_fault_filter() {
   K7VehicleCanState vehicle;
   std::array<uint8_t, 8> bytes{};
@@ -172,6 +192,103 @@ void verify_braking_does_not_disengage() {
       controller.update(replay_path(), replay_target(), vehicle, 1.01, 1);
   require(brake_pressed_result.active,
           "DriverBraking must not disengage lateral control");
+}
+
+void verify_large_angle_fault_avoidance() {
+  K7LateralControllerConfig config;
+  config.force_engaged = true;
+  config.driving_params.vehicle_state_timeout_ms = 2000;
+  K7LateralController controller(config);
+  K7VehicleCanState vehicle;
+  vehicle.has_lkas11_seed = true;
+  vehicle.has_clu11_seed = true;
+  vehicle.has_mdps12_seed = true;
+  vehicle.lkas11_time_s = 1.0;
+  vehicle.clu11_time_s = 1.0;
+  vehicle.sas11_time_s = 1.0;
+  vehicle.esp12_time_s = 1.0;
+  vehicle.mdps12_time_s = 1.0;
+  vehicle.tcs13_time_s = 1.0;
+  vehicle.tcs15_time_s = 1.0;
+  vehicle.e_ems11_time_s = 1.0;
+  vehicle.elect_gear_time_s = 1.0;
+  vehicle.cgw1_time_s = 1.0;
+  vehicle.cgw2_time_s = 1.0;
+  vehicle.gear = 5;
+  vehicle.cluster_speed = 72.0f;
+  vehicle.steering_angle_deg = 85.0f;
+
+  for (int frame = 0; frame < 89; ++frame) {
+    const auto result =
+        controller.update(replay_path(), replay_target(), vehicle,
+                          1.0 + frame * 0.01, frame);
+    require(result.active && !result.cut_steer_temp,
+            "large-angle control must remain requested before RK fault limit");
+  }
+
+  for (int frame = 89; frame < 91; ++frame) {
+    const auto result =
+        controller.update(replay_path(), replay_target(), vehicle,
+                          1.0 + frame * 0.01, frame);
+    require(result.active && result.cut_steer_temp && !result.frames.empty(),
+            "large-angle fault avoidance must cut request without disengaging");
+    const HyundaiLkas11Values lkas = decode_lkas11(result.frames.front().data);
+    require(!lkas.steer_req && lkas.toi_fault,
+            "fault-avoidance LKAS11 request and temporary-fault bits");
+    require(lkas.steer_torque == result.apply_torque &&
+                std::abs(result.apply_torque) > 0,
+            "fault avoidance must preserve steering torque");
+  }
+
+  const auto resumed =
+      controller.update(replay_path(), replay_target(), vehicle, 1.91, 91);
+  require(resumed.active && !resumed.cut_steer_temp && !resumed.frames.empty(),
+          "large-angle steering request must resume after two frames");
+  const HyundaiLkas11Values lkas = decode_lkas11(resumed.frames.front().data);
+  require(lkas.steer_req && !lkas.toi_fault,
+          "resumed LKAS11 request and temporary-fault bits");
+}
+
+void verify_runtime_params_apply_immediately() {
+  K7LateralControllerConfig config;
+  config.force_engaged = true;
+  K7LateralController controller(config);
+  K7VehicleCanState vehicle;
+  vehicle.has_lkas11_seed = true;
+  vehicle.has_clu11_seed = true;
+  vehicle.has_mdps12_seed = true;
+  vehicle.lkas11_time_s = 1.0;
+  vehicle.clu11_time_s = 1.0;
+  vehicle.sas11_time_s = 1.0;
+  vehicle.esp12_time_s = 1.0;
+  vehicle.mdps12_time_s = 1.0;
+  vehicle.tcs13_time_s = 1.0;
+  vehicle.tcs15_time_s = 1.0;
+  vehicle.e_ems11_time_s = 1.0;
+  vehicle.elect_gear_time_s = 1.0;
+  vehicle.cgw1_time_s = 1.0;
+  vehicle.cgw2_time_s = 1.0;
+  vehicle.gear = 5;
+  vehicle.cluster_speed = 72.0f;
+
+  const auto active =
+      controller.update(replay_path(), replay_target(), vehicle, 1.0, 0);
+  require(active.active, "runtime parameter test must start active");
+
+  K7SteeringParams steering = config.steering_params;
+  steering.enabled = false;
+  controller.update_params(steering, config.driving_params);
+  const auto disabled =
+      controller.update(replay_path(), replay_target(), vehicle, 1.01, 1);
+  require(!disabled.active && disabled.active_block == "controller_disabled",
+          "runtime steering parameters must apply on the next control tick");
+
+  steering.enabled = true;
+  controller.update_params(steering, config.driving_params);
+  const auto resumed =
+      controller.update(replay_path(), replay_target(), vehicle, 1.02, 2);
+  require(resumed.active,
+          "runtime parameter update must preserve controller operation");
 }
 
 void verify_lkas_hud_state_stability() {
@@ -319,8 +436,11 @@ int main(int argc, char **argv) {
   try {
     verify_mdps_speed_spoof();
     verify_lca11();
+    verify_scc11();
     verify_mdps_fault_filter();
     verify_braking_does_not_disengage();
+    verify_large_angle_fault_avoidance();
+    verify_runtime_params_apply_immediately();
     verify_lkas_hud_state_stability();
     verify_panda_gate_and_handoff();
     verify_model_path_adapter();

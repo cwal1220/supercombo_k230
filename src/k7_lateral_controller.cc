@@ -8,6 +8,7 @@ namespace {
 constexpr int kButtonSetDecel = 2;
 constexpr int kButtonCancel = 4;
 constexpr int kGearDrive = 5;
+constexpr int kSteeringPressedMinCount = 5;
 constexpr float kSmoothSteerRecoverStep = 0.005f;
 constexpr float kDesiredCurvatureLimit = 0.1f;
 constexpr float kGravity = 9.8f;
@@ -70,6 +71,15 @@ K7LateralController::K7LateralController(K7LateralControllerConfig config)
   config_.can_config.mdps_speed_spoof_kph = config_.driving_params.mdps_speed_spoof_kph;
 }
 
+// 제어 상태를 유지한 채 런타임 파라미터를 즉시 교체한다.
+void K7LateralController::update_params(
+    const K7SteeringParams &steering_params,
+    const K7DrivingParams &driving_params) {
+  config_.steering_params = steering_params;
+  config_.driving_params = driving_params;
+  config_.can_config.mdps_speed_spoof_kph = driving_params.mdps_speed_spoof_kph;
+}
+
 // 차량 버튼/상태와 lane path를 바탕으로 LKAS 제어 결과와 CAN frame을 만든다.
 K7LateralControlResult K7LateralController::update(const LateralPath &path,
                                                    const LateralTarget &target,
@@ -110,8 +120,7 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
   result.active = result.active_block.empty();
   result.cut_steer_temp = update_cut_steer_state(result.active, vehicle_state);
 
-  const bool steering_pressed =
-      std::abs(vehicle_state.driver_torque) > config_.steering_params.steer_driver_allowance;
+  const bool steering_pressed = update_steering_pressed(vehicle_state.driver_torque);
   const bool driver_guard_active =
       driver_steering_torque_above_timer_ >= 0 && driver_steering_torque_above_timer_ < 100;
   const EffectiveSteerLimits effective_limits = config_.steering_params.effective_steer_limits(
@@ -188,6 +197,7 @@ void K7LateralController::reset() {
   engaged_ = false;
   last_button_ = 0;
   last_disengage_s_ = -1000.0;
+  steering_pressed_counter_ = 0;
   reset_control_state();
   lkas11_counter_valid_ = false;
   lkas11_counter_ = 0;
@@ -255,7 +265,7 @@ bool K7LateralController::update_cut_steer_state(
     bool active, const K7VehicleCanState &vehicle_state) {
   const K7SteeringParams &params = config_.steering_params;
   if (params.avoid_lkas_fault_enabled) {
-    if (active && std::fabs(vehicle_state.steering_angle_deg) >
+    if (active && std::fabs(vehicle_state.steering_angle_deg) >=
                       params.avoid_lkas_fault_max_angle_deg) {
       ++angle_limit_counter_;
     } else {
@@ -282,6 +292,16 @@ bool K7LateralController::update_cut_steer_state(
   angle_limit_counter_ = 0;
   ++cut_steer_frames_;
   return true;
+}
+
+// 노이즈가 있는 운전자 조향 토크를 openpilot 방식으로 필터링한다.
+bool K7LateralController::update_steering_pressed(int driver_torque) {
+  const bool pressed =
+      std::abs(driver_torque) > config_.steering_params.steering_pressed_threshold;
+  steering_pressed_counter_ += pressed ? 1 : -1;
+  steering_pressed_counter_ =
+      std::clamp(steering_pressed_counter_, 0, kSteeringPressedMinCount * 2 + 1);
+  return steering_pressed_counter_ > kSteeringPressedMinCount;
 }
 
 // 운전자 조향 토크 감지 타이머를 openpilot K7 방식으로 갱신한다.

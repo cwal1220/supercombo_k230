@@ -5,6 +5,7 @@
 
 constexpr uint32_t kHyundaiSas11Address = 688;       // 0x2b0
 constexpr uint32_t kHyundaiEsp12Address = 544;       // 0x220
+constexpr uint32_t kHyundaiScc11Address = 1056;      // 0x420
 constexpr uint32_t kHyundaiScc12Address = 1057;      // 0x421
 constexpr uint32_t kHyundaiTcs13Address = 916;       // 0x394
 constexpr uint32_t kHyundaiTcs15Address = 1287;      // 0x507
@@ -41,6 +42,11 @@ struct Esp12Values {
   float yaw_rate_rad_s = 0.0f;
   bool yaw_rate_valid = true;
   float lat_accel_mps2 = 0.0f;
+};
+
+struct Scc11Values {
+  bool main_mode = false;
+  float set_speed = 0.0f;
 };
 
 struct Tcs13Values {
@@ -99,6 +105,7 @@ struct K7VehicleCanState {
   double clu11_time_s = -1.0;
   double sas11_time_s = -1.0;
   double esp12_time_s = -1.0;
+  double scc11_time_s = -1.0;
   double mdps12_time_s = -1.0;
   double tcs13_time_s = -1.0;
   double tcs15_time_s = -1.0;
@@ -148,7 +155,9 @@ struct K7VehicleCanState {
   bool left_blindspot = false;
   bool right_blindspot = false;
   int acc_mode = 0;
+  bool cruise_main = false;
   bool cruise_active = false;
+  float cruise_set_speed = 0.0f;
 };
 
 // Panda safety의 MDPS12 driver torque scale과 같은 값을 계산한다.
@@ -162,6 +171,9 @@ Mdps12Values decode_mdps12(const std::array<uint8_t, 8> &data);
 
 // K7 ESP12 yaw/lateral acceleration 값을 해석한다.
 Esp12Values decode_esp12(const std::array<uint8_t, 8> &data);
+
+// K7 SCC11 cruise main mode와 cluster-unit 설정 속도를 해석한다.
+Scc11Values decode_scc11(const std::array<uint8_t, 8> &data);
 
 // K7 TCS13 brake 관련 상태를 해석한다.
 Tcs13Values decode_tcs13(const std::array<uint8_t, 8> &data);
@@ -196,3 +208,6 @@ bool k7_vehicle_state_fresh(const K7VehicleCanState &state, double now_s,
 
 // LKAS/CLU/MDPS seed frame이 모두 준비됐는지 확인한다.
 bool k7_seed_frames_ready(const K7VehicleCanState &state);
+
+// SCC11 설정 속도를 CLU11 단위 설정에 따라 km/h로 변환한다.
+float k7_cruise_set_speed_kph(const K7VehicleCanState &state);

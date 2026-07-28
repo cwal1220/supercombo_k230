@@ -1,0 +1,1127 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import signal
+import stat
+import tempfile
+import threading
+from pathlib import Path
+from typing import Any, Callable, Dict
+
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+
+
+CONTROLSD_NAME = "k230_k7_controlsd"
+GROUP_ENV = {
+    "steering": ("K230_K7_STEERING_PARAMS", "k7_yg_steering.json"),
+    "driving": ("K230_K7_DRIVING_PARAMS", "k7_yg_driving.json"),
+}
+
+
+def param_meta(
+    label: str,
+    section: str,
+    unit: str,
+    step: float,
+    minimum: float,
+    maximum: float,
+    description: str,
+    increase: str,
+    decrease: str,
+    *,
+    quick: bool = False,
+) -> Dict[str, Any]:
+    return {
+        "label": label,
+        "section": section,
+        "unit": unit,
+        "step": step,
+        "min": minimum,
+        "max": maximum,
+        "description": description,
+        "increase": increase,
+        "decrease": decrease,
+        "quick": quick,
+    }
+
+
+PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
+    "steering": {
+        "enabled": {
+            "label": "자동 조향",
+            "section": "기본 토크 제한",
+            "description": "K7 조향 컨트롤러 전체를 켜거나 끕니다.",
+            "increase": "켜면 모델 경로를 따라 조향 토크를 생성합니다.",
+            "decrease": "끄면 조향 토크를 생성하지 않습니다.",
+        },
+        "steer_max": param_meta(
+            "최대 조향 토크", "기본 토크 제한", "CAN torque", 5, 0, 384,
+            "가변 토크 제한과 fault 회피에 사용하는 전체 토크 상한입니다.",
+            "강한 커브에서 더 큰 토크를 허용합니다.",
+            "최대 조향 힘이 줄어들어 급커브 추종이 약해질 수 있습니다.",
+        ),
+        "steer_delta_up": param_meta(
+            "토크 증가 속도", "기본 토크 제한", "torque/frame", 1, 0, 20,
+            "가변 제한에서 한 제어 주기마다 토크가 증가할 수 있는 양입니다.",
+            "핸들이 목표 토크에 더 빠르게 도달합니다.",
+            "조향 반응이 부드러워지지만 커브 진입이 늦을 수 있습니다.",
+        ),
+        "steer_delta_down": param_meta(
+            "토크 감소 속도", "기본 토크 제한", "torque/frame", 1, 0, 30,
+            "가변 제한에서 한 제어 주기마다 토크가 감소할 수 있는 양입니다.",
+            "커브가 끝날 때 토크를 더 빨리 풉니다.",
+            "토크가 더 천천히 풀려 조향이 부드럽지만 잔류할 수 있습니다.",
+        ),
+        "steer_driver_allowance": param_meta(
+            "운전자 토크 여유", "운전자 개입", "MDPS raw", 5, 0, 300,
+            "운전자 조향 토크 제한 계산에서 허용하는 기본 여유입니다.",
+            "운전자 입력 중에도 자동 조향 토크가 더 오래 유지됩니다.",
+            "운전자 입력에 자동 조향이 더 빨리 양보합니다.",
+        ),
+        "steer_driver_multiplier": param_meta(
+            "운전자 토크 배율", "운전자 개입", "배", 1, 0, 10,
+            "운전자 토크가 허용 자동 조향 토크에 미치는 배율입니다.",
+            "운전자 입력이 토크 제한에 더 강하게 반영됩니다.",
+            "운전자 입력에 따른 토크 제한 변화가 작아집니다.",
+        ),
+        "steer_driver_factor": param_meta(
+            "운전자 토크 계수", "운전자 개입", "배", 1, 0, 5,
+            "MDPS에서 읽은 운전자 토크에 적용하는 계수입니다.",
+            "같은 핸들 입력을 더 큰 운전자 개입으로 판단합니다.",
+            "같은 핸들 입력을 더 작게 판단합니다.",
+        ),
+        "steering_pressed_threshold": param_meta(
+            "운전자 조향 감지값", "운전자 개입", "MDPS raw", 10, 0, 500,
+            "PID 적분을 멈추는 운전자 조향 토크 기준입니다.",
+            "더 강하게 핸들을 잡아야 운전자 개입으로 판단합니다.",
+            "작은 핸들 입력도 더 빨리 운전자 개입으로 판단합니다.",
+        ),
+        "variable_steer_max": {
+            "label": "속도별 최대 토크",
+            "section": "속도별 토크 제한",
+            "description": "차량 속도에 따라 최대 토크를 보간합니다.",
+            "increase": "켜면 30~100 km/h에서 primary와 base 값을 보간합니다.",
+            "decrease": "끄면 base 최대 토크를 고정 사용합니다.",
+        },
+        "variable_steer_delta": {
+            "label": "속도별 토크 변화량",
+            "section": "속도별 토크 제한",
+            "description": "차량 속도에 따라 토크 증감 속도를 보간합니다.",
+            "increase": "켜면 속도에 따라 primary와 base 변화량을 보간합니다.",
+            "decrease": "끄면 base 변화량을 고정 사용합니다.",
+        },
+        "steer_max_base": param_meta(
+            "주행 최대 조향 토크", "빠른 조향 튜닝", "CAN torque", 5, 0, 384,
+            "일반 주행에서 실제 사용하는 최대 조향 토크입니다.",
+            "급커브에서 더 강한 조향을 허용합니다.",
+            "조향 힘을 제한해 급커브 추종량이 줄어듭니다.",
+            quick=True,
+        ),
+        "steer_delta_up_base": param_meta(
+            "주행 토크 반응 속도", "빠른 조향 튜닝", "torque/frame", 1, 0, 20,
+            "일반 주행에서 100 Hz 주기마다 토크를 올리는 최대량입니다.",
+            "커브 진입 시 핸들이 더 빠르게 반응합니다.",
+            "핸들 반응은 부드러워지지만 커브 진입이 늦을 수 있습니다.",
+            quick=True,
+        ),
+        "steer_delta_down_base": param_meta(
+            "주행 토크 해제 속도", "빠른 조향 튜닝", "torque/frame", 1, 0, 30,
+            "일반 주행에서 100 Hz 주기마다 토크를 내리는 최대량입니다.",
+            "커브 종료 시 토크가 더 빠르게 풀립니다.",
+            "토크가 천천히 풀려 움직임이 부드럽지만 잔류할 수 있습니다.",
+            quick=True,
+        ),
+        "torque_max_lat_accel_raw": param_meta(
+            "토크 기준 횡가속도", "토크 컨트롤러", "0.1 m/s²", 1, 1, 80,
+            "토크 PID 이득을 정규화하는 최대 횡가속도 기준입니다.",
+            "같은 raw 이득의 실제 PID 반응이 약해집니다.",
+            "같은 raw 이득의 실제 PID 반응이 강해집니다.",
+        ),
+        "torque_kp_raw": param_meta(
+            "비례 이득 Kp", "토크 컨트롤러", "raw", 1, 0, 100,
+            "현재 횡가속도 오차에 바로 반응하는 비례 이득입니다.",
+            "경로 오차를 더 빠르고 강하게 보정하지만 흔들림이 늘 수 있습니다.",
+            "반응이 부드러워지지만 경로 오차 회복이 느려질 수 있습니다.",
+            quick=True,
+        ),
+        "torque_kf_raw": param_meta(
+            "선행 보상 Kf", "토크 컨트롤러", "raw", 1, 0, 100,
+            "목표 횡가속도에 미리 더하는 feed-forward 이득입니다.",
+            "커브에서 기본 조향 토크가 커집니다.",
+            "커브에서 선행 조향 토크가 작아집니다.",
+            quick=True,
+        ),
+        "torque_ki_raw": param_meta(
+            "적분 이득 Ki", "토크 컨트롤러", "raw", 1, 0, 100,
+            "지속되는 횡가속도 오차를 누적해 없애는 적분 이득입니다.",
+            "지속 오차를 빨리 없애지만 오버슈트가 늘 수 있습니다.",
+            "누적 보정이 느려져 일정한 편향이 오래 남을 수 있습니다.",
+            quick=True,
+        ),
+        "torque_friction_raw": param_meta(
+            "조향 마찰 보상", "토크 컨트롤러", "0.001 m/s²", 5, 0, 300,
+            "조향계 마찰을 넘기 위해 방향 전환 시 더하는 보상입니다.",
+            "작은 커브에도 핸들이 더 즉각 움직이지만 좌우 튐이 생길 수 있습니다.",
+            "미세 조향이 부드러워지지만 dead zone이 커질 수 있습니다.",
+            quick=True,
+        ),
+        "torque_use_angle": {
+            "label": "조향각 기반 곡률",
+            "section": "토크 컨트롤러",
+            "description": "실제 곡률 계산에 조향각 센서를 우선 사용합니다.",
+            "increase": "켜면 조향각 기반 곡률을 사용합니다.",
+            "decrease": "끄면 유효한 ESP yaw-rate와 속도별로 혼합합니다.",
+        },
+        "torque_angle_deadzone_raw": param_meta(
+            "조향각 오차 무시 범위", "토크 컨트롤러", "0.1°", 1, 0, 50,
+            "조향각 기반 오차에서 무시하는 작은 구간입니다.",
+            "미세 오차에 덜 반응해 핸들 떨림이 줄 수 있습니다.",
+            "작은 경로 오차에도 더 민감하게 반응합니다.",
+        ),
+        "torque_output_sign": param_meta(
+            "토크 출력 방향", "고정 차량 설정", "부호", 2, -1, 1,
+            "K7 YG HEV의 조향 토크 방향입니다. 정상값은 -1입니다.",
+            "1로 바뀌면 조향 방향이 반전됩니다.",
+            "-1로 바뀌면 K7 기준 정상 조향 방향이 됩니다.",
+        ),
+        "smooth_steer_method": param_meta(
+            "Smooth steer 모드", "Smooth steer", "mode", 1, 0, 1,
+            "운전자 입력과 큰 조향각에서 토크를 줄이는 방식을 선택합니다.",
+            "1이면 각도 기반 smooth steer를 사용합니다.",
+            "0이면 일반 운전자 토크 fade를 사용합니다.",
+        ),
+        "smooth_max_steering_angle_deg": param_meta(
+            "Smooth steer 시작 각도", "Smooth steer", "°", 5, 0, 180,
+            "Smooth steer가 큰 조향각으로 판단하는 기준입니다.",
+            "더 큰 핸들 각도까지 토크 감소를 늦춥니다.",
+            "더 작은 핸들 각도부터 토크를 줄입니다.",
+        ),
+        "smooth_max_driver_angle_wait": param_meta(
+            "큰 각도 운전자 감쇠", "Smooth steer", "ratio/frame", 0.001, 0, 1,
+            "큰 조향각에서 운전자 입력이 있을 때 프레임마다 줄이는 토크 비율입니다.",
+            "운전자 개입 시 토크를 더 빨리 줄입니다.",
+            "운전자 개입 시 토크를 더 천천히 줄입니다.",
+        ),
+        "smooth_max_steer_angle_wait": param_meta(
+            "큰 각도 자동 감쇠", "Smooth steer", "ratio/frame", 0.001, 0, 1,
+            "큰 조향각에서 운전자 입력이 없을 때 프레임마다 줄이는 토크 비율입니다.",
+            "큰 조향각의 자동 토크를 더 빨리 줄입니다.",
+            "큰 조향각의 자동 토크를 더 오래 유지합니다.",
+        ),
+        "smooth_driver_angle_wait": param_meta(
+            "일반 각도 운전자 감쇠", "Smooth steer", "ratio/frame", 0.001, 0, 1,
+            "일반 조향각에서 운전자 입력이 있을 때 프레임마다 줄이는 토크 비율입니다.",
+            "운전자 입력에 자동 조향이 더 빨리 양보합니다.",
+            "자동 조향 토크를 더 오래 유지합니다.",
+        ),
+        "steer_ratio": param_meta(
+            "조향비", "차량 모델", "ratio", 0.1, 8, 25,
+            "핸들 조향각과 전륜 조향각 사이의 차량 조향비입니다.",
+            "같은 핸들 각도를 더 작은 전륜 조향으로 추정합니다.",
+            "같은 핸들 각도를 더 큰 전륜 조향으로 추정합니다.",
+        ),
+        "tire_stiffness_factor": param_meta(
+            "타이어 횡강성", "차량 모델", "배", 0.05, 0.2, 2,
+            "차량 모델의 기준 타이어 횡강성에 곱하는 보정값입니다.",
+            "타이어가 횡력에 더 단단하게 반응한다고 계산합니다.",
+            "타이어가 더 유연하게 반응한다고 계산합니다.",
+        ),
+        "steer_actuator_delay": param_meta(
+            "조향 반응 지연", "빠른 조향 튜닝", "초", 0.01, 0.01, 1,
+            "현재 조향 명령이 차량에 반영되기까지의 예측 지연입니다.",
+            "경로를 더 앞에서 읽어 커브 진입을 선행하지만 과하면 오버슈트할 수 있습니다.",
+            "조향 선행량이 줄어 커브 반응이 늦어질 수 있습니다.",
+            quick=True,
+        ),
+        "max_steering_angle_deg": param_meta(
+            "최대 자동 조향각", "LKAS fault 보호", "°", 5, 0, 360,
+            "fault 회피 모드가 꺼졌을 때 자동 조향을 허용하는 절대 각도입니다.",
+            "더 큰 핸들 각도까지 자동 조향을 허용합니다.",
+            "더 이른 조향각에서 자동 조향을 제한합니다.",
+        ),
+        "avoid_lkas_fault_enabled": {
+            "label": "LKAS fault 회피",
+            "section": "LKAS fault 보호",
+            "description": "큰 조향각이 지속될 때 steer request를 잠시 끊어 fault를 회피합니다.",
+            "increase": "켜면 K7용 request pulse 회피 로직을 사용합니다.",
+            "decrease": "끄면 큰 조향각에서도 request를 계속 유지합니다.",
+        },
+        "avoid_lkas_fault_max_angle_deg": param_meta(
+            "Fault 감시 조향각", "LKAS fault 보호", "°", 1, 1, 180,
+            "LKAS fault 회피 카운터를 시작하는 절대 조향각입니다.",
+            "더 큰 핸들 각도에서 회피 동작을 시작합니다.",
+            "더 작은 핸들 각도부터 회피 동작을 준비합니다.",
+        ),
+        "avoid_lkas_fault_max_frames": param_meta(
+            "Fault 허용 프레임", "LKAS fault 보호", "frame", 1, 0, 300,
+            "큰 조향각에서 request를 유지할 수 있는 최대 100 Hz 프레임 수입니다.",
+            "request를 더 오래 유지한 뒤 잠시 끊습니다.",
+            "request를 더 일찍 끊어 fault를 회피합니다.",
+        ),
+        "avoid_lkas_fault_beyond": {
+            "label": "Fault 구간 확장 토크",
+            "section": "LKAS fault 보호",
+            "description": "저속·큰 조향각 fault 회피 구간에서 primary 토크 제한을 사용합니다.",
+            "increase": "켜면 해당 구간에서 확장 제한을 사용합니다.",
+            "decrease": "끄면 일반 base 토크 제한을 유지합니다.",
+        },
+        "no_smart_mdps": {
+            "label": "비 Smart MDPS 모드",
+            "section": "고정 차량 설정",
+            "description": "최소 조향 속도 아래에서 제어 전체를 차단하는 호환 모드입니다.",
+            "increase": "켜면 저속에서 제어를 차단합니다.",
+            "decrease": "끄면 K7 Smart MDPS 동작을 유지합니다.",
+        },
+        "turn_steering_disable": {
+            "label": "저속 방향지시등 조향 차단",
+            "section": "운전자 개입",
+            "description": "저속에서 방향지시등을 켰을 때 자동 조향을 잠시 차단합니다.",
+            "increase": "켜면 설정 속도 아래에서 차선 변경 조향을 운전자에게 넘깁니다.",
+            "decrease": "끄면 방향지시등 중에도 desire 경로를 따라 자동 조향합니다.",
+        },
+        "ldws_car_fix": {
+            "label": "LDWS 차량 보정",
+            "section": "고정 차량 설정",
+            "description": "LKAS11 생성 시 차량별 LDWS 보정 플래그를 사용합니다.",
+            "increase": "켜면 별도 LDWS 보정 플래그를 적용합니다.",
+            "decrease": "끄면 K7 기본 LKAS11 구성을 사용합니다.",
+        },
+        "angle_offset_deg": param_meta(
+            "직진 조향각 오프셋", "차량 중심 보정", "°", 0.1, -10, 10,
+            "직진 상태의 조향각 센서 편차를 실제 곡률 계산 전에 뺍니다.",
+            "현재 센서 각도를 더 작게 보정합니다.",
+            "현재 센서 각도를 더 크게 보정합니다.",
+            quick=True,
+        ),
+        "roll_rad": param_meta(
+            "차량 Roll 보정", "차량 모델", "rad", 0.001, -0.2, 0.2,
+            "도로 기울기 또는 차량 roll이 만드는 횡가속도를 보정합니다.",
+            "우측 방향 중력 보정량이 커집니다.",
+            "좌측 방향 중력 보정량이 커집니다.",
+        ),
+        "mass_kg": param_meta(
+            "차량 질량", "차량 모델", "kg", 10, 1000, 2600,
+            "차량 모델과 타이어 횡강성 계산에 사용하는 질량입니다.",
+            "차량이 더 무겁다고 계산합니다.",
+            "차량이 더 가볍다고 계산합니다.",
+        ),
+        "wheelbase_m": param_meta(
+            "축거", "차량 모델", "m", 0.01, 2, 3.5,
+            "전륜과 후륜 사이 거리입니다.",
+            "같은 곡률에 더 큰 조향각이 필요하다고 계산합니다.",
+            "같은 곡률에 더 작은 조향각이 필요하다고 계산합니다.",
+        ),
+        "center_to_front_ratio": param_meta(
+            "전축 무게중심 비율", "차량 모델", "ratio", 0.01, 0.2, 0.7,
+            "무게중심에서 전축까지 거리를 축거 비율로 나타냅니다.",
+            "무게중심을 후방 쪽으로 계산합니다.",
+            "무게중심을 전방 쪽으로 계산합니다.",
+        ),
+        "steer_ratio_rear": param_meta(
+            "후륜 조향비", "고정 차량 설정", "ratio", 0.01, -0.5, 0.5,
+            "후륜 조향 차량의 곡률 보정값입니다. K7 정상값은 0입니다.",
+            "후륜 조향의 양의 보정량이 커집니다.",
+            "후륜 조향의 음의 보정량이 커집니다.",
+        ),
+        "camera_offset_m": param_meta(
+            "카메라 좌우 위치", "차량 중심 보정", "m", 0.01, -1, 1,
+            "차량 중심에 대한 카메라 위치를 차선 검출선에 보정합니다.",
+            "목표 차선 중심이 차량 기준 왼쪽으로 이동합니다.",
+            "목표 차선 중심이 차량 기준 오른쪽으로 이동합니다.",
+            quick=True,
+        ),
+        "path_offset_m": param_meta(
+            "주행 경로 좌우 보정", "차량 중심 보정", "m", 0.01, -1, 1,
+            "최종 모델 주행 경로 전체를 좌우로 평행 이동합니다.",
+            "목표 주행 위치가 차량 기준 왼쪽으로 이동합니다.",
+            "목표 주행 위치가 차량 기준 오른쪽으로 이동합니다.",
+            quick=True,
+        ),
+        "invert_steer": {
+            "label": "목표 곡률 반전",
+            "section": "고정 차량 설정",
+            "description": "모델이 만든 목표 곡률의 좌우 부호를 반전합니다.",
+            "increase": "켜면 좌우 조향 방향이 완전히 반전됩니다.",
+            "decrease": "끄면 K7의 정상 곡률 방향을 사용합니다.",
+        },
+        "min_steer_speed_mps": param_meta(
+            "최소 자동 조향 속도", "기본 토크 제한", "m/s", 0.1, 0, 5,
+            "이 속도 미만에서 토크 컨트롤러 출력을 0으로 만듭니다.",
+            "자동 조향이 시작되는 최소 속도가 높아집니다.",
+            "더 낮은 속도에서도 자동 조향을 허용합니다.",
+        ),
+    },
+    "driving": {
+        "model_timeout_ms": param_meta(
+            "모델 경로 유효 시간", "데이터 상태", "ms", 50, 50, 2000,
+            "마지막 모델 경로를 유효하다고 인정하는 최대 시간입니다.",
+            "모델 갱신이 늦어도 기존 경로를 더 오래 사용합니다.",
+            "모델 정지 시 더 빨리 조향을 차단합니다.",
+        ),
+        "vehicle_state_timeout_ms": param_meta(
+            "차량 상태 유효 시간", "데이터 상태", "ms", 50, 50, 2000,
+            "CAN 차량 상태와 yaw-rate를 유효하다고 인정하는 최대 시간입니다.",
+            "CAN 지연을 더 오래 허용하지만 오래된 상태를 쓸 수 있습니다.",
+            "CAN 갱신이 멈추면 더 빨리 제어를 차단합니다.",
+        ),
+        "inactive_release_ms": param_meta(
+            "Disengage 토크 해제 시간", "상태와 CAN", "ms", 100, 0, 5000,
+            "Disengage 후 순정 LKAS에 넘기기 전 0 토크 프레임을 유지하는 시간입니다.",
+            "0 토크 handoff를 더 오래 유지합니다.",
+            "순정 LKAS로 더 빨리 제어권을 넘깁니다.",
+        ),
+        "mdps_speed_spoof_kph": param_meta(
+            "MDPS 위조 속도", "고정 차량 설정", "km/h", 1, 30, 100,
+            "K7 MDPS가 저속에서도 LKAS 조향을 허용하도록 보내는 속도입니다.",
+            "MDPS에 더 높은 차량 속도로 보냅니다.",
+            "MDPS에 더 낮은 차량 속도로 보냅니다. K7 기준은 60 km/h입니다.",
+        ),
+        "lane_change_min_speed_kph": param_meta(
+            "저속 보호 기준", "운전자 개입", "km/h", 1, 0, 80,
+            "운전자 토크 보호와 저속 방향지시등 조향 차단의 속도 기준입니다.",
+            "보호 로직이 적용되는 속도 구간이 넓어집니다.",
+            "보호 로직이 적용되는 속도 구간이 줄어듭니다.",
+        ),
+        "manual_steer_disable_frames": param_meta(
+            "수동 조향 유지 시간", "운전자 개입", "frame", 10, 0, 500,
+            "저속 방향지시등 조작 후 자동 조향을 차단하는 100 Hz 프레임 수입니다.",
+            "운전자에게 조향을 넘기는 시간이 길어집니다.",
+            "자동 조향으로 더 빨리 복귀합니다.",
+        ),
+        "driver_torque_threshold": param_meta(
+            "저속 운전자 토크 기준", "운전자 개입", "MDPS raw", 10, 0, 500,
+            "저속에서 자동 토크를 줄이기 시작하는 운전자 조향 토크입니다.",
+            "더 강한 운전자 입력에서만 자동 토크를 줄입니다.",
+            "작은 운전자 입력에도 자동 토크를 더 빨리 줄입니다.",
+        ),
+        "max_lateral_jerk": param_meta(
+            "최대 횡방향 Jerk", "빠른 주행 튜닝", "m/s³", 0.1, 0.1, 20,
+            "목표 곡률이 시간에 따라 바뀌는 최대 속도를 제한합니다.",
+            "커브 변화에 더 빠르게 반응하지만 조향이 급해질 수 있습니다.",
+            "조향이 부드러워지지만 급커브 진입이 늦을 수 있습니다.",
+            quick=True,
+        ),
+        "max_lateral_accel": param_meta(
+            "최대 횡가속도", "빠른 주행 튜닝", "m/s²", 0.1, 0.5, 5,
+            "차량 속도에 따라 허용하는 목표 곡률을 횡가속도로 제한합니다.",
+            "고속에서 더 큰 곡률과 적극적인 조향을 허용합니다.",
+            "고속 커브 조향을 더 보수적으로 제한합니다.",
+            quick=True,
+        ),
+        "max_curvature": param_meta(
+            "최대 경로 곡률", "빠른 주행 튜닝", "1/m", 0.01, 0.01, 0.5,
+            "최종 목표 곡률의 절대 상한입니다. 0.2는 반경 약 5 m입니다.",
+            "더 급한 커브 경로를 허용합니다.",
+            "급커브에서 목표 조향량을 더 일찍 제한합니다.",
+            quick=True,
+        ),
+    },
+}
+
+
+def configured_paths() -> Dict[str, Path]:
+    params_dir = Path(os.environ.get("K230_PARAMS_DIR", "params"))
+    return {
+        group: Path(os.environ.get(env_name, params_dir / filename))
+        for group, (env_name, filename) in GROUP_ENV.items()
+    }
+
+
+def find_controlsd_pids() -> list[int]:
+    pids = []
+    proc = Path("/proc")
+    if not proc.is_dir():
+        return pids
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            argv0 = (entry / "cmdline").read_bytes().split(b"\0", 1)[0]
+            if Path(os.fsdecode(argv0)).name == CONTROLSD_NAME:
+                pids.append(int(entry.name))
+        except (FileNotFoundError, PermissionError, ProcessLookupError, ValueError):
+            continue
+    return sorted(pids)
+
+
+def notify_controlsd() -> list[int]:
+    notified = []
+    for pid in find_controlsd_pids():
+        try:
+            os.kill(pid, signal.SIGHUP)
+            notified.append(pid)
+        except (PermissionError, ProcessLookupError):
+            continue
+    return notified
+
+
+class ParamStore:
+    def __init__(
+        self,
+        paths: Dict[str, Path] | None = None,
+        notifier: Callable[[], list[int]] = notify_controlsd,
+    ):
+        self.paths = paths or configured_paths()
+        self.notifier = notifier
+        self.lock = threading.Lock()
+
+    def read_group(self, group: str) -> Dict[str, Any]:
+        path = self._path(group)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise ValueError(f"parameter file not found: {path}") from exc
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid JSON in {path}: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError(f"parameter document must be an object: {path}")
+        return data
+
+    def snapshot(self) -> Dict[str, Any]:
+        with self.lock:
+            documents = {group: self.read_group(group) for group in self.paths}
+        return {
+            "params": documents,
+            "metadata": PARAM_METADATA,
+            "paths": {group: str(path) for group, path in self.paths.items()},
+            "controlsd_pids": find_controlsd_pids(),
+        }
+
+    def update(self, group: str, values: Dict[str, Any]) -> Dict[str, Any]:
+        if not values:
+            raise ValueError("no parameter values supplied")
+        with self.lock:
+            document = self.read_group(group)
+            unknown = sorted(set(values) - set(document))
+            if unknown:
+                raise KeyError(", ".join(unknown))
+            document.update(values)
+            self._atomic_write(self._path(group), document)
+        notified = self.notifier()
+        return {
+            "group": group,
+            "values": values,
+            "params": document,
+            "notified_pids": notified,
+        }
+
+    def _path(self, group: str) -> Path:
+        if group not in self.paths:
+            raise KeyError(group)
+        return self.paths[group]
+
+    @staticmethod
+    def _atomic_write(path: Path, document: Dict[str, Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        mode = stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o664
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=path.name + ".", suffix=".tmp", dir=path.parent
+        )
+        temporary = Path(temporary_name)
+        try:
+            os.fchmod(fd, mode)
+            with os.fdopen(fd, "w", encoding="utf-8") as file:
+                json.dump(document, file, ensure_ascii=False, indent=2)
+                file.write("\n")
+                file.flush()
+                os.fsync(file.fileno())
+            os.replace(temporary, path)
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
+
+class ParamPatch(BaseModel):
+    values: Dict[str, Any]
+
+
+HTML = """<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>K7 실시간 튜닝</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #101214;
+      color: #f4f6f7;
+      --surface: #191c1f;
+      --surface-raised: #202428;
+      --line: #353b40;
+      --muted: #a5adb4;
+      --accent: #58a6e7;
+      --good: #4bc78d;
+      --warn: #efb85b;
+      --bad: #ed7474;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: #101214; }
+    button, input { font: inherit; }
+    button { touch-action: manipulation; }
+    .app-header {
+      position: sticky; top: 0; z-index: 5;
+      display: flex; align-items: center; gap: 14px;
+      min-height: 64px; padding: 10px max(16px, env(safe-area-inset-right)) 10px max(16px, env(safe-area-inset-left));
+      background: #171a1d; border-bottom: 1px solid var(--line);
+    }
+    .brand { min-width: 0; }
+    h1 { margin: 0; font-size: 19px; line-height: 1.2; font-weight: 750; letter-spacing: 0; }
+    .connection {
+      display: flex; align-items: center; gap: 7px;
+      color: var(--muted); font-size: 13px; white-space: nowrap;
+    }
+    .dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: var(--bad); }
+    .dot.online { background: var(--good); }
+    .icon-button {
+      width: 44px; height: 44px; margin-left: auto; padding: 0;
+      border: 1px solid #4a5157; border-radius: 6px;
+      background: #262b2f; color: #fff; font-size: 24px; line-height: 1;
+      cursor: pointer;
+    }
+    .icon-button:hover { background: #31373c; }
+    .group-tabs {
+      position: sticky; top: 64px; z-index: 4;
+      display: grid; grid-template-columns: 1fr 1fr;
+      padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+      background: #171a1d; border-bottom: 1px solid var(--line);
+    }
+    .group-tab {
+      min-height: 50px; border: 0; border-bottom: 3px solid transparent;
+      border-radius: 0; background: transparent; color: var(--muted);
+      cursor: pointer; font-weight: 750;
+    }
+    .group-tab.active { color: #fff; border-bottom-color: var(--accent); }
+    main {
+      width: min(1100px, 100%); margin: 0 auto;
+      padding: 16px max(16px, env(safe-area-inset-right)) max(40px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    }
+    .view-bar {
+      display: flex; align-items: center; gap: 12px; justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .view-tabs {
+      display: inline-grid; grid-template-columns: 1fr 1fr;
+      border: 1px solid #454c52; border-radius: 7px; overflow: hidden;
+    }
+    .view-tab {
+      min-height: 40px; padding: 7px 14px; border: 0; border-right: 1px solid #454c52;
+      border-radius: 0; background: #1a1e21; color: var(--muted);
+      cursor: pointer; font-weight: 700;
+    }
+    .view-tab:last-child { border-right: 0; }
+    .view-tab.active { background: #2b343a; color: #fff; }
+    .count { color: var(--muted); font-size: 13px; }
+    #message {
+      display: none; margin-bottom: 14px; padding: 10px 12px;
+      border: 1px solid #366249; border-radius: 6px;
+      background: #17261f; color: #79daa9; font-size: 13px;
+    }
+    #message.visible { display: block; }
+    #message.failed { border-color: #743f3f; background: #2a1919; color: #f08b8b; }
+    .section { margin: 0 0 24px; }
+    .section-title {
+      display: flex; align-items: baseline; gap: 9px;
+      margin: 0 0 9px; color: #e5e9ec; font-size: 15px; font-weight: 750;
+    }
+    .section-title span { color: #7f8991; font-size: 12px; font-weight: 600; }
+    .param-list {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .param-card {
+      min-width: 0; padding: 14px;
+      border: 1px solid var(--line); border-radius: 7px;
+      background: var(--surface);
+    }
+    .param-card.busy { opacity: 0.66; }
+    .param-card.saved { border-color: #397659; }
+    .param-card.error { border-color: #8a4949; }
+    .param-head { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; }
+    .param-title { margin: 0; font-size: 16px; line-height: 1.3; font-weight: 750; letter-spacing: 0; }
+    .param-unit { color: var(--warn); font-size: 12px; white-space: nowrap; }
+    .param-key {
+      margin-top: 3px; color: #737e86;
+      font: 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+      overflow-wrap: anywhere;
+    }
+    .description { min-height: 40px; margin: 11px 0 9px; color: #c5cbd0; font-size: 13px; line-height: 1.5; }
+    .effects {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+      margin-bottom: 13px;
+    }
+    .effect {
+      padding: 8px 9px; border-left: 3px solid #576068;
+      background: #15181a; color: #aeb6bc; font-size: 12px; line-height: 1.45;
+    }
+    .effect.up { border-left-color: var(--warn); }
+    .effect.down { border-left-color: var(--accent); }
+    .effect b { display: block; margin-bottom: 2px; color: #e5e9ec; font-size: 11px; }
+    .number-control {
+      display: grid; grid-template-columns: 54px minmax(100px, 1fr) 54px;
+      gap: 8px; height: 50px;
+    }
+    .adjust-button {
+      border: 1px solid #515960; border-radius: 6px;
+      background: #293036; color: #fff; cursor: pointer;
+      font-size: 28px; font-weight: 500; line-height: 1;
+    }
+    .adjust-button:hover { background: #363e44; }
+    .value-wrap { position: relative; min-width: 0; }
+    .value-input {
+      width: 100%; height: 50px; padding: 5px 9px 17px;
+      border: 1px solid #535c63; border-radius: 6px;
+      background: #0d0f11; color: #fff; text-align: center;
+      font-size: 19px; font-weight: 750; font-variant-numeric: tabular-nums;
+    }
+    .value-input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+    .range {
+      position: absolute; bottom: 4px; left: 4px; right: 4px;
+      color: #768089; text-align: center; font-size: 9px; pointer-events: none;
+    }
+    .toggle-control {
+      display: flex; align-items: center; justify-content: space-between;
+      width: 100%; height: 50px; padding: 0 14px;
+      border: 1px solid #515960; border-radius: 6px;
+      background: #24292d; color: #d7dce0; cursor: pointer; font-weight: 750;
+    }
+    .toggle {
+      position: relative; width: 52px; height: 28px;
+      border-radius: 15px; background: #555e65; transition: background 120ms ease;
+    }
+    .toggle::after {
+      content: ""; position: absolute; top: 4px; left: 4px;
+      width: 20px; height: 20px; border-radius: 50%; background: #fff;
+      transition: transform 120ms ease;
+    }
+    .toggle-control[aria-checked="true"] .toggle { background: var(--good); }
+    .toggle-control[aria-checked="true"] .toggle::after { transform: translateX(24px); }
+    .card-status { min-height: 18px; margin-top: 7px; color: #7f8991; font-size: 11px; text-align: right; }
+    .card-status.ok { color: var(--good); }
+    .card-status.fail { color: var(--bad); }
+    .empty {
+      padding: 28px; border: 1px solid var(--line); border-radius: 7px;
+      color: var(--muted); text-align: center;
+    }
+    details { margin-top: 24px; color: #758088; font-size: 11px; }
+    summary { cursor: pointer; }
+    .file-path { margin-top: 8px; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+    button:disabled, input:disabled { cursor: default; opacity: 0.5; }
+    @media (max-width: 760px) {
+      .app-header { gap: 9px; }
+      .connection { margin-left: auto; }
+      .icon-button { margin-left: 0; }
+      .param-list { grid-template-columns: 1fr; }
+      .description { min-height: 0; }
+    }
+    @media (max-width: 460px) {
+      h1 { font-size: 17px; }
+      .connection span:last-child { max-width: 92px; overflow: hidden; text-overflow: ellipsis; }
+      .view-bar { align-items: stretch; flex-direction: column; }
+      .view-tabs { width: 100%; }
+      .effects { grid-template-columns: 1fr; }
+      .number-control { grid-template-columns: 58px minmax(0, 1fr) 58px; }
+      .adjust-button, .value-input, .toggle-control { height: 54px; }
+      .number-control { height: 54px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand"><h1>K7 실시간 튜닝</h1></div>
+    <div class="connection" id="connection">
+      <span id="dot" class="dot"></span><span id="status">연결 확인 중</span>
+    </div>
+    <button id="reload" class="icon-button" type="button" title="새로고침" aria-label="새로고침">↻</button>
+  </header>
+  <nav class="group-tabs" aria-label="파라미터 그룹">
+    <button class="group-tab active" data-group="steering" type="button">조향</button>
+    <button class="group-tab" data-group="driving" type="button">주행 제한</button>
+  </nav>
+  <main>
+    <div class="view-bar">
+      <div class="view-tabs" aria-label="표시 범위">
+        <button class="view-tab active" data-view="quick" type="button">빠른 조정</button>
+        <button class="view-tab" data-view="all" type="button">전체 설정</button>
+      </div>
+      <div id="count" class="count"></div>
+    </div>
+    <div id="message" role="status"></div>
+    <div id="sections"></div>
+    <details>
+      <summary>파라미터 파일</summary>
+      <div id="path" class="file-path"></div>
+    </details>
+  </main>
+  <script>
+    let snapshot = null;
+    let activeGroup = "steering";
+    let activeView = "quick";
+    let messageTimer = null;
+
+    const sections = document.getElementById("sections");
+    const message = document.getElementById("message");
+    const path = document.getElementById("path");
+    const dot = document.getElementById("dot");
+    const status = document.getElementById("status");
+    const connection = document.getElementById("connection");
+    const count = document.getElementById("count");
+
+    function setConnection(pids, saved = false) {
+      const online = pids.length > 0;
+      dot.classList.toggle("online", online);
+      connection.title = online ? `controlsd PID ${pids.join(", ")}` : "controlsd가 실행 중이 아닙니다";
+      status.textContent = online ? (saved ? "실시간 적용됨" : "제어 연결됨") : (saved ? "저장됨 · 제어 미연결" : "제어 미연결");
+    }
+
+    function setMessage(text, failed = false) {
+      window.clearTimeout(messageTimer);
+      message.textContent = text;
+      message.className = text ? `visible${failed ? " failed" : ""}` : "";
+      if (text && !failed) {
+        messageTimer = window.setTimeout(() => {
+          message.textContent = "";
+          message.className = "";
+        }, 1800);
+      }
+    }
+
+    function genericMeta(key, value) {
+      return {
+        label: key,
+        section: "기타",
+        unit: "",
+        step: Number.isInteger(value) ? 1 : 0.01,
+        min: -1000000,
+        max: 1000000,
+        description: "추가 설명이 등록되지 않은 파라미터입니다.",
+        increase: "값이 증가합니다.",
+        decrease: "값이 감소합니다.",
+        quick: false,
+      };
+    }
+
+    function decimalsForStep(step) {
+      const text = String(step);
+      if (text.includes("e-")) return Number(text.split("e-")[1]);
+      return text.includes(".") ? text.split(".")[1].length : 0;
+    }
+
+    function clampAndRound(value, meta) {
+      const clamped = Math.min(meta.max, Math.max(meta.min, value));
+      const decimals = decimalsForStep(meta.step);
+      return Number(clamped.toFixed(decimals));
+    }
+
+    async function loadParams(showMessage = false) {
+      try {
+        const response = await fetch("/api/params", {cache: "no-store"});
+        if (!response.ok) throw new Error(await response.text());
+        snapshot = await response.json();
+        setConnection(snapshot.controlsd_pids);
+        if (showMessage) setMessage("최신 값을 불러왔습니다.");
+        render();
+      } catch (error) {
+        setMessage(`읽기 실패: ${error.message}`, true);
+      }
+    }
+
+    async function applyValue(key, value, card, input = null) {
+      const group = activeGroup;
+      card.classList.remove("saved", "error");
+      card.classList.add("busy");
+      card.querySelectorAll("button, input").forEach(control => control.disabled = true);
+      const cardStatus = card.querySelector(".card-status");
+      cardStatus.textContent = "적용 중";
+      cardStatus.className = "card-status";
+      try {
+        const response = await fetch(`/api/params/${group}`, {
+          method: "PATCH",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({values: {[key]: value}}),
+        });
+        if (!response.ok) throw new Error(await response.text());
+        const update = await response.json();
+        snapshot.params[group] = update.params;
+        snapshot.controlsd_pids = update.notified_pids;
+        const applied = update.params[key];
+        if (input) input.value = String(applied);
+        card.classList.add("saved");
+        cardStatus.textContent = `적용됨 ${new Date().toLocaleTimeString("ko-KR", {hour12: false})}`;
+        cardStatus.className = "card-status ok";
+        setConnection(update.notified_pids, true);
+        window.setTimeout(() => card.classList.remove("saved"), 900);
+        return applied;
+      } catch (error) {
+        card.classList.add("error");
+        cardStatus.textContent = "적용 실패";
+        cardStatus.className = "card-status fail";
+        setMessage(error.message, true);
+        throw error;
+      } finally {
+        card.classList.remove("busy");
+        card.querySelectorAll("button, input").forEach(control => control.disabled = false);
+      }
+    }
+
+    function createEffects(meta, isBoolean) {
+      const effects = document.createElement("div");
+      effects.className = "effects";
+      const down = document.createElement("div");
+      down.className = "effect down";
+      const downTitle = document.createElement("b");
+      downTitle.textContent = isBoolean ? "끄면" : "값 감소";
+      down.append(downTitle, document.createTextNode(meta.decrease));
+      const up = document.createElement("div");
+      up.className = "effect up";
+      const upTitle = document.createElement("b");
+      upTitle.textContent = isBoolean ? "켜면" : "값 증가";
+      up.append(upTitle, document.createTextNode(meta.increase));
+      effects.append(down, up);
+      return effects;
+    }
+
+    function createNumberControl(key, value, meta, card) {
+      const control = document.createElement("div");
+      control.className = "number-control";
+      const minus = document.createElement("button");
+      minus.type = "button";
+      minus.className = "adjust-button";
+      minus.textContent = "−";
+      minus.title = `${meta.step}${meta.unit ? ` ${meta.unit}` : ""} 감소`;
+      minus.setAttribute("aria-label", minus.title);
+      const valueWrap = document.createElement("div");
+      valueWrap.className = "value-wrap";
+      const input = document.createElement("input");
+      input.className = "value-input";
+      input.type = "number";
+      input.inputMode = "decimal";
+      input.value = String(value);
+      input.step = String(meta.step);
+      input.min = String(meta.min);
+      input.max = String(meta.max);
+      input.setAttribute("aria-label", `${meta.label} 현재값`);
+      const range = document.createElement("span");
+      range.className = "range";
+      range.textContent = `${meta.min} ~ ${meta.max}${meta.unit ? ` ${meta.unit}` : ""}`;
+      valueWrap.append(input, range);
+      const plus = document.createElement("button");
+      plus.type = "button";
+      plus.className = "adjust-button";
+      plus.textContent = "+";
+      plus.title = `${meta.step}${meta.unit ? ` ${meta.unit}` : ""} 증가`;
+      plus.setAttribute("aria-label", plus.title);
+
+      const adjust = async direction => {
+        const current = Number(input.value);
+        if (!Number.isFinite(current)) {
+          setMessage("숫자를 입력하세요.", true);
+          return;
+        }
+        const next = clampAndRound(current + direction * meta.step, meta);
+        input.value = String(next);
+        try {
+          await applyValue(key, next, card, input);
+        } catch (_) {
+          input.value = String(snapshot.params[activeGroup][key]);
+        }
+      };
+      minus.addEventListener("click", () => adjust(-1));
+      plus.addEventListener("click", () => adjust(1));
+      input.addEventListener("keydown", event => {
+        if (event.key === "Enter") input.blur();
+      });
+      input.addEventListener("change", async () => {
+        const parsed = Number(input.value);
+        if (!Number.isFinite(parsed)) {
+          setMessage("숫자를 입력하세요.", true);
+          input.value = String(snapshot.params[activeGroup][key]);
+          return;
+        }
+        const next = clampAndRound(parsed, meta);
+        input.value = String(next);
+        try {
+          await applyValue(key, next, card, input);
+        } catch (_) {
+          input.value = String(snapshot.params[activeGroup][key]);
+        }
+      });
+      control.append(minus, valueWrap, plus);
+      return control;
+    }
+
+    function createToggleControl(key, value, meta, card) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "toggle-control";
+      button.setAttribute("role", "switch");
+      button.setAttribute("aria-checked", String(value));
+      const label = document.createElement("span");
+      label.textContent = value ? "켜짐" : "꺼짐";
+      const toggle = document.createElement("span");
+      toggle.className = "toggle";
+      button.append(label, toggle);
+      button.addEventListener("click", async () => {
+        const next = button.getAttribute("aria-checked") !== "true";
+        try {
+          const applied = await applyValue(key, next, card);
+          button.setAttribute("aria-checked", String(applied));
+          label.textContent = applied ? "켜짐" : "꺼짐";
+        } catch (_) {}
+      });
+      return button;
+    }
+
+    function createCard(key, value, meta) {
+      const card = document.createElement("article");
+      card.className = "param-card";
+      const head = document.createElement("div");
+      head.className = "param-head";
+      const identity = document.createElement("div");
+      const title = document.createElement("h3");
+      title.className = "param-title";
+      title.textContent = meta.label;
+      const technicalKey = document.createElement("div");
+      technicalKey.className = "param-key";
+      technicalKey.textContent = key;
+      identity.append(title, technicalKey);
+      const unit = document.createElement("div");
+      unit.className = "param-unit";
+      unit.textContent = meta.unit || (typeof value === "boolean" ? "ON / OFF" : "");
+      head.append(identity, unit);
+      const description = document.createElement("p");
+      description.className = "description";
+      description.textContent = meta.description;
+      const cardStatus = document.createElement("div");
+      cardStatus.className = "card-status";
+      card.append(head, description, createEffects(meta, typeof value === "boolean"));
+      card.append(
+        typeof value === "boolean"
+          ? createToggleControl(key, value, meta, card)
+          : createNumberControl(key, value, meta, card),
+        cardStatus,
+      );
+      return card;
+    }
+
+    function render() {
+      if (!snapshot) return;
+      sections.replaceChildren();
+      path.textContent = snapshot.paths[activeGroup];
+      const params = snapshot.params[activeGroup];
+      const metadata = snapshot.metadata[activeGroup] || {};
+      const visible = Object.entries(params).filter(([key, value]) => {
+        const meta = metadata[key] || genericMeta(key, value);
+        return activeView === "all" || meta.quick;
+      });
+      count.textContent = `${visible.length}개 항목`;
+      const grouped = new Map();
+      for (const [key, value] of visible) {
+        const meta = metadata[key] || genericMeta(key, value);
+        if (!grouped.has(meta.section)) grouped.set(meta.section, []);
+        grouped.get(meta.section).push([key, value, meta]);
+      }
+      for (const [sectionName, entries] of grouped) {
+        const section = document.createElement("section");
+        section.className = "section";
+        const heading = document.createElement("h2");
+        heading.className = "section-title";
+        heading.append(document.createTextNode(sectionName));
+        const sectionCount = document.createElement("span");
+        sectionCount.textContent = `${entries.length}개`;
+        heading.append(sectionCount);
+        const list = document.createElement("div");
+        list.className = "param-list";
+        for (const [key, value, meta] of entries) {
+          list.appendChild(createCard(key, value, meta));
+        }
+        section.append(heading, list);
+        sections.appendChild(section);
+      }
+      if (!visible.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "빠른 조정 항목이 없습니다.";
+        sections.appendChild(empty);
+      }
+    }
+
+    document.querySelectorAll(".group-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".group-tab").forEach(item => item.classList.remove("active"));
+        tab.classList.add("active");
+        activeGroup = tab.dataset.group;
+        render();
+        window.scrollTo({top: 0, behavior: "smooth"});
+      });
+    });
+    document.querySelectorAll(".view-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".view-tab").forEach(item => item.classList.remove("active"));
+        tab.classList.add("active");
+        activeView = tab.dataset.view;
+        render();
+      });
+    });
+    document.getElementById("reload").addEventListener("click", () => loadParams(true));
+    loadParams();
+  </script>
+</body>
+</html>
+"""
+
+
+def create_app(store: ParamStore | None = None) -> FastAPI:
+    param_store = store or ParamStore()
+    application = FastAPI(title="K7 parameter server", docs_url="/docs")
+
+    @application.get("/", response_class=HTMLResponse)
+    def index() -> str:
+        return HTML
+
+    @application.get("/api/params")
+    def get_params() -> Dict[str, Any]:
+        try:
+            return param_store.snapshot()
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @application.patch("/api/params/{group}")
+    def patch_params(group: str, patch: ParamPatch) -> Dict[str, Any]:
+        try:
+            return param_store.update(group, patch.values)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"unknown parameter: {exc}") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return application
+
+
+app = create_app()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default=os.environ.get("K230_PARAM_HOST", "0.0.0.0"))
+    parser.add_argument(
+        "--port", type=int, default=int(os.environ.get("K230_PARAM_PORT", "8080"))
+    )
+    args = parser.parse_args()
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+
+
+if __name__ == "__main__":
+    main()

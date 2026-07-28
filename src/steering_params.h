@@ -19,19 +19,20 @@ struct K7SteeringParams {
   int steer_driver_allowance = 50;
   int steer_driver_multiplier = 2;
   int steer_driver_factor = 1;
+  int steering_pressed_threshold = 150;
   bool variable_steer_max = false;
   bool variable_steer_delta = false;
   int steer_max_base = 384;
   int steer_delta_up_base = 3;
   int steer_delta_down_base = 7;
 
-  int torque_max_lat_accel_raw = 27;
+  int torque_max_lat_accel_raw = 22;
   int torque_kp_raw = 10;
   int torque_kf_raw = 10;
   int torque_ki_raw = 1;
-  int torque_friction_raw = 65;
+  int torque_friction_raw = 100;
   bool torque_use_angle = true;
-  int torque_angle_deadzone_raw = 10;
+  int torque_angle_deadzone_raw = 0;
   int torque_output_sign = -1;
 
   int smooth_steer_method = 0;
@@ -40,13 +41,13 @@ struct K7SteeringParams {
   float smooth_max_steer_angle_wait = 0.001f;
   float smooth_driver_angle_wait = 0.001f;
 
-  float steer_ratio = 15.5f;
-  float tire_stiffness_factor = 0.85f;
+  float steer_ratio = 16.8f;
+  float tire_stiffness_factor = 1.0f;
   float steer_actuator_delay = 0.42f;
   float max_steering_angle_deg = 90.0f;
-  bool avoid_lkas_fault_enabled = false;
+  bool avoid_lkas_fault_enabled = true;
   float avoid_lkas_fault_max_angle_deg = 85.0f;
-  int avoid_lkas_fault_max_frames = 90;
+  int avoid_lkas_fault_max_frames = 89;
   bool avoid_lkas_fault_beyond = false;
   bool no_smart_mdps = false;
   bool turn_steering_disable = false;

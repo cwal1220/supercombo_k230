@@ -22,11 +22,19 @@ runtime_files=(
   "${BIN_DIR}/k230_modeld"
   "${BIN_DIR}/k230_overlay"
   scripts/k230_manager.py
+  scripts/k7_param_server.py
+  scripts/requirements-param-server.txt
 )
 model="models/supercombo.kmodel"
+init_script="scripts/S95supercombo_k230"
 
 if [ -x "${BIN_DIR}/k230_pandad" ]; then
   runtime_files+=("${BIN_DIR}/k230_pandad" "${BIN_DIR}/k230_k7_controlsd")
+fi
+
+if [ ! -f "${init_script}" ]; then
+  echo "Missing init script: ${init_script}" >&2
+  exit 1
 fi
 
 for runtime_file in "${runtime_files[@]}"; do
@@ -54,4 +62,9 @@ fi
   params/k7_yg_steering.json \
   params/k7_yg_driving.json \
   "$BOARD:$DEST/params/"
+"${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \
+  "$init_script" "$BOARD:/etc/init.d/S95supercombo_k230"
+"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
+  "chmod 755 /etc/init.d/S95supercombo_k230"
+"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "sync"
 echo "Uploaded runtime files to $BOARD:$DEST"

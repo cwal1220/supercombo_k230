@@ -32,7 +32,8 @@ apt-get install -y \
   libusb-1.0-0-dev \
   libopencv-dev \
   make \
-  python3
+  python3 \
+  python3-pip
 ```
 
 Package purpose:
@@ -43,7 +44,14 @@ Package purpose:
 - `libopencv-dev`: OpenCV headers/libraries used by the overlay renderer
 - `curl`, `ca-certificates`: `scripts/fetch_nncase_runtime.sh` download support
 - `git`: fresh clone from GitHub
-- `python3`: `k230_manager.py`
+- `python3`: `k230_manager.py`와 K7 파라미터 웹 서버
+- `python3-pip`: FastAPI/uvicorn 설치
+
+Install the parameter server dependencies:
+
+```sh
+python3 -m pip install -r scripts/requirements-param-server.txt
+```
 
 If the directory is copied to the board with all files already present, `git` is
 not needed for building. It is only needed for a fresh repository checkout.
@@ -129,7 +137,24 @@ Openpilot-style split runtime:
 
 ```sh
 cd /root/supercombo_k230
-./scripts/k230_manager.py models/supercombo.kmodel 0
+./k230_manager.py
+```
+
+The no-argument command selects the installed `model/supercombo.kmodel` (or the
+source-tree `models/supercombo.kmodel`), debug mode `0`, K7 control enabled,
+Panda TX enabled, and the FastAPI parameter server enabled. Each setting can
+still be overridden with `K230_KMODEL`, its existing environment variable, or
+a command-line argument.
+
+On the board, `/etc/init.d/S95supercombo_k230` starts the same command
+automatically after the ISP, network, ADB, and remote access services. It is
+installed by `scripts/upload_to_board.sh`. Manual service controls are:
+
+```sh
+/etc/init.d/S95supercombo_k230 start
+/etc/init.d/S95supercombo_k230 stop
+/etc/init.d/S95supercombo_k230 restart
+/etc/init.d/S95supercombo_k230 status
 ```
 
 The split runtime gives the model pipeline priority and keeps display work to a
@@ -377,17 +402,18 @@ Useful runtime options:
   - manager starts `k230_pandad` and `k230_k7_controlsd`.
   - no openpilot checkout or Python native extension is required.
 - `K230_PANDA_SAFETY=nooutput|silent|hyundai|hyundaiCommunity|allOutput`
-  - panda safety mode for `k230_pandad`. Default is `nooutput`.
+  - panda safety mode for `k230_pandad`. Its standalone default is `nooutput`;
+    the managed full pipeline defaults to `hyundaiCommunity:0`.
   - collected KIA K7 YG HEV logs from the current openpilot fork report
     `safety=hyundaiCommunity:0`, `sccBus=-1`, `mdpsBus=1`, and `sasBus=1`.
     Use `K230_PANDA_SAFETY=hyundaiCommunity` for shadow/TX experiments unless
     a newer fingerprint proves otherwise.
 - `K230_PANDA_TX=1`
   - allows `k230_pandad` to relay ordered `/dev/shm/k230_sendcan` batches to panda.
-    Default is `0`; shadow mode blocks transmission.
+    Its standalone default is `0`; the managed full pipeline defaults to `1`.
 - `K230_PANDA_ENGAGED=1`
   - sends panda heartbeat as engaged, only meaningful with `K230_PANDA_TX=1`.
-    Default is disengaged.
+    Its standalone default is disengaged; the managed full pipeline defaults to engaged.
 - `K230_PANDA_IDLE_US=5000`
   - sleep time used by `k230_pandad` when panda returns no CAN frames and no
     pending `sendcan` batch exists. This keeps USB-only or parked shadow runs
@@ -403,10 +429,27 @@ Useful runtime options:
 - `K230_K7_DRIVING_PARAMS=/path/to/driving_params.json`
   - overrides `params/k7_yg_driving.json`, which contains model/CAN freshness,
     inactive release, MDPS 60 kph spoof, and lateral motion limits.
+- `K230_ENABLE_PARAM_SERVER=0|1`
+  - starts the FastAPI parameter editor with the manager. It defaults to `1`
+    when `K230_ENABLE_CONTROL=1`.
+- `K230_PARAM_HOST=address`, `K230_PARAM_PORT=port`
+  - select the parameter editor listen address and port. Defaults are
+    `0.0.0.0:8080`.
 
 The tracked JSON files in `params/` are the source of truth for K7 steering
-and driving configuration. `calibration.json` is board-specific runtime state
-and is intentionally ignored by Git and preserved by the upload script.
+and driving configuration. Changes are written atomically, signaled to
+`k230_k7_controlsd`, and also detected by its 100 ms fallback poll. Every field
+is applied on the next control tick without an engage or standstill gate.
+`calibration.json` is board-specific runtime state and is intentionally ignored
+by Git and preserved by the upload script.
+
+Open the editor at `http://<board-ip>:8080`. It has no authentication and must
+only be exposed on a trusted vehicle or development network. It can also be
+started directly:
+
+```sh
+python3 scripts/k7_param_server.py --host 0.0.0.0 --port 8080
+```
 
 Fixed production defaults:
 

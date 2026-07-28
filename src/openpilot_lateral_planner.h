@@ -16,6 +16,8 @@ public:
   OpenpilotLateralPlanner(const OpenpilotLateralPlanner &) = delete;
   OpenpilotLateralPlanner &operator=(const OpenpilotLateralPlanner &) = delete;
 
+  void update_params(const K7SteeringParams &params);
+
   LateralTarget update(const K230ModelState &model,
                        const K7VehicleCanState &vehicle, float v_ego,
                        float measured_curvature, bool active,

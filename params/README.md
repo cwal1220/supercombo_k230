@@ -1,8 +1,9 @@
 # K7 YG HEV 파라미터 안내
 
 이 디렉터리에는 KIA K7 YG HEV용 조향 제어, 주행 제한 및 카메라
-캘리브레이션 값이 들어 있다. 값은 `k230_k7_controlsd`와 `k230_modeld`를
-시작할 때 읽으므로 수정 후 전체 파이프라인을 다시 시작해야 한다.
+캘리브레이션 값이 들어 있다. `k230_k7_controlsd`는 steering/driving JSON
+변경을 100ms 이내에 감지하고 다음 제어 주기에 즉시 반영한다. 제어 상태와
+PID 상태는 유지되며 engage 여부에 따른 적용 지연은 없다.
 
 기본 경로는 실행 디렉터리의 `params/`이다. 다른 디렉터리를 사용하려면
 `K230_PARAMS_DIR=/path/to/params`를 지정한다.
@@ -15,6 +16,7 @@
 - 허용 범위를 벗어난 숫자는 로더가 아래 표의 범위로 제한한다.
 - JSON은 주석을 지원하지 않으므로 설명은 이 문서에서 관리한다.
 - `mdps_speed_spoof_kph`, 토크 부호, 차량 제원은 다른 차량 값으로 임의 변경하지 않는다.
+- 웹 편집기는 `K230_ENABLE_PARAM_SERVER=1`일 때 기본 8080 포트에서 실행된다.
 
 ## k7_yg_driving.json
 
@@ -56,6 +58,7 @@
 | `steer_driver_allowance` | 50 | MDPS raw torque / 0~300 | 운전자 토크 제한 계산에서 허용하는 기본 여유값이다. |
 | `steer_driver_multiplier` | 2 | 배수 / 0~10 | 운전자 토크가 최종 허용 토크에 미치는 배율이다. |
 | `steer_driver_factor` | 1 | 배수 / 0~5 | MDPS 운전자 토크 입력에 적용하는 계수다. |
+| `steering_pressed_threshold` | 150 | MDPS raw torque / 0~500 | 토크 PID의 적분을 멈추는 운전자 조향 감지 기준이다. RK openpilot과 같이 5프레임 필터를 거치며, CAN 안전 제한용 `steer_driver_allowance`와는 별개다. |
 
 ### 속도별 토크 제한
 
@@ -70,19 +73,19 @@
 ### OpenPilot 토크 컨트롤러
 
 `*_raw` 값은 OpenPilot 파라미터 표현을 유지한다. 현재
-`torque_max_lat_accel_raw=27`은 2.7 m/s^2로 환산된다. `kp`, `kf`, `ki`는
+`torque_max_lat_accel_raw=22`는 RK K7의 2.2 m/s^2로 환산된다. `kp`, `kf`, `ki`는
 각각 `raw * 0.1 / max_lat_accel`로 변환되고 friction은 `raw * 0.001`로
 변환된다.
 
 | 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
 |---|---:|---|---|
-| `torque_max_lat_accel_raw` | 27 | 0.1 m/s^2 / 1~80 | 토크 컨트롤러가 정규화에 사용하는 최대 횡가속도다. |
+| `torque_max_lat_accel_raw` | 22 | 0.1 m/s^2 / 1~80 | 토크 컨트롤러가 정규화에 사용하는 최대 횡가속도다. RK K7의 `latAccelFactor=2.2`에 맞춘 값이다. |
 | `torque_kp_raw` | 12 | raw / 0~100 | 횡가속도 오차의 비례 이득이다. |
-| `torque_kf_raw` | 11 | raw / 0~100 | 목표 횡가속도 feed-forward 이득이다. 0이어도 내부에서 최소값으로 제한한다. |
+| `torque_kf_raw` | 10 | raw / 0~100 | 목표 횡가속도 feed-forward 이득이다. RK처럼 횡가속도 1.0을 그대로 feed-forward한 뒤 2.2로 정규화한다. |
 | `torque_ki_raw` | 1 | raw / 0~100 | 횡가속도 오차의 적분 이득이다. |
-| `torque_friction_raw` | 75 | 0.001 m/s^2 / 0~300 | 조향계 마찰을 넘기 위한 feed-forward 보상값이다. 현재값은 0.075다. |
+| `torque_friction_raw` | 100 | 0.001 m/s^2 / 0~300 | 조향계 마찰을 넘기 위한 feed-forward 보상값이다. RK K7과 같은 0.1이다. |
 | `torque_use_angle` | true | bool | `true`면 조향각 기반 실제 곡률을 사용한다. `false`면 유효한 ESP yaw-rate가 필요하며 두 값을 속도에 따라 혼합한다. |
-| `torque_angle_deadzone_raw` | 8 | 0.1 degree / 0~50 | 조향각 기반 오차 deadzone이다. 현재값은 0.8도다. `torque_use_angle=true`일 때 적용된다. |
+| `torque_angle_deadzone_raw` | 0 | 0.1 degree / 0~50 | 조향각 기반 오차 deadzone이다. RK K7 기본값과 같이 비활성화했다. `torque_use_angle=true`일 때 적용된다. |
 | `torque_output_sign` | -1 | 부호 / -1 또는 1 | 토크 출력 방향이다. K7 YG HEV에서는 -1을 사용한다. 잘못 바꾸면 반대 방향으로 조향할 수 있다. |
 
 ### Smooth steer
@@ -102,8 +105,8 @@
 
 | 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
 |---|---:|---|---|
-| `steer_ratio` | 15.5 | ratio / 8~25 | 핸들 조향각과 전륜 조향각의 비율이다. 실제 곡률 추정에 직접 사용한다. |
-| `tire_stiffness_factor` | 0.85 | 배율 / 0.2~2.0 | 기준 타이어 횡강성에 적용하는 차량별 보정 계수다. |
+| `steer_ratio` | 16.8 | ratio / 8~25 | 핸들 조향각과 전륜 조향각의 비율이다. RK의 KIA K7 HEV 차량값과 동일하다. |
+| `tire_stiffness_factor` | 1.0 | 배율 / 0.2~2.0 | 기준 타이어 횡강성에 적용하는 차량별 보정 계수다. RK K7의 기본 배율과 동일하다. |
 | `steer_actuator_delay` | 0.42 | second / 0.01~1.0 | 현재 시점의 목표 곡률을 계산할 때 보상하는 조향 액추에이터 지연이다. 값을 키우면 MPC 경로를 조금 더 앞에서 읽어 커브 진입을 선행하지만, 과도하면 조향이 빨라지거나 오버슈트할 수 있다. |
 | `angle_offset_deg` | 0.8 | degree / -10~10 | 조향각 센서의 직진 오프셋이다. 실제 곡률 추정 전에 센서 각도에서 뺀다. |
 | `roll_rad` | 0.0 | radian / -0.2~0.2 | 도로 또는 차량 roll에 의한 횡가속도와 곡률 보정값이다. |
@@ -121,9 +124,9 @@
 | 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
 |---|---:|---|---|
 | `max_steering_angle_deg` | 90.0 | degree / 0~360 | fault 회피 모드가 꺼졌을 때 자동 조향을 허용할 절대 조향각 한도다. 90 미만이면 이 gate를 사용하지 않고, 90이면 90도로 고정한다. 90보다 크면 정지 시 설정값+60도에서 20 km/h의 설정값까지 선형으로 줄어든다. |
-| `avoid_lkas_fault_enabled` | false | bool | 큰 조향각이 지속될 때 잠시 steer request를 끊는 fault 회피 로직을 사용한다. |
+| `avoid_lkas_fault_enabled` | true | bool | 큰 조향각이 지속될 때 토크는 유지하고 steer request만 잠시 끊는 RK openpilot 방식의 fault 회피 로직을 사용한다. |
 | `avoid_lkas_fault_max_angle_deg` | 85.0 | degree / 1~180 | fault 회피 카운터를 증가시키는 절대 조향각 기준이다. |
-| `avoid_lkas_fault_max_frames` | 90 | frame / 0~300 | fault 회피가 켜지면 큰 조향각 허용 프레임 수다. 꺼진 상태에서는 MDPS 오류 누적 횟수의 cut-steer 기준으로 사용한다. |
+| `avoid_lkas_fault_max_frames` | 89 | frame / 0~300 | 85도 이상 조향각이 지속될 때 허용하는 프레임 수다. 이후 2프레임 동안 request를 끊고 다시 허용한다. |
 | `avoid_lkas_fault_beyond` | false | bool | fault 회피가 켜진 저속·큰 조향각 조건에서 primary 토크 제한을 사용하는 확장 옵션이다. |
 | `no_smart_mdps` | false | bool | `true`면 `min_steer_speed_mps` 미만에서 제어 자체를 차단한다. |
 | `turn_steering_disable` | false | bool | `true`면 `lane_change_min_speed_kph` 미만에서 한쪽 방향지시등을 켰을 때 지정 프레임 동안 조향을 차단한다. |

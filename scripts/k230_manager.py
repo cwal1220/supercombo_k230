@@ -21,6 +21,11 @@ DISPLAY_READY_FILE = "/tmp/k230_display_ready"
 DISPLAY_READY_TIMEOUT_MS = 7000
 START_ORDER = ("k230_overlay", "k230_camerad", "k230_modeld")
 PROCESS_ORDER = ("k230_camerad", "k230_modeld", "k230_overlay")
+DEFAULT_KMODEL_CANDIDATES = (
+    "model/supercombo.kmodel",
+    "models/supercombo.kmodel",
+)
+DEFAULT_DEBUG_MODE = "0"
 
 
 def now_ns() -> int:
@@ -34,6 +39,16 @@ def env_enabled(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value not in ("0", "false", "False", "FALSE")
+
+
+def default_kmodel_path() -> str:
+    override = os.environ.get("K230_KMODEL")
+    if override:
+        return override
+    return next(
+        (path for path in DEFAULT_KMODEL_CANDIDATES if os.path.exists(path)),
+        DEFAULT_KMODEL_CANDIDATES[0],
+    )
 
 
 class LatestPublisher:
@@ -128,10 +143,18 @@ def child_setup(nice_adjust: int):
 
 class Manager:
     def __init__(self, argv: List[str]):
-        if len(argv) < 2 or len(argv) > 3:
-            raise ValueError(f"Usage: {argv[0] if argv else 'k230_manager.py'} <supercombo.kmodel> [debug_mode]")
-        self.kmodel = argv[1]
-        self.debug = argv[2] if len(argv) >= 3 else "1"
+        if len(argv) > 3:
+            raise ValueError(
+                f"Usage: {argv[0] if argv else 'k230_manager.py'} "
+                "[supercombo.kmodel] [debug_mode]"
+            )
+        self.kmodel = argv[1] if len(argv) >= 2 else default_kmodel_path()
+        self.debug = argv[2] if len(argv) >= 3 else DEFAULT_DEBUG_MODE
+        os.environ.setdefault("K230_ENABLE_CONTROL", "1")
+        os.environ.setdefault("K230_PANDA_TX", "1")
+        os.environ.setdefault("K230_PANDA_ENGAGED", "1")
+        os.environ.setdefault("K230_PANDA_SAFETY", "hyundaiCommunity")
+        os.environ.setdefault("K230_PANDA_SAFETY_PARAM", "0")
         app_lib = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib")
         os.environ["LD_LIBRARY_PATH"] = app_lib + (
             ":" + os.environ["LD_LIBRARY_PATH"] if os.environ.get("LD_LIBRARY_PATH") else ""
@@ -142,19 +165,29 @@ class Manager:
 
         self.start_order = list(START_ORDER)
         self.process_order = list(PROCESS_ORDER)
+        enable_control = env_enabled("K230_ENABLE_CONTROL")
         specs = [
             ProcSpec("k230_camerad", ["./k230_camerad"], 0),
             ProcSpec("k230_modeld", ["./k230_modeld", self.kmodel, self.debug], -5),
             ProcSpec("k230_overlay", ["./k230_overlay"], 10),
         ]
-        if env_enabled("K230_ENABLE_PANDA") or env_enabled("K230_ENABLE_CONTROL"):
+        if env_enabled("K230_ENABLE_PANDA") or enable_control:
             specs.append(ProcSpec("k230_pandad", ["./k230_pandad"], -10))
             self.start_order.append("k230_pandad")
             self.process_order.append("k230_pandad")
-        if env_enabled("K230_ENABLE_CONTROL"):
+        if enable_control:
             specs.append(ProcSpec("k230_controlsd", ["./k230_k7_controlsd"], -8))
             self.start_order.append("k230_controlsd")
             self.process_order.append("k230_controlsd")
+        if env_enabled("K230_ENABLE_PARAM_SERVER", enable_control):
+            server_script = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "k7_param_server.py"
+            )
+            specs.append(
+                ProcSpec("k7_param_server", [sys.executable, server_script], 10)
+            )
+            self.start_order.append("k7_param_server")
+            self.process_order.append("k7_param_server")
         for spec in specs:
             self.procs[spec.name] = ProcState(spec=spec)
         self.display_ready_file = DISPLAY_READY_FILE
