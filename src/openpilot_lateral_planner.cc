@@ -78,8 +78,6 @@ public:
   std::array<std::array<double, 3>, kTrajectorySize> lane_path(
       float v_ego, const std::array<double, kTrajectorySize> &path_t,
       std::array<std::array<double, 3>, kTrajectorySize> path) {
-    for (auto &point : path) point[1] += path_offset_m_;
-
     std::array<double, kTrajectorySize> width{};
     for (int i = 0; i < kTrajectorySize; ++i)
       width[i] = right_y_[i] - left_y_[i];
@@ -135,6 +133,12 @@ public:
       }
     }
     return path;
+  }
+
+  void apply_path_offset(
+      std::array<std::array<double, 3>, kTrajectorySize> *path) const {
+    if (!path) return;
+    for (auto &point : *path) point[1] += path_offset_m_;
   }
 
   double mean_near_probability() const { return (left_prob_ + right_prob_) * 0.5; }
@@ -328,6 +332,7 @@ struct OpenpilotLateralPlanner::Impl {
     }
     if (!use_model_path)
       path = lane_planner.lane_path(v_ego, path_t, path);
+    lane_planner.apply_path_offset(&path);
 
     std::array<double, kTrajectorySize> distance{};
     std::array<double, kTrajectorySize> model_distance{};

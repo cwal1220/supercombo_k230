@@ -47,6 +47,8 @@ struct Esp12Values {
 struct Scc11Values {
   bool main_mode = false;
   float set_speed = 0.0f;
+  bool object_valid = false;
+  float object_distance_m = 0.0f;
 };
 
 struct Tcs13Values {
@@ -158,6 +160,8 @@ struct K7VehicleCanState {
   bool cruise_main = false;
   bool cruise_active = false;
   float cruise_set_speed = 0.0f;
+  bool radar_lead_valid = false;
+  float radar_lead_distance_m = 0.0f;
 };
 
 // Panda safety의 MDPS12 driver torque scale과 같은 값을 계산한다.
@@ -172,7 +176,7 @@ Mdps12Values decode_mdps12(const std::array<uint8_t, 8> &data);
 // K7 ESP12 yaw/lateral acceleration 값을 해석한다.
 Esp12Values decode_esp12(const std::array<uint8_t, 8> &data);
 
-// K7 SCC11 cruise main mode와 cluster-unit 설정 속도를 해석한다.
+// K7 SCC11 cruise와 전방 객체 상태를 해석한다.
 Scc11Values decode_scc11(const std::array<uint8_t, 8> &data);
 
 // K7 TCS13 brake 관련 상태를 해석한다.

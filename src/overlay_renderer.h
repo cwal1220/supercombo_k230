@@ -25,6 +25,8 @@ struct OverlayHudState {
     int wifi_signal_dbm = 0;
     float speed_kph = 0.0f;
     float cruise_set_speed_kph = 0.0f;
+    bool radar_lead_valid = false;
+    float radar_lead_distance_m = 0.0f;
     float steering_angle_deg = 0.0f;
     float normalized_output = 0.0f;
     int desired_torque = 0;

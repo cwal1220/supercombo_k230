@@ -514,6 +514,10 @@ private:
         hud_.speed_kph = control_fresh ? latest_control_state_.speed_kph : 0.0f;
         hud_.cruise_set_speed_kph =
             control_fresh ? latest_control_state_.cruise_set_speed_kph : 0.0f;
+        hud_.radar_lead_valid =
+            control_fresh && latest_control_state_.radar_lead_valid != 0;
+        hud_.radar_lead_distance_m =
+            control_fresh ? latest_control_state_.radar_lead_distance_m : 0.0f;
         hud_.steering_angle_deg = control_fresh ? latest_control_state_.steering_angle_deg : 0.0f;
         hud_.normalized_output = control_fresh ? latest_control_state_.normalized_output : 0.0f;
         hud_.desired_torque = control_fresh ? latest_control_state_.desired_torque : 0;

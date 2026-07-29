@@ -245,6 +245,8 @@ struct K230ControlState {
     int32_t driver_torque = 0;
     uint32_t desire = 0;
     char active_block[32] = {};
+    uint32_t radar_lead_valid = 0;
+    float radar_lead_distance_m = 0.0f;
 };
 
 class K230LatestChannel {

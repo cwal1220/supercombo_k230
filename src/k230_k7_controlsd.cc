@@ -439,6 +439,12 @@ int main() {
       control_state.desire = static_cast<uint32_t>(lateral_target.desire);
       std::snprintf(control_state.active_block, sizeof(control_state.active_block), "%s",
                     last_result.active_block.c_str());
+      const bool radar_lead_fresh =
+          vehicle.scc11_time_s >= 0.0 && now_s >= vehicle.scc11_time_s &&
+          now_s - vehicle.scc11_time_s <= 0.5;
+      control_state.radar_lead_valid =
+          radar_lead_fresh && vehicle.radar_lead_valid ? 1U : 0U;
+      control_state.radar_lead_distance_m = vehicle.radar_lead_distance_m;
       if (!control_state_pub.publish(&control_state, sizeof(control_state))) {
         ++publish_errors;
       }

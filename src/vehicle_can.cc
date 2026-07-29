@@ -107,6 +107,9 @@ Scc11Values decode_scc11(const std::array<uint8_t, 8> &data) {
   Scc11Values values;
   values.main_mode = get_signal_le(data.data(), 0, 1) != 0;
   values.set_speed = static_cast<float>(get_signal_le(data.data(), 8, 8));
+  values.object_valid = get_signal_le(data.data(), 22, 2) != 0;
+  values.object_distance_m =
+      static_cast<float>(get_signal_le(data.data(), 33, 11)) * 0.1f;
   return values;
 }
 
@@ -214,6 +217,8 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     const Scc11Values scc = decode_scc11(data);
     state->cruise_main = scc.main_mode;
     state->cruise_set_speed = scc.set_speed;
+    state->radar_lead_valid = scc.object_valid;
+    state->radar_lead_distance_m = scc.object_distance_m;
     state->scc11_time_s = now_s;
   } else if (address == kHyundaiScc12Address && length >= 8) {
     state->acc_mode = static_cast<int>(get_signal_le(data.data(), 13, 2));

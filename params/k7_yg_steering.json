@@ -42,8 +42,8 @@
   "wheelbase_m": 2.855,
   "center_to_front_ratio": 0.4,
   "steer_ratio_rear": 0.0,
-  "camera_offset_m": -0.06,
-  "path_offset_m": 0.0,
+  "camera_offset_m": 0.0,
+  "path_offset_m": 0.09,
   "invert_steer": false,
   "min_steer_speed_mps": 0.3
 }

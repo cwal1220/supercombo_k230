@@ -18,6 +18,18 @@ void require(bool condition, const char *message) {
   if (!condition) throw std::runtime_error(message);
 }
 
+void set_signal_le(std::array<uint8_t, 8> *data, int start_bit, int length,
+                   uint32_t value) {
+  for (int i = 0; i < length; ++i) {
+    const int bit = start_bit + i;
+    const uint8_t mask = static_cast<uint8_t>(1U << (bit % 8));
+    if ((value & (1U << i)) != 0U)
+      (*data)[bit / 8] |= mask;
+    else
+      (*data)[bit / 8] &= static_cast<uint8_t>(~mask);
+  }
+}
+
 LateralPath replay_path() {
   LateralPath path;
   path.left_valid = true;
@@ -124,14 +136,21 @@ void verify_scc11() {
   std::array<uint8_t, 8> bytes{};
   bytes[0] = 1;
   bytes[1] = 88;
+  set_signal_le(&bytes, 22, 2, 1);
+  set_signal_le(&bytes, 33, 11, 54);
   const Scc11Values decoded = decode_scc11(bytes);
-  require(decoded.main_mode && std::fabs(decoded.set_speed - 88.0f) < 0.001f,
+  require(decoded.main_mode && std::fabs(decoded.set_speed - 88.0f) < 0.001f &&
+              decoded.object_valid &&
+              std::fabs(decoded.object_distance_m - 5.4f) < 0.001f,
           "SCC11 cruise state decoding");
 
   K7VehicleCanState vehicle;
   update_k7_vehicle_can_state(&vehicle, kHyundaiScc11Address, bytes,
                               bytes.size(), kK7PowertrainBus, 1.0);
-  require(vehicle.cruise_main && std::fabs(vehicle.cruise_set_speed - 88.0f) < 0.001f,
+  require(vehicle.cruise_main &&
+              std::fabs(vehicle.cruise_set_speed - 88.0f) < 0.001f &&
+              vehicle.radar_lead_valid &&
+              std::fabs(vehicle.radar_lead_distance_m - 5.4f) < 0.001f,
           "SCC11 vehicle-state update");
   require(std::fabs(k7_cruise_set_speed_kph(vehicle) - 88.0f) < 0.001f,
           "SCC11 metric set speed");

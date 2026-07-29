@@ -10,6 +10,19 @@
 
 namespace {
 
+constexpr float kRadarToCameraDistanceM = 1.52f;
+
+float display_lead_distance_m(const OverlayHudState &hud,
+                              const ParsedLeadPoint *vision_lead)
+{
+    if (hud.radar_lead_valid && std::isfinite(hud.radar_lead_distance_m) &&
+        hud.radar_lead_distance_m > 0.0f)
+        return hud.radar_lead_distance_m;
+    return vision_lead
+        ? std::max(0.0f, vision_lead->x - kRadarToCameraDistanceM)
+        : 0.0f;
+}
+
 cv::Scalar bgra(int b, int g, int r, int a = 255)
 {
     return cv::Scalar(b, g, r, a);
@@ -468,22 +481,34 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     float lead_probability = 0.0f;
     const bool have_lead = output.valid &&
                            output.leads.primary(0, 0.5f, &lead, &lead_probability);
+    const bool have_radar_lead =
+        hud.radar_lead_valid && std::isfinite(hud.radar_lead_distance_m) &&
+        hud.radar_lead_distance_m > 0.0f;
+    const bool have_display_lead = have_radar_lead || have_lead;
+    const float lead_distance_m =
+        display_lead_distance_m(hud, have_lead ? &lead : nullptr);
     const float relative_speed_kph =
         have_lead ? (lead.velocity - hud.speed_kph / 3.6f) * 3.6f : 0.0f;
-    const uint32_t lead_color = !have_lead ? dim :
-        ((lead.x < 15.0f || relative_speed_kph < -20.0f) ? orange : blue);
+    const uint32_t lead_color = !have_display_lead ? dim :
+        ((lead_distance_m < 15.0f ||
+          (have_lead && relative_speed_kph < -20.0f)) ? orange : blue);
     constexpr int lead_box_y = 172;
     ui.box(right_box_x, lead_box_y, box_w, drive_box_h, lead_color, true);
     ui.hud_text_left(right_x, lead_box_y + 6, "LEAD", 1, dim, col_w);
-    if (have_lead) {
+    if (have_display_lead) {
         ui.hud_text_left(right_x, lead_box_y + 24,
                          format_text("DIST %.0FM P %.0F%%",
-                                     std::max(0.0f, lead.x),
-                                     lead_probability * 100.0f),
+                                     lead_distance_m,
+                                     have_lead ? lead_probability * 100.0f : 0.0f),
                          2, lead_color, col_w);
-        ui.hud_text_left(right_x, lead_box_y + 46,
-                         format_text("REL %+.0F KPH", relative_speed_kph),
-                         2, lead_color, col_w);
+        if (have_lead) {
+            ui.hud_text_left(right_x, lead_box_y + 46,
+                             format_text("REL %+.0F KPH", relative_speed_kph),
+                             2, lead_color, col_w);
+        } else {
+            ui.hud_text_left(right_x, lead_box_y + 46, "REL -- KPH",
+                             2, lead_color, col_w);
+        }
     } else {
         ui.hud_text_left(right_x, lead_box_y + 24, "NO LEAD", 2, dim, col_w);
         ui.hud_text_left(right_x, lead_box_y + 46, "REL -- KPH", 2, dim, col_w);
@@ -648,11 +673,14 @@ void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &outp
             if (project_point(projection, lead.x, lead.y, kModelHeight,
                               logical_width, logical_height, &px, &py)) {
                 rotate_model_point_180(logical_width, logical_height, &px, &py);
-                const int size = std::clamp(static_cast<int>(13.0f - lead.x * 0.05f),
-                                            7, 11);
+                const float lead_distance_m = display_lead_distance_m(hud, &lead);
+                const int size = std::clamp(
+                    static_cast<int>(13.0f - lead_distance_m * 0.05f),
+                    7, 11);
                 const int marker_y = py + size + 3;
                 const float relative_speed_mps = lead.velocity - hud.speed_kph / 3.6f;
-                draw_lead_chevron_180(frame, px, marker_y, size, lead.x, relative_speed_mps,
+                draw_lead_chevron_180(frame, px, marker_y, size, lead_distance_m,
+                                      relative_speed_mps,
                                       lead_probability, logical_width, logical_height,
                                       rotate_landscape);
             }
