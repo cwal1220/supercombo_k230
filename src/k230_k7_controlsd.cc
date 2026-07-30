@@ -1,4 +1,5 @@
 #include "k230_ipc.h"
+#include "departure_alert.h"
 #include "k7_lateral_controller.h"
 #include "k7_path.h"
 #include "openpilot_lateral_planner.h"
@@ -28,6 +29,7 @@ volatile sig_atomic_t g_reload_params = 0;
 constexpr uint32_t kExpectedPandaSafetyModel = 24;
 constexpr uint32_t kExpectedPandaSafetyParam = 0;
 constexpr uint64_t kPandaStateTimeoutNs = 1100000000ULL;
+constexpr uint64_t kAlertModelTimeoutNs = 500000000ULL;
 constexpr uint64_t kMaxCanRxAgeNs = 100000000ULL;
 constexpr int kParamPollIntervalMs = 100;
 
@@ -302,6 +304,7 @@ int main() {
                  steering_path.c_str(), driving_path.c_str(),
                  config.driving_params.mdps_speed_spoof_kph);
     K7LateralController controller(config);
+    DepartureAlertDetector departure_alert_detector;
     LateralPlannerWorker lateral_planner(config.steering_params);
     K7VehicleCanState vehicle;
     K230ModelState model;
@@ -315,6 +318,8 @@ int main() {
     unsigned send_queue_full = 0;
     unsigned stale_can_batches = 0;
     int control_frame = 0;
+    double last_alert_scc11_time_s = -1.0;
+    uint32_t last_logged_alert_event_id = 0;
 
     using Clock = std::chrono::steady_clock;
     const auto start = Clock::now();
@@ -377,10 +382,12 @@ int main() {
         apply_can_batch(can_batch, now_s, &vehicle);
         can_frames += std::min<uint32_t>(can_batch.count, kK230CanBatchMaxFrames);
       }
+      bool model_updated = false;
       uint64_t next_model_seq = model_seq;
       if (model_sub.read(&model, sizeof(model), &next_model_seq) &&
           next_model_seq != model_seq) {
         model_seq = next_model_seq;
+        model_updated = true;
         lateral_planner.submit(
             model, vehicle, vehicle_speed_mps(vehicle),
             last_result.actual_curvature, last_result.active,
@@ -413,6 +420,59 @@ int main() {
                                       control_frame++, panda_ready,
                                       panda_controls_allowed);
 
+      const bool radar_lead_fresh =
+          vehicle.scc11_time_s >= 0.0 && now_s >= vehicle.scc11_time_s &&
+          now_s - vehicle.scc11_time_s <= 0.5;
+      const bool radar_updated =
+          vehicle.scc11_time_s > last_alert_scc11_time_s;
+      if (radar_updated)
+        last_alert_scc11_time_s = vehicle.scc11_time_s;
+      const bool model_fresh =
+          model.valid != 0 && model.model_timestamp_ns != 0 &&
+          now_ns >= model.model_timestamp_ns &&
+          now_ns - model.model_timestamp_ns <= kAlertModelTimeoutNs;
+      DepartureAlertInput alert_input;
+      alert_input.now_s = now_s;
+      alert_input.vehicle_valid = last_result.vehicle_fresh;
+      alert_input.gear = vehicle.gear;
+      alert_input.speed_mps = vehicle_speed_mps(vehicle);
+      alert_input.gas_pressed = vehicle.gas_pressed;
+      alert_input.radar_updated = radar_updated;
+      alert_input.radar_lead_valid =
+          radar_lead_fresh && vehicle.radar_lead_valid;
+      alert_input.radar_lead_distance_m = vehicle.radar_lead_distance_m;
+      alert_input.radar_lead_relative_speed_mps =
+          vehicle.radar_lead_relative_speed_mps;
+      alert_input.model_updated = model_updated;
+      alert_input.model_valid = model_fresh;
+      alert_input.vision_lead_present =
+          model_fresh && model.lead.valid != 0 &&
+          model.lead.probability > 0.5f && model.lead.x > 0.0f &&
+          model.lead.x < 60.0f;
+      alert_input.plan_distance_m =
+          model_fresh ? model.plan[kTrajectorySize - 1].x : 0.0f;
+      alert_input.stop_line_valid =
+          model_fresh && model.stop_line.valid != 0;
+      alert_input.stop_line_probability = model.stop_line.probability;
+      alert_input.stop_line_distance_m = model.stop_line.x;
+      const DepartureAlertOutput departure_alert =
+          departure_alert_detector.update(alert_input);
+      if (departure_alert.event_id != 0 &&
+          departure_alert.event_id != last_logged_alert_event_id) {
+        last_logged_alert_event_id = departure_alert.event_id;
+        std::fprintf(
+            stderr,
+            "k230_k7_controlsd: departure alert=%s event=%u "
+            "lead=%.1fm rel=%.1fm/s plan=%.1fm stopline=%.1fm p=%.2f\n",
+            departure_alert_name(departure_alert.type),
+            departure_alert.event_id,
+            vehicle.radar_lead_distance_m,
+            vehicle.radar_lead_relative_speed_mps,
+            alert_input.plan_distance_m,
+            alert_input.stop_line_distance_m,
+            alert_input.stop_line_probability);
+      }
+
       K230ControlState control_state;
       control_state.timestamp_ns = k230_now_ns();
       control_state.enabled = config.enabled ? 1U : 0U;
@@ -439,12 +499,24 @@ int main() {
       control_state.desire = static_cast<uint32_t>(lateral_target.desire);
       std::snprintf(control_state.active_block, sizeof(control_state.active_block), "%s",
                     last_result.active_block.c_str());
-      const bool radar_lead_fresh =
-          vehicle.scc11_time_s >= 0.0 && now_s >= vehicle.scc11_time_s &&
-          now_s - vehicle.scc11_time_s <= 0.5;
       control_state.radar_lead_valid =
           radar_lead_fresh && vehicle.radar_lead_valid ? 1U : 0U;
       control_state.radar_lead_distance_m = vehicle.radar_lead_distance_m;
+      control_state.radar_lead_relative_speed_mps =
+          vehicle.radar_lead_relative_speed_mps;
+      control_state.departure_alert_type =
+          static_cast<uint32_t>(departure_alert.type);
+      control_state.departure_alert_event_id = departure_alert.event_id;
+      control_state.green_light_alert_armed =
+          departure_alert.green_light_armed ? 1U : 0U;
+      control_state.tpms_valid =
+          k7_tpms_state_fresh(vehicle, now_s) ? 1U : 0U;
+      control_state.tpms_unit = static_cast<uint32_t>(vehicle.tpms_unit);
+      control_state.tpms_pressure_fl = vehicle.tpms_pressure_fl;
+      control_state.tpms_pressure_fr = vehicle.tpms_pressure_fr;
+      control_state.tpms_pressure_rl = vehicle.tpms_pressure_rl;
+      control_state.tpms_pressure_rr = vehicle.tpms_pressure_rr;
+      control_state.tpms_warning = vehicle.tpms_warning ? 1U : 0U;
       if (!control_state_pub.publish(&control_state, sizeof(control_state))) {
         ++publish_errors;
       }

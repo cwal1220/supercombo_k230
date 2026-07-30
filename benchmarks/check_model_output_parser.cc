@@ -19,7 +19,10 @@ constexpr int kRoadEdgeMeanSize = 2 * kTrajectorySize * 2;
 constexpr int kLeadOffset = kRoadEdgeOffset + kRoadEdgeMeanSize * 2;
 constexpr int kLeadStride = kLeadTrajLen * 4 * 2 + kLeadMhpSelection;
 constexpr int kLeadProbOffset = kLeadOffset + kLeadMhpN * kLeadStride;
-constexpr int kMetaOffset = kLeadProbOffset + kLeadMhpSelection + 3 * 17 + 1;
+constexpr int kStopLineOffset = kLeadProbOffset + kLeadMhpSelection;
+constexpr int kStopLineStride = 17;
+constexpr int kStopLineSize = 3 * kStopLineStride + 1;
+constexpr int kMetaOffset = kStopLineOffset + kStopLineSize;
 constexpr int kPoseOffset = 6000;
 
 bool near(float actual, float expected, float tolerance = 1e-6f)
@@ -49,6 +52,13 @@ int self_test()
     raw[kLeadOffset + 1 * kLeadStride] = 31.0f;
     raw[kLeadOffset + 1 * kLeadStride + kLeadStride - kLeadMhpSelection] = 2.0f;
     raw[kLeadProbOffset] = 3.0f;
+    const int stop_line_base = kStopLineOffset + 2 * kStopLineStride;
+    raw[stop_line_base] = 6.5f;
+    raw[stop_line_base + 1] = -0.2f;
+    raw[stop_line_base + 6] = 0.1f;
+    raw[stop_line_base + 7] = 1.4f;
+    raw[stop_line_base + kStopLineStride - 1] = 3.0f;
+    raw[kStopLineOffset + kStopLineSize - 1] = 2.0f;
     raw[kMetaOffset + 4] = 4.0f;
     for (int i = 0; i < 3; ++i) {
         raw[kPoseOffset + i] = 10.0f + i;
@@ -69,6 +79,12 @@ int self_test()
         near(parsed.road_edges[1].points[3].y, -3.0f) &&
         near(parsed.road_edges[1].std, 0.3f) &&
         parsed.leads.primary(0, 0.0f, &lead) && near(lead.x, 31.0f) &&
+        parsed.stop_line.valid && parsed.stop_line.best_index == 2 &&
+        near(parsed.stop_line.position.x, 6.5f) &&
+        near(parsed.stop_line.position.y, -0.2f) &&
+        near(parsed.stop_line.speed, 0.1f) &&
+        near(parsed.stop_line.time, 1.4f) &&
+        parsed.stop_line.probability > 0.8f &&
         parsed.meta.desire_state[4] > parsed.meta.desire_state[0] &&
         parsed.has_pose && near(parsed.pose.trans[2], 12.0f) &&
         near(parsed.pose.trans_std[2], 0.03f);
@@ -142,6 +158,9 @@ int main(int argc, char *argv[])
               << " lead_valid=" << (have_lead ? 1 : 0);
     if (have_lead)
         std::cout << " lead_x=" << lead.x << " lead_y=" << lead.y;
+    if (parsed.stop_line.valid)
+        std::cout << " stopline_x=" << parsed.stop_line.position.x
+                  << " stopline_prob=" << parsed.stop_line.probability;
     std::cout << "\n";
     return 0;
 }

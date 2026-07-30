@@ -14,6 +14,8 @@
 #include <cstring>
 
 static_assert(sizeof(K230IpcHeader) == 40, "K230IpcHeader layout is part of the Python manager ABI");
+static_assert(sizeof(K230ControlState) == 184,
+              "K230ControlState layout is shared by controlsd and overlay");
 
 namespace {
 
@@ -328,6 +330,14 @@ void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parse
         state.lead.acceleration = lead.acceleration;
     }
 
+    state.stop_line.valid = parsed.stop_line.valid ? 1 : 0;
+    state.stop_line.probability = parsed.stop_line.probability;
+    state.stop_line.x = parsed.stop_line.position.x;
+    state.stop_line.y = parsed.stop_line.position.y;
+    state.stop_line.z = parsed.stop_line.position.z;
+    state.stop_line.speed = parsed.stop_line.speed;
+    state.stop_line.time = parsed.stop_line.time;
+
     state.pose.valid = parsed.has_pose ? 1 : 0;
     if (parsed.has_pose) {
         for (int i = 0; i < 3; ++i) {
@@ -416,6 +426,16 @@ ParsedModelOutput k230_parsed_from_model_state(const K230ModelState &state)
             state.lead.acceleration,
         };
     }
+
+    parsed.stop_line.valid = state.stop_line.valid != 0;
+    parsed.stop_line.probability = state.stop_line.probability;
+    parsed.stop_line.position = {
+        state.stop_line.x,
+        state.stop_line.y,
+        state.stop_line.z,
+    };
+    parsed.stop_line.speed = state.stop_line.speed;
+    parsed.stop_line.time = state.stop_line.time;
 
     parsed.has_pose = state.pose.valid != 0;
     if (parsed.has_pose) {

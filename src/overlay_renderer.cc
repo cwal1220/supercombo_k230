@@ -156,12 +156,20 @@ public:
         text_left(x, y, text, scale, color);
     }
 
-    void box(int x, int y, int w, int h, uint32_t accent, bool accent_right = false)
+    void box(int x, int y, int w, int h, uint32_t accent)
     {
-        fill_rect(x, y, w, h, argb(74, 0, 0, 0));
-        fill_rect(x, y, w, 1, argb(72, 255, 255, 255));
-        fill_rect(x, y + h - 1, w, 1, argb(36, 255, 255, 255));
-        fill_rect(accent_right ? x + w - 3 : x, y, 3, h, accent);
+        fill_rect(x, y, w, h, argb(82, 3, 7, 11));
+        fill_rect(x, y, w, 1, argb(68, 255, 255, 255));
+        fill_rect(x, y + h - 1, w, 1, argb(44, 255, 255, 255));
+        fill_rect(x, y, 1, h, argb(52, 255, 255, 255));
+        fill_rect(x + w - 1, y, 1, h, argb(34, 255, 255, 255));
+        fill_rect(x, y, 3, h, accent);
+    }
+
+    void panel(int x, int y, int w, int h, uint32_t accent)
+    {
+        box(x, y, w, h, accent);
+        fill_rect(x + 8, y + 17, w - 16, 1, argb(42, 255, 255, 255));
     }
 
 private:
@@ -284,7 +292,7 @@ void draw_turn_signals(cv::Mat &frame, const OverlayHudState &hud,
 {
     if (!hud.left_blinker && !hud.right_blinker) return;
 
-    constexpr int kCenterY = 130;
+    constexpr int kCenterY = 42;
     constexpr int kInnerOffset = 74;
     constexpr int kChevronStep = 28;
     const int center_x = logical_width / 2;
@@ -348,6 +356,85 @@ void draw_lead_chevron_180(cv::Mat &img, int cx, int cy, int size,
                   bgra(35, inner_green, 255, confidence_alpha));
 }
 
+void draw_stop_signal_indicator(cv::Mat &img, const OverlayHudState &hud,
+                                int logical_width, int logical_height,
+                                bool rotate_landscape)
+{
+    const bool green =
+        hud.departure_alert_type == DepartureAlertType::green_light;
+    const bool red = hud.green_light_alert_armed;
+    if (!green && !red) return;
+
+    constexpr int kRightOffset = 126;
+    constexpr int kCenterY = 350;
+    constexpr int kHalfWidth = 58;
+    constexpr int kHalfHeight = 24;
+    constexpr int kCorner = 6;
+    const int center_x = logical_width - kRightOffset;
+
+    auto housing_points = [&](int offset_x, int offset_y) {
+        const int left = center_x - kHalfWidth + offset_x;
+        const int right = center_x + kHalfWidth + offset_x;
+        const int top = kCenterY - kHalfHeight + offset_y;
+        const int bottom = kCenterY + kHalfHeight + offset_y;
+        std::array<cv::Point, 8> points = {
+            display_point(left + kCorner, top, logical_height, rotate_landscape),
+            display_point(right - kCorner, top, logical_height, rotate_landscape),
+            display_point(right, top + kCorner, logical_height, rotate_landscape),
+            display_point(right, bottom - kCorner, logical_height, rotate_landscape),
+            display_point(right - kCorner, bottom, logical_height, rotate_landscape),
+            display_point(left + kCorner, bottom, logical_height, rotate_landscape),
+            display_point(left, bottom - kCorner, logical_height, rotate_landscape),
+            display_point(left, top + kCorner, logical_height, rotate_landscape),
+        };
+        return points;
+    };
+
+    auto fill_housing = [&](const std::array<cv::Point, 8> &points,
+                            const cv::Scalar &color) {
+        const cv::Point *polygon[] = {points.data()};
+        const int count[] = {static_cast<int>(points.size())};
+        cv::fillPoly(img, polygon, count, 1, color, cv::LINE_8);
+    };
+
+    const std::array<cv::Point, 8> shadow = housing_points(3, 3);
+    fill_housing(shadow, bgra(0, 0, 0, 90));
+    const std::array<cv::Point, 8> housing = housing_points(0, 0);
+    fill_housing(housing, bgra(16, 19, 22, 235));
+    const cv::Point *outline[] = {housing.data()};
+    const int outline_count[] = {static_cast<int>(housing.size())};
+    cv::polylines(img, outline, outline_count, 1, true,
+                  bgra(105, 115, 125, 210), 1, cv::LINE_8);
+
+    auto draw_lamp = [&](int logical_x, const cv::Scalar &off_color,
+                         const cv::Scalar &on_color, bool active) {
+        const cv::Point center = display_point(
+            logical_x, kCenterY, logical_height, rotate_landscape);
+        cv::circle(img, center, 14, bgra(0, 0, 0, 230),
+                   cv::FILLED, cv::LINE_8);
+        if (active) {
+            cv::circle(img, center, 12,
+                       cv::Scalar(on_color[0], on_color[1], on_color[2], 80),
+                       cv::FILLED, cv::LINE_8);
+            cv::circle(img, center, 9, on_color, cv::FILLED, cv::LINE_8);
+            const cv::Point highlight = display_point(
+                logical_x - 3, kCenterY - 3,
+                logical_height, rotate_landscape);
+            cv::circle(img, highlight, 3, bgra(225, 235, 245, 190),
+                       cv::FILLED, cv::LINE_8);
+        } else {
+            cv::circle(img, center, 9, off_color, cv::FILLED, cv::LINE_8);
+        }
+    };
+
+    draw_lamp(center_x - 33, bgra(8, 12, 60, 210),
+              bgra(25, 45, 255, 245), red && !green);
+    draw_lamp(center_x, bgra(8, 45, 60, 210),
+              bgra(20, 210, 255, 245), false);
+    draw_lamp(center_x + 33, bgra(12, 55, 12, 210),
+              bgra(25, 245, 35, 245), green);
+}
+
 void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
               const ParsedModelOutput &output, int logical_width, int logical_height,
               bool rotate_landscape)
@@ -375,6 +462,16 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     constexpr int left_x = left_box_x + 10;
     const int right_x = right_box_x + 10;
     constexpr int col_w = box_w - 20;
+    constexpr int panel_h = 66;
+    constexpr int panel_gap = 8;
+    constexpr int panel_y0 = 10;
+    constexpr int panel_y1 = panel_y0 + panel_h + panel_gap;
+    constexpr int panel_y2 = panel_y1 + panel_h + panel_gap;
+    constexpr int panel_y3 = panel_y2 + panel_h + panel_gap;
+    auto draw_panel = [&](int x, int y, uint32_t accent, const char *title) {
+        ui.panel(x, y, box_w, panel_h, accent);
+        ui.hud_text_left(x + 10, y + 5, title, 1, dim, col_w);
+    };
 
     ui.hud_text_center(width / 2, 12,
                        format_text("%.0F", std::max(0.0f, hud.speed_kph)),
@@ -390,24 +487,26 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     const uint32_t panda_color = !hud.panda_connected || !hud.panda_healthy ? orange :
                                  (hud.panda_faults != 0 ? red : green);
 
-    ui.box(left_box_x, 10, box_w, 72, status);
-    ui.hud_text_left(left_x, 16, "OPENPILOT", 1, dim, col_w);
-    ui.hud_text_left(left_x, 34, op_status, 3, control_color, col_w);
-    ui.hud_text_left(left_x, 62,
+    draw_panel(left_box_x, panel_y0, status, "OPENPILOT");
+    ui.hud_text_left(left_x, panel_y0 + 21, op_status, 3,
+                     control_color, col_w);
+    ui.hud_text_left(left_x, panel_y0 + 51,
                      format_text("PANDA %s  CAR %s",
                                  hud.panda_connected && hud.panda_healthy ? "OK" : "--",
                                  hud.vehicle_fresh ? "OK" : "--"),
                      1, panda_color, col_w);
-    ui.box(left_box_x, 90, box_w, 66, control_color);
-    ui.hud_text_left(left_x, 96,
+
+    draw_panel(left_box_x, panel_y1, control_color, "CONTROL");
+    ui.hud_text_left(left_x, panel_y1 + 21,
                      format_text("ANGLE %.1F", hud.steering_angle_deg),
                      2, control_color, col_w);
-    ui.hud_text_left(left_x, 116,
-                     format_text("TQ D %d A %d", hud.desired_torque, hud.apply_torque),
-                     2, control_color, col_w);
-    ui.hud_text_left(left_x, 136,
+    ui.hud_text_left(left_x, panel_y1 + 42,
+                     format_text("TORQUE D %d A %d",
+                                 hud.desired_torque, hud.apply_torque),
+                     1, control_color, col_w);
+    ui.hud_text_left(left_x, panel_y1 + 53,
                      format_text("DRIVER %d", hud.driver_torque),
-                     2, hud.services_healthy ? dim : orange, col_w);
+                     1, hud.services_healthy ? dim : orange, col_w);
 
     const uint32_t cpu_color = hud.cpu_percent >= 90.0f || hud.cpu_temp_c >= 85.0f ? red :
                                (hud.cpu_percent >= 75.0f || hud.cpu_temp_c >= 75.0f ? orange :
@@ -420,19 +519,16 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
                                         (hud.calibration_status == 2 ? red : yellow));
     const uint32_t network_color = !hud.network_connected ? orange :
         (hud.wifi_signal_dbm != 0 && hud.wifi_signal_dbm <= -75 ? yellow : green);
-    ui.box(right_box_x, 10, box_w, 80, cpu_color, true);
-    ui.hud_text_left(right_x, 16,
-                     format_text("CPU %.0F%% TEMP %.0FC", hud.cpu_percent, hud.cpu_temp_c),
-                     2, cpu_color, col_w);
-    ui.hud_text_left(right_x, 42,
-                     format_text("AI %.1F FPS CAM %.1F FPS",
+    const uint32_t system_color = hud.services_healthy ? blue : orange;
+    draw_panel(right_box_x, panel_y0, system_color, "SYSTEM");
+    ui.hud_text_left(right_x, panel_y0 + 21,
+                     format_text("AI %.1F FPS  CAM %.1F FPS",
                                  hud.model_fps, hud.preview_fps),
                      1, dim, col_w);
-    ui.hud_text_left(right_x, 58,
-                     format_text("HUD %.1F FPS MEM %.0F%%",
-                                 hud.overlay_fps, hud.memory_percent),
+    ui.hud_text_left(right_x, panel_y0 + 36,
+                     format_text("HUD %.1F FPS", hud.overlay_fps),
                      1, dim, col_w);
-    ui.hud_text_left(right_x, 74,
+    ui.hud_text_left(right_x, panel_y0 + 51,
                      hud.network_connected
                          ? (hud.wifi_signal_dbm != 0
                                 ? format_text("NET %s %s %dDBM",
@@ -445,33 +541,39 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
                          : "NET OFFLINE",
                      1, network_color, col_w);
 
-    constexpr int calibration_box_y = 98;
-    ui.box(right_box_x, calibration_box_y, box_w, 66, calibration_color, true);
-    ui.hud_text_left(right_x, calibration_box_y + 6,
-                     format_text("CAL %s B %d", calibration_status,
-                                 std::max(0, hud.calibration_valid_blocks)),
-                     2, calibration_color, col_w);
-    ui.hud_text_left(right_x, calibration_box_y + 26,
+    draw_panel(right_box_x, panel_y1, cpu_color, "HEALTH");
+    ui.hud_text_left(right_x, panel_y1 + 22,
+                     format_text("CPU %.0F%% TEMP %.0FC",
+                                 hud.cpu_percent, hud.cpu_temp_c),
+                     2, cpu_color, col_w);
+    ui.hud_text_left(right_x, panel_y1 + 47,
+                     format_text("MEM %.0F%%", hud.memory_percent),
+                     2, cpu_color, col_w);
+
+    draw_panel(right_box_x, panel_y2, calibration_color, "CALIBRATION");
+    ui.hud_text_left(right_x + 180, panel_y2 + 5,
+                     calibration_status, 1, calibration_color, 36);
+    ui.hud_text_left(right_x, panel_y2 + 22,
                      format_text("R %.2F P %.2F", hud.calibration_roll_deg,
                                  hud.calibration_pitch_deg),
                      2, calibration_color, col_w);
-    ui.hud_text_left(right_x, calibration_box_y + 46,
-                     format_text("Y %.2F DEG", hud.calibration_yaw_deg),
+    ui.hud_text_left(right_x, panel_y2 + 47,
+                     format_text("Y %.2F BLOCK %d",
+                                 hud.calibration_yaw_deg,
+                                 std::max(0, hud.calibration_valid_blocks)),
                      2, calibration_color, col_w);
 
-    constexpr int drive_box_y = 164;
-    constexpr int drive_box_h = 66;
+    constexpr int drive_box_y = panel_y2;
     const bool set_speed_valid = std::isfinite(hud.cruise_set_speed_kph) &&
                                  hud.cruise_set_speed_kph > 0.0f;
-    ui.box(left_box_x, drive_box_y, box_w, drive_box_h, control_color);
-    ui.hud_text_left(left_x, drive_box_y + 6, "DRIVE", 1, dim, col_w);
-    ui.hud_text_left(left_x, drive_box_y + 24,
+    draw_panel(left_box_x, drive_box_y, control_color, "DRIVE");
+    ui.hud_text_left(left_x, drive_box_y + 22,
                      set_speed_valid
                          ? format_text("GEAR %s SET %.0F", gear_text(hud.gear),
                                        hud.cruise_set_speed_kph)
                          : format_text("GEAR %s SET --", gear_text(hud.gear)),
                      2, control_color, col_w);
-    ui.hud_text_left(left_x, drive_box_y + 48,
+    ui.hud_text_left(left_x, drive_box_y + 47,
                      format_text("CRZ %s  %s",
                                  hud.cruise_active ? "ON" : "OFF",
                                  active_block_text(hud).c_str()),
@@ -487,35 +589,87 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     const bool have_display_lead = have_radar_lead || have_lead;
     const float lead_distance_m =
         display_lead_distance_m(hud, have_lead ? &lead : nullptr);
-    const float relative_speed_kph =
-        have_lead ? (lead.velocity - hud.speed_kph / 3.6f) * 3.6f : 0.0f;
+    const float relative_speed_kph = have_radar_lead
+        ? hud.radar_lead_relative_speed_mps * 3.6f
+        : (have_lead ? (lead.velocity - hud.speed_kph / 3.6f) * 3.6f : 0.0f);
     const uint32_t lead_color = !have_display_lead ? dim :
-        ((lead_distance_m < 15.0f ||
-          (have_lead && relative_speed_kph < -20.0f)) ? orange : blue);
-    constexpr int lead_box_y = 172;
-    ui.box(right_box_x, lead_box_y, box_w, drive_box_h, lead_color, true);
-    ui.hud_text_left(right_x, lead_box_y + 6, "LEAD", 1, dim, col_w);
+        ((lead_distance_m < 15.0f || relative_speed_kph < -20.0f)
+             ? orange : blue);
+    constexpr int lead_box_y = panel_y3;
+    draw_panel(right_box_x, lead_box_y, lead_color, "LEAD");
     if (have_display_lead) {
-        ui.hud_text_left(right_x, lead_box_y + 24,
+        ui.hud_text_left(right_x, lead_box_y + 22,
                          format_text("DIST %.0FM P %.0F%%",
                                      lead_distance_m,
                                      have_lead ? lead_probability * 100.0f : 0.0f),
                          2, lead_color, col_w);
-        if (have_lead) {
-            ui.hud_text_left(right_x, lead_box_y + 46,
-                             format_text("REL %+.0F KPH", relative_speed_kph),
-                             2, lead_color, col_w);
-        } else {
-            ui.hud_text_left(right_x, lead_box_y + 46, "REL -- KPH",
-                             2, lead_color, col_w);
-        }
+        ui.hud_text_left(right_x, lead_box_y + 47,
+                         format_text("REL %+.0F KPH", relative_speed_kph),
+                         2, lead_color, col_w);
     } else {
-        ui.hud_text_left(right_x, lead_box_y + 24, "NO LEAD", 2, dim, col_w);
-        ui.hud_text_left(right_x, lead_box_y + 46, "REL -- KPH", 2, dim, col_w);
+        ui.hud_text_left(right_x, lead_box_y + 22, "NO LEAD", 2, dim, col_w);
+        ui.hud_text_left(right_x, lead_box_y + 47, "REL -- KPH", 2, dim, col_w);
     }
+
+    draw_stop_signal_indicator(frame, hud,
+                               logical_width, logical_height, rotate_landscape);
+
+    constexpr int tpms_box_y = panel_y3;
+    constexpr int tpms_col_offset = 112;
+    constexpr int tpms_col_w = 108;
+    const bool tpms_bar = hud.tpms_unit == 2;
+    const float tpms_low = tpms_bar ? 2.2f : 32.0f;
+    const float tpms_high = tpms_bar ? 2.8f : 45.0f;
+    auto pressure_available = [&](float pressure) {
+        return hud.tpms_valid && std::isfinite(pressure) && pressure > 0.0f;
+    };
+    auto pressure_color = [&](float pressure) {
+        if (!pressure_available(pressure)) return dim;
+        if (pressure > tpms_high) return red;
+        if (pressure < tpms_low) return yellow;
+        return green;
+    };
+    auto pressure_text = [&](const char *wheel, float pressure) {
+        if (!pressure_available(pressure))
+            return format_text("%s -", wheel);
+        return tpms_bar ? format_text("%s %.1F", wheel, pressure)
+                        : format_text("%s %.0F", wheel, pressure);
+    };
+    const std::array<float, 4> pressures = {
+        hud.tpms_pressure_fl, hud.tpms_pressure_fr,
+        hud.tpms_pressure_rl, hud.tpms_pressure_rr,
+    };
+    bool tpms_low_pressure = false;
+    bool tpms_high_pressure = false;
+    for (float pressure : pressures) {
+        if (!pressure_available(pressure)) continue;
+        tpms_low_pressure |= pressure < tpms_low;
+        tpms_high_pressure |= pressure > tpms_high;
+    }
+    const uint32_t tpms_color = !hud.tpms_valid ? dim :
+        ((hud.tpms_warning || tpms_high_pressure) ? red :
+         (tpms_low_pressure ? yellow : green));
+    draw_panel(left_box_x, tpms_box_y, tpms_color, "TPMS");
+    ui.hud_text_left(left_x + 178, tpms_box_y + 5,
+                     tpms_bar ? "BAR" : "PSI", 1, tpms_color, 38);
+    ui.fill_rect(left_x + tpms_col_offset - 8, tpms_box_y + 22, 1, 38,
+                 argb(38, 255, 255, 255));
+    ui.hud_text_left(left_x, tpms_box_y + 22,
+                     pressure_text("FL", hud.tpms_pressure_fl), 2,
+                     pressure_color(hud.tpms_pressure_fl), tpms_col_w);
+    ui.hud_text_left(left_x + tpms_col_offset, tpms_box_y + 22,
+                     pressure_text("FR", hud.tpms_pressure_fr), 2,
+                     pressure_color(hud.tpms_pressure_fr), tpms_col_w);
+    ui.hud_text_left(left_x, tpms_box_y + 43,
+                     pressure_text("RL", hud.tpms_pressure_rl), 2,
+                     pressure_color(hud.tpms_pressure_rl), tpms_col_w);
+    ui.hud_text_left(left_x + tpms_col_offset, tpms_box_y + 43,
+                     pressure_text("RR", hud.tpms_pressure_rr), 2,
+                     pressure_color(hud.tpms_pressure_rr), tpms_col_w);
 
     std::string alert;
     uint32_t alert_color = orange;
+    bool showing_departure_alert = false;
     if (hud.steering_fault) {
         alert = "STEERING FAULT";
         alert_color = red;
@@ -524,6 +678,14 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
         alert_color = red;
     } else if (!hud.services_healthy) {
         alert = "WAITING FOR SERVICES";
+    } else if (hud.departure_alert_type == DepartureAlertType::lead_departed) {
+        alert = "LEAD VEHICLE MOVING";
+        alert_color = green;
+        showing_departure_alert = true;
+    } else if (hud.departure_alert_type == DepartureAlertType::green_light) {
+        alert = "TRAFFIC SIGNAL CHANGED";
+        alert_color = green;
+        showing_departure_alert = true;
     }
     if (!alert.empty()) {
         constexpr int alert_w = 520;
@@ -533,10 +695,12 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
         ui.hud_text_center(width / 2, alert_y + 8, alert, 3,
                            alert_color, alert_w - 18);
         ui.hud_text_center(width / 2, alert_y + 36,
-                           format_text("M%s CTL%s PND%s",
-                                       output.valid ? "OK" : "--",
-                                       hud.vehicle_fresh ? "OK" : "--",
-                                       hud.panda_connected ? "OK" : "--"),
+                           showing_departure_alert
+                               ? "CHECK ROAD AND PROCEED"
+                               : format_text("M%s CTL%s PND%s",
+                                             output.valid ? "OK" : "--",
+                                             hud.vehicle_fresh ? "OK" : "--",
+                                             hud.panda_connected ? "OK" : "--"),
                            1, white, alert_w - 18);
     }
 }
@@ -583,6 +747,46 @@ void draw_model_ribbon(cv::Mat &img,
         const int count[] = {static_cast<int>(vertices.size())};
         cv::fillPoly(img, polygon, count, 1, color, cv::LINE_8);
     }
+}
+
+void draw_stop_line(cv::Mat &img, const ParsedStopLine &stop_line,
+                    const ProjectionState &projection,
+                    int logical_width, int logical_height, bool rotate_landscape)
+{
+    constexpr float kProbabilityThreshold = 0.7f;
+    constexpr float kMinDistanceM = 0.5f;
+    constexpr float kMaxDistanceM = 80.0f;
+    constexpr float kHalfWidthM = 2.0f;
+    constexpr float kHalfDepthM = 0.5f;
+
+    const ModelPoint &center = stop_line.position;
+    if (!stop_line.valid || stop_line.probability < kProbabilityThreshold ||
+        !std::isfinite(center.x) || !std::isfinite(center.y) ||
+        !std::isfinite(center.z) ||
+        center.x < kMinDistanceM || center.x > kMaxDistanceM) {
+        return;
+    }
+
+    const std::array<ModelPoint, 4> corners = {{
+        {center.x + kHalfDepthM, center.y - kHalfWidthM, center.z + kModelHeight},
+        {center.x + kHalfDepthM, center.y + kHalfWidthM, center.z + kModelHeight},
+        {center.x - kHalfDepthM, center.y + kHalfWidthM, center.z + kModelHeight},
+        {center.x - kHalfDepthM, center.y - kHalfWidthM, center.z + kModelHeight},
+    }};
+
+    std::vector<cv::Point> vertices;
+    vertices.reserve(corners.size());
+    for (const ModelPoint &corner : corners) {
+        if (!append_projected_point(&vertices, corner, 0.0f, 0.0f, projection,
+                                    logical_width, logical_height,
+                                    rotate_landscape)) {
+            return;
+        }
+    }
+
+    const int alpha = static_cast<int>(
+        std::clamp(stop_line.probability, 0.0f, 1.0f) * 255.0f);
+    cv::fillConvexPoly(img, vertices, bgra(0, 0, 179, alpha), cv::LINE_8);
 }
 
 cv::Scalar openpilot_path_color(const OverlayHudState &hud)
@@ -663,6 +867,9 @@ void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &outp
                               bgra(60, 60, 255, static_cast<int>(confidence * 200.0f)),
                               projection, logical_width, logical_height, rotate_landscape);
         }
+
+        draw_stop_line(frame, output.stop_line, projection,
+                       logical_width, logical_height, rotate_landscape);
 
         ParsedLeadPoint lead;
         float lead_probability = 0.0f;

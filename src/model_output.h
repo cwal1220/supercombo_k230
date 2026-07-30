@@ -66,12 +66,23 @@ struct ParsedLeads {
     bool primary(int time_idx, float min_probability, ParsedLeadPoint *lead, float *probability = nullptr) const;
 };
 
+struct ParsedStopLine {
+    bool valid = false;
+    int best_index = 0;
+    float probability = 0.0f;
+    ModelPoint position;
+    ModelPoint rotation;
+    float speed = 0.0f;
+    float time = 0.0f;
+};
+
 struct ParsedModelOutput {
     bool valid = false;
     ParsedPlan plan;
     std::array<ParsedLaneLine, 4> lanes{};
     std::array<ParsedRoadEdge, 2> road_edges{};
     ParsedLeads leads;
+    ParsedStopLine stop_line;
     ParsedMeta meta;
     bool has_pose = false;
     PoseObservation pose{};

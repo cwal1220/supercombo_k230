@@ -85,6 +85,16 @@ struct K230LeadState {
     float acceleration = 0.0f;
 };
 
+struct K230StopLineState {
+    uint32_t valid = 0;
+    float probability = 0.0f;
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+    float speed = 0.0f;
+    float time = 0.0f;
+};
+
 struct K230PoseState {
     uint32_t valid = 0;
     float trans[3] = {};
@@ -141,6 +151,7 @@ struct K230ModelState {
     float road_edge_stds[2] = {};
     float desire_state[kDesireLen] = {};
     K230LeadState lead;
+    K230StopLineState stop_line;
     K230PoseState pose;
     K230CalibrationState calibration;
     K230LateralTargetState lateral_target;
@@ -247,6 +258,17 @@ struct K230ControlState {
     char active_block[32] = {};
     uint32_t radar_lead_valid = 0;
     float radar_lead_distance_m = 0.0f;
+    float radar_lead_relative_speed_mps = 0.0f;
+    uint32_t departure_alert_type = 0;
+    uint32_t departure_alert_event_id = 0;
+    uint32_t green_light_alert_armed = 0;
+    uint32_t tpms_valid = 0;
+    uint32_t tpms_unit = 0;
+    float tpms_pressure_fl = 0.0f;
+    float tpms_pressure_fr = 0.0f;
+    float tpms_pressure_rl = 0.0f;
+    float tpms_pressure_rr = 0.0f;
+    uint32_t tpms_warning = 0;
 };
 
 class K230LatestChannel {

@@ -26,6 +26,7 @@ bool expected_openpilot_k7_bus(uint32_t address, uint8_t bus) {
     case kHyundaiCgw1Address:
     case kHyundaiCgw2Address:
     case kHyundaiLca11Address:
+    case kHyundaiTpms11Address:
       return bus == kK7PowertrainBus;
     case kHyundaiMdps12Address:
       return bus == kK7MdpsBus;
@@ -110,6 +111,8 @@ Scc11Values decode_scc11(const std::array<uint8_t, 8> &data) {
   values.object_valid = get_signal_le(data.data(), 22, 2) != 0;
   values.object_distance_m =
       static_cast<float>(get_signal_le(data.data(), 33, 11)) * 0.1f;
+  values.object_relative_speed_mps =
+      static_cast<float>(get_signal_le(data.data(), 44, 12)) * 0.1f - 170.0f;
   return values;
 }
 
@@ -171,6 +174,27 @@ Lca11Values decode_lca11(const std::array<uint8_t, 8> &data) {
   return values;
 }
 
+Tpms11Values decode_tpms11(const std::array<uint8_t, 8> &data) {
+  Tpms11Values values;
+  values.unit = static_cast<int>(get_signal_le(data.data(), 11, 2));
+  const float factor =
+      values.unit == 1 ? 0.72519f : (values.unit == 2 ? 0.1f : 1.0f);
+  auto pressure = [factor](uint8_t raw) {
+    return raw == 0xff ? 0.0f : static_cast<float>(raw) * factor;
+  };
+  values.pressure_fl = pressure(data[2]);
+  values.pressure_fr = pressure(data[3]);
+  values.pressure_rl = pressure(data[4]);
+  values.pressure_rr = pressure(data[5]);
+  values.warning =
+      get_signal_le(data.data(), 0, 2) != 0 ||
+      get_signal_le(data.data(), 4, 1) != 0 ||
+      get_signal_le(data.data(), 5, 1) != 0 ||
+      get_signal_le(data.data(), 6, 1) != 0 ||
+      get_signal_le(data.data(), 7, 1) != 0;
+  return values;
+}
+
 void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
                                  const std::array<uint8_t, 8> &data,
                                  uint8_t length, uint8_t bus,
@@ -219,6 +243,7 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     state->cruise_set_speed = scc.set_speed;
     state->radar_lead_valid = scc.object_valid;
     state->radar_lead_distance_m = scc.object_distance_m;
+    state->radar_lead_relative_speed_mps = scc.object_relative_speed_mps;
     state->scc11_time_s = now_s;
   } else if (address == kHyundaiScc12Address && length >= 8) {
     state->acc_mode = static_cast<int>(get_signal_le(data.data(), 13, 2));
@@ -268,6 +293,15 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     state->left_blindspot = lca.left_blindspot;
     state->right_blindspot = lca.right_blindspot;
     state->lca11_time_s = now_s;
+  } else if (address == kHyundaiTpms11Address && length >= 6) {
+    const Tpms11Values tpms = decode_tpms11(data);
+    state->tpms_unit = tpms.unit;
+    state->tpms_pressure_fl = tpms.pressure_fl;
+    state->tpms_pressure_fr = tpms.pressure_fr;
+    state->tpms_pressure_rl = tpms.pressure_rl;
+    state->tpms_pressure_rr = tpms.pressure_rr;
+    state->tpms_warning = tpms.warning;
+    state->tpms11_time_s = now_s;
   }
 }
 
@@ -287,6 +321,11 @@ bool k7_vehicle_state_fresh(const K7VehicleCanState &state, double now_s,
 
 bool k7_seed_frames_ready(const K7VehicleCanState &state) {
   return state.has_lkas11_seed && state.has_clu11_seed && state.has_mdps12_seed;
+}
+
+bool k7_tpms_state_fresh(const K7VehicleCanState &state, double now_s,
+                         double timeout_s) {
+  return fresh_time(state.tpms11_time_s, now_s, timeout_s);
 }
 
 float k7_cruise_set_speed_kph(const K7VehicleCanState &state) {

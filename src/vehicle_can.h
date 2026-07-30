@@ -14,6 +14,7 @@ constexpr uint32_t kHyundaiElectGearAddress = 882;   // 0x372
 constexpr uint32_t kHyundaiCgw1Address = 1345;       // 0x541
 constexpr uint32_t kHyundaiCgw2Address = 1363;       // 0x553
 constexpr uint32_t kHyundaiLca11Address = 1419;      // 0x58b
+constexpr uint32_t kHyundaiTpms11Address = 1427;     // 0x593
 
 constexpr uint8_t kK7PowertrainBus = 0;
 constexpr uint8_t kK7MdpsBus = 1;
@@ -49,6 +50,7 @@ struct Scc11Values {
   float set_speed = 0.0f;
   bool object_valid = false;
   float object_distance_m = 0.0f;
+  float object_relative_speed_mps = 0.0f;
 };
 
 struct Tcs13Values {
@@ -94,6 +96,15 @@ struct Lca11Values {
   bool right_blindspot = false;
 };
 
+struct Tpms11Values {
+  int unit = 0;
+  float pressure_fl = 0.0f;
+  float pressure_fr = 0.0f;
+  float pressure_rl = 0.0f;
+  float pressure_rr = 0.0f;
+  bool warning = false;
+};
+
 struct K7VehicleCanState {
   std::array<uint8_t, 8> lkas11_seed{};
   std::array<uint8_t, 4> clu11_seed{};
@@ -116,6 +127,7 @@ struct K7VehicleCanState {
   double cgw1_time_s = -1.0;
   double cgw2_time_s = -1.0;
   double lca11_time_s = -1.0;
+  double tpms11_time_s = -1.0;
 
   int clu_button = 0;
   float cluster_speed = 0.0f;
@@ -156,12 +168,19 @@ struct K7VehicleCanState {
   bool hazard = false;
   bool left_blindspot = false;
   bool right_blindspot = false;
+  int tpms_unit = 0;
+  float tpms_pressure_fl = 0.0f;
+  float tpms_pressure_fr = 0.0f;
+  float tpms_pressure_rl = 0.0f;
+  float tpms_pressure_rr = 0.0f;
+  bool tpms_warning = false;
   int acc_mode = 0;
   bool cruise_main = false;
   bool cruise_active = false;
   float cruise_set_speed = 0.0f;
   bool radar_lead_valid = false;
   float radar_lead_distance_m = 0.0f;
+  float radar_lead_relative_speed_mps = 0.0f;
 };
 
 // Panda safety의 MDPS12 driver torque scale과 같은 값을 계산한다.
@@ -200,6 +219,8 @@ Cgw2Values decode_cgw2(const std::array<uint8_t, 8> &data);
 // K7 LCA11 blind-spot indicators를 해석한다.
 Lca11Values decode_lca11(const std::array<uint8_t, 8> &data);
 
+Tpms11Values decode_tpms11(const std::array<uint8_t, 8> &data);
+
 // raw CAN frame을 K7 vehicle state에 반영한다.
 void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
                                  const std::array<uint8_t, 8> &data,
@@ -212,6 +233,9 @@ bool k7_vehicle_state_fresh(const K7VehicleCanState &state, double now_s,
 
 // LKAS/CLU/MDPS seed frame이 모두 준비됐는지 확인한다.
 bool k7_seed_frames_ready(const K7VehicleCanState &state);
+
+bool k7_tpms_state_fresh(const K7VehicleCanState &state, double now_s,
+                         double timeout_s = 5.0);
 
 // SCC11 설정 속도를 CLU11 단위 설정에 따라 km/h로 변환한다.
 float k7_cruise_set_speed_kph(const K7VehicleCanState &state);

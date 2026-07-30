@@ -46,6 +46,7 @@ set(PROJECT_LOCAL_INCLUDES
 set(PROJECT_SYSTEM_INCLUDES)
 
 add_library(k7_control_core STATIC
+  src/departure_alert.cc
   src/driving_params.cc
   src/hyundai_can.cc
   src/hyundai_steering.cc
@@ -89,8 +90,9 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     "${K230_SYSROOT_LIB_DIR}/libdisplay.so"
     "${K230_SYSROOT_LIB_DIR}/libdrm.so.2"
   )
+  set(K230_ASOUND_LIB "${K230_SYSROOT_LIB_DIR}/libasound.so")
 
-  foreach(required_lib IN LISTS NNCASE_STATIC_LIBS K230_SHARED_LIBS)
+  foreach(required_lib IN LISTS NNCASE_STATIC_LIBS K230_SHARED_LIBS K230_ASOUND_LIB)
     if(NOT EXISTS "${required_lib}")
       message(FATAL_ERROR
         "Missing required library: ${required_lib}\n"
@@ -180,6 +182,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
 
   add_executable(k230_overlay
     src/k230_overlay.cc
+    src/alert_sound_player.cc
     src/k230_ipc.cc
     src/overlay_renderer.cc
     ${COMMON_SOURCES}
@@ -187,6 +190,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
   configure_k230_target(k230_overlay
     mmz
     ${K230_SHARED_LIBS}
+    ${K230_ASOUND_LIB}
     ${OpenCV_LIBS}
   )
 
@@ -275,6 +279,11 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
   target_link_libraries(check_k7_control_replay PRIVATE k7_control_core)
   target_include_directories(check_k7_control_replay PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_compile_options(check_k7_control_replay PRIVATE ${PROJECT_WARNINGS})
+
+  add_executable(check_departure_alert benchmarks/check_departure_alert.cc)
+  target_link_libraries(check_departure_alert PRIVATE k7_control_core)
+  target_include_directories(check_departure_alert PRIVATE ${PROJECT_LOCAL_INCLUDES})
+  target_compile_options(check_departure_alert PRIVATE ${PROJECT_WARNINGS})
 
   add_executable(bench_input_warp_overhead
     benchmarks/bench_input_warp_overhead.cc

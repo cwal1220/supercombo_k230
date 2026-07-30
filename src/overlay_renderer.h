@@ -2,6 +2,7 @@
 #define OVERLAY_RENDERER_H
 
 #include "display.h"
+#include "departure_alert.h"
 #include "model_output.h"
 #include "projection.h"
 
@@ -27,6 +28,17 @@ struct OverlayHudState {
     float cruise_set_speed_kph = 0.0f;
     bool radar_lead_valid = false;
     float radar_lead_distance_m = 0.0f;
+    float radar_lead_relative_speed_mps = 0.0f;
+    DepartureAlertType departure_alert_type = DepartureAlertType::none;
+    uint32_t departure_alert_event_id = 0;
+    bool green_light_alert_armed = false;
+    bool tpms_valid = false;
+    int tpms_unit = 0;
+    float tpms_pressure_fl = 0.0f;
+    float tpms_pressure_fr = 0.0f;
+    float tpms_pressure_rl = 0.0f;
+    float tpms_pressure_rr = 0.0f;
+    bool tpms_warning = false;
     float steering_angle_deg = 0.0f;
     float normalized_output = 0.0f;
     int desired_torque = 0;

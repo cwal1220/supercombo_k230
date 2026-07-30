@@ -1,4 +1,5 @@
 #include "app_config.h"
+#include "alert_sound_player.h"
 #include "display.h"
 #include "k230_ipc.h"
 #include "overlay_renderer.h"
@@ -518,6 +519,43 @@ private:
             control_fresh && latest_control_state_.radar_lead_valid != 0;
         hud_.radar_lead_distance_m =
             control_fresh ? latest_control_state_.radar_lead_distance_m : 0.0f;
+        hud_.radar_lead_relative_speed_mps =
+            control_fresh
+                ? latest_control_state_.radar_lead_relative_speed_mps
+                : 0.0f;
+        hud_.departure_alert_type = control_fresh
+            ? static_cast<DepartureAlertType>(
+                  latest_control_state_.departure_alert_type)
+            : DepartureAlertType::none;
+        hud_.departure_alert_event_id =
+            control_fresh ? latest_control_state_.departure_alert_event_id : 0;
+        hud_.green_light_alert_armed =
+            control_fresh &&
+            latest_control_state_.green_light_alert_armed != 0;
+        hud_.tpms_valid =
+            control_fresh && latest_control_state_.tpms_valid != 0;
+        hud_.tpms_unit =
+            control_fresh ? static_cast<int>(latest_control_state_.tpms_unit) : 0;
+        hud_.tpms_pressure_fl =
+            control_fresh ? latest_control_state_.tpms_pressure_fl : 0.0f;
+        hud_.tpms_pressure_fr =
+            control_fresh ? latest_control_state_.tpms_pressure_fr : 0.0f;
+        hud_.tpms_pressure_rl =
+            control_fresh ? latest_control_state_.tpms_pressure_rl : 0.0f;
+        hud_.tpms_pressure_rr =
+            control_fresh ? latest_control_state_.tpms_pressure_rr : 0.0f;
+        hud_.tpms_warning =
+            control_fresh && latest_control_state_.tpms_warning != 0;
+        if (!control_fresh) {
+            last_alert_sound_event_id_ = 0;
+        } else if (hud_.departure_alert_type != DepartureAlertType::none &&
+                   hud_.departure_alert_event_id != 0 &&
+                   hud_.departure_alert_event_id !=
+                       last_alert_sound_event_id_) {
+            last_alert_sound_event_id_ = hud_.departure_alert_event_id;
+            alert_sound_player_.play(hud_.departure_alert_type,
+                                     hud_.departure_alert_event_id);
+        }
         hud_.steering_angle_deg = control_fresh ? latest_control_state_.steering_angle_deg : 0.0f;
         hud_.normalized_output = control_fresh ? latest_control_state_.normalized_output : 0.0f;
         hud_.desired_torque = control_fresh ? latest_control_state_.desired_torque : 0;
@@ -615,6 +653,8 @@ private:
     StageStats overlay_stats_;
     StageStats present_stats_;
     SystemMonitor system_monitor_;
+    AlertSoundPlayer alert_sound_player_;
+    uint32_t last_alert_sound_event_id_ = 0;
     OverlayHudState hud_;
 };
 

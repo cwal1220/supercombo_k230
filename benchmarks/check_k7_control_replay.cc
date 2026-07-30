@@ -132,16 +132,52 @@ void verify_lca11() {
           "LCA11 vehicle-state update");
 }
 
+void verify_tpms11() {
+  std::array<uint8_t, 8> bytes{};
+  set_signal_le(&bytes, 11, 2, 2);
+  bytes[2] = 23;
+  bytes[3] = 24;
+  bytes[4] = 25;
+  bytes[5] = 26;
+  const Tpms11Values decoded = decode_tpms11(bytes);
+  require(decoded.unit == 2 &&
+              std::fabs(decoded.pressure_fl - 2.3f) < 0.001f &&
+              std::fabs(decoded.pressure_fr - 2.4f) < 0.001f &&
+              std::fabs(decoded.pressure_rl - 2.5f) < 0.001f &&
+              std::fabs(decoded.pressure_rr - 2.6f) < 0.001f &&
+              !decoded.warning,
+          "TPMS11 pressure decoding");
+
+  bytes[0] |= 1U << 4;
+  K7VehicleCanState vehicle;
+  update_k7_vehicle_can_state(&vehicle, kHyundaiTpms11Address, bytes, 6,
+                              kK7PowertrainBus, 1.0);
+  require(k7_tpms_state_fresh(vehicle, 2.0) && vehicle.tpms_warning,
+          "TPMS11 vehicle-state update");
+  require(!k7_tpms_state_fresh(vehicle, 7.0),
+          "TPMS11 freshness timeout");
+
+  bytes[2] = 0xff;
+  update_k7_vehicle_can_state(&vehicle, kHyundaiTpms11Address, bytes, 6,
+                              kK7PowertrainBus, 8.0);
+  require(k7_tpms_state_fresh(vehicle, 8.0) &&
+              vehicle.tpms_pressure_fl == 0.0f &&
+              vehicle.tpms_pressure_fr > 0.0f,
+          "TPMS11 unavailable wheel pressure");
+}
+
 void verify_scc11() {
   std::array<uint8_t, 8> bytes{};
   bytes[0] = 1;
   bytes[1] = 88;
   set_signal_le(&bytes, 22, 2, 1);
   set_signal_le(&bytes, 33, 11, 54);
+  set_signal_le(&bytes, 44, 12, 1715);
   const Scc11Values decoded = decode_scc11(bytes);
   require(decoded.main_mode && std::fabs(decoded.set_speed - 88.0f) < 0.001f &&
               decoded.object_valid &&
-              std::fabs(decoded.object_distance_m - 5.4f) < 0.001f,
+              std::fabs(decoded.object_distance_m - 5.4f) < 0.001f &&
+              std::fabs(decoded.object_relative_speed_mps - 1.5f) < 0.001f,
           "SCC11 cruise state decoding");
 
   K7VehicleCanState vehicle;
@@ -150,7 +186,8 @@ void verify_scc11() {
   require(vehicle.cruise_main &&
               std::fabs(vehicle.cruise_set_speed - 88.0f) < 0.001f &&
               vehicle.radar_lead_valid &&
-              std::fabs(vehicle.radar_lead_distance_m - 5.4f) < 0.001f,
+              std::fabs(vehicle.radar_lead_distance_m - 5.4f) < 0.001f &&
+              std::fabs(vehicle.radar_lead_relative_speed_mps - 1.5f) < 0.001f,
           "SCC11 vehicle-state update");
   require(std::fabs(k7_cruise_set_speed_kph(vehicle) - 88.0f) < 0.001f,
           "SCC11 metric set speed");
@@ -455,6 +492,7 @@ int main(int argc, char **argv) {
   try {
     verify_mdps_speed_spoof();
     verify_lca11();
+    verify_tpms11();
     verify_scc11();
     verify_mdps_fault_filter();
     verify_braking_does_not_disengage();

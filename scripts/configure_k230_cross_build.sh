@@ -13,6 +13,7 @@ image="${K230_CONFIGURE_IMAGE:-ubuntu:24.04}"
 
 for required in \
   "${host_dir}/bin/riscv64-unknown-linux-gnu-g++" \
+  "${sysroot}/usr/lib/libasound.so" \
   "${sysroot}/usr/lib/libv4l2-drm.so" \
   "${xuantie_dir}/bin/riscv64-unknown-linux-gnu-g++"; do
   if [ ! -e "${required}" ]; then

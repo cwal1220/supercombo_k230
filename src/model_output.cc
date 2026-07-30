@@ -21,9 +21,11 @@ constexpr int kStopLinePredictionStride = 17;
 constexpr int kStopLineMhpN = 3;
 constexpr int kStopLineOffset = kLeadProbOffset + kLeadMhpSelection;
 constexpr int kStopLineSize = kStopLineMhpN * kStopLinePredictionStride + 1;
+constexpr int kStopLineProbOffset = kStopLineOffset + kStopLineSize - 1;
 constexpr int kMetaOffset = kStopLineOffset + kStopLineSize;
 constexpr int kMinOverlayOutputFloats = kRoadEdgeOffset + kRoadEdgeMeanSize;
 constexpr int kMinLeadOutputFloats = kLeadProbOffset + kLeadMhpSelection;
+constexpr int kMinStopLineOutputFloats = kStopLineOffset + kStopLineSize;
 constexpr int kMinMetaOutputFloats = kMetaOffset + kDesireLen;
 constexpr int kPoseOffset = 6000;
 constexpr int kMinPoseOutputFloats = kPoseOffset + 12;
@@ -171,6 +173,29 @@ ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
         }
         for (int i = 0; i < kLeadMhpSelection; ++i)
             output.leads.global_probabilities[i] = sigmoid(raw[kLeadProbOffset + i]);
+    }
+
+    if (raw.size() >= static_cast<size_t>(kMinStopLineOutputFloats)) {
+        int best = 0;
+        float best_prob = raw[kStopLineOffset + kStopLinePredictionStride - 1];
+        for (int i = 1; i < kStopLineMhpN; ++i) {
+            const float prob =
+                raw[kStopLineOffset + i * kStopLinePredictionStride +
+                    kStopLinePredictionStride - 1];
+            if (prob > best_prob) {
+                best = i;
+                best_prob = prob;
+            }
+        }
+
+        const int base = kStopLineOffset + best * kStopLinePredictionStride;
+        output.stop_line.valid = true;
+        output.stop_line.best_index = best;
+        output.stop_line.probability = sigmoid(raw[kStopLineProbOffset]);
+        output.stop_line.position = {raw[base], raw[base + 1], raw[base + 2]};
+        output.stop_line.rotation = {raw[base + 3], raw[base + 4], raw[base + 5]};
+        output.stop_line.speed = raw[base + 6];
+        output.stop_line.time = raw[base + 7];
     }
 
     if (raw.size() >= static_cast<size_t>(kMinMetaOutputFloats))
