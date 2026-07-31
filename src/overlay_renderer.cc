@@ -481,6 +481,8 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     const uint32_t control_color = hud.steering_fault ? red :
                                    (hud.controller_active ? green :
                                     (hud.controller_engaged ? yellow : dim));
+    const uint32_t lateral_mode_color = !hud.lateral_mode_available ? dim :
+                                        (hud.laneless_mode ? blue : green);
     const char *op_status = hud.controller_active ? "OP ACT" :
                             (hud.controller_engaged ? "OP EN" :
                              (hud.controller_enabled ? "OP RDY" : "OP OFF"));
@@ -551,22 +553,41 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
                      2, cpu_color, col_w);
 
     draw_panel(right_box_x, panel_y2, calibration_color, "CALIBRATION");
-    ui.hud_text_left(right_x + 180, panel_y2 + 5,
-                     calibration_status, 1, calibration_color, 36);
-    ui.hud_text_left(right_x, panel_y2 + 22,
-                     format_text("R %.2F P %.2F", hud.calibration_roll_deg,
-                                 hud.calibration_pitch_deg),
-                     2, calibration_color, col_w);
-    ui.hud_text_left(right_x, panel_y2 + 47,
-                     format_text("Y %.2F BLOCK %d",
-                                 hud.calibration_yaw_deg,
-                                 std::max(0, hud.calibration_valid_blocks)),
-                     2, calibration_color, col_w);
+    ui.hud_text_center(right_box_x + box_w - 37, panel_y2 + 5,
+                       format_text("%s B%d", calibration_status,
+                                   std::max(0, hud.calibration_valid_blocks)),
+                       1, calibration_color, 68);
+    const int calibration_inner_x = right_box_x + 8;
+    constexpr int calibration_inner_w = box_w - 16;
+    constexpr int calibration_col_w = calibration_inner_w / 3;
+    for (int col = 1; col < 3; ++col) {
+        ui.fill_rect(calibration_inner_x + col * calibration_col_w,
+                     panel_y2 + 22, 1, 36, argb(38, 255, 255, 255));
+    }
+    const char *calibration_labels[] = {"ROLL", "PITCH", "YAW"};
+    const float calibration_values[] = {
+        hud.calibration_roll_deg,
+        hud.calibration_pitch_deg,
+        hud.calibration_yaw_deg,
+    };
+    for (int col = 0; col < 3; ++col) {
+        const int center_x = calibration_inner_x + col * calibration_col_w +
+                             calibration_col_w / 2;
+        ui.hud_text_center(center_x, panel_y2 + 22, calibration_labels[col],
+                           1, dim, calibration_col_w - 6);
+        ui.hud_text_center(center_x, panel_y2 + 39,
+                           format_text("%.2F", calibration_values[col]),
+                           2, calibration_color, calibration_col_w - 6);
+    }
 
     constexpr int drive_box_y = panel_y2;
     const bool set_speed_valid = std::isfinite(hud.cruise_set_speed_kph) &&
                                  hud.cruise_set_speed_kph > 0.0f;
     draw_panel(left_box_x, drive_box_y, control_color, "DRIVE");
+    ui.hud_text_center(left_box_x + box_w - 37, drive_box_y + 5,
+                       !hud.lateral_mode_available ? "--" :
+                           (hud.laneless_mode ? "LANELESS" : "LANE"),
+                       1, lateral_mode_color, 68);
     ui.hud_text_left(left_x, drive_box_y + 22,
                      set_speed_valid
                          ? format_text("GEAR %s SET %.0F", gear_text(hud.gear),
@@ -800,6 +821,8 @@ cv::Scalar openpilot_path_color(const OverlayHudState &hud)
                                           0.0f, 1.0f);
     const int red = static_cast<int>(output_scale * 255.0f);
     const int green = static_cast<int>((1.0f - output_scale) * 255.0f);
+    if (hud.laneless_mode)
+        return bgra(green, 150, red, 160);
     return bgra(0, green, red, 160);
 }
 
@@ -850,22 +873,24 @@ void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &outp
                               logical_width, logical_height, rotate_landscape);
         }
 
-        for (const ParsedLaneLine &lane : output.lanes) {
-            if (!lane.valid || lane.probability < 0.05f) continue;
-            draw_model_ribbon(frame, lane.points,
-                              std::max(0.015f, 0.025f * lane.probability),
-                              0.0f, max_distance, openpilot_lane_color(lane.probability),
-                              projection, logical_width, logical_height, rotate_landscape);
-        }
+        if (!hud.laneless_mode) {
+            for (const ParsedLaneLine &lane : output.lanes) {
+                if (!lane.valid || lane.probability < 0.05f) continue;
+                draw_model_ribbon(frame, lane.points,
+                                  std::max(0.015f, 0.025f * lane.probability),
+                                  0.0f, max_distance, openpilot_lane_color(lane.probability),
+                                  projection, logical_width, logical_height, rotate_landscape);
+            }
 
-        for (const ParsedRoadEdge &edge : output.road_edges) {
-            if (!edge.valid) continue;
-            const float confidence = std::clamp(1.0f - edge.std, 0.0f, 1.0f);
-            if (confidence < 0.05f) continue;
-            draw_model_ribbon(frame, edge.points,
-                              0.025f, 0.0f, max_distance,
-                              bgra(60, 60, 255, static_cast<int>(confidence * 200.0f)),
-                              projection, logical_width, logical_height, rotate_landscape);
+            for (const ParsedRoadEdge &edge : output.road_edges) {
+                if (!edge.valid) continue;
+                const float confidence = std::clamp(1.0f - edge.std, 0.0f, 1.0f);
+                if (confidence < 0.05f) continue;
+                draw_model_ribbon(frame, edge.points,
+                                  0.025f, 0.0f, max_distance,
+                                  bgra(60, 60, 255, static_cast<int>(confidence * 200.0f)),
+                                  projection, logical_width, logical_height, rotate_landscape);
+            }
         }
 
         draw_stop_line(frame, output.stop_line, projection,

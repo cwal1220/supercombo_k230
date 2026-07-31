@@ -26,15 +26,9 @@ runtime_files=(
   scripts/requirements-param-server.txt
 )
 model="models/supercombo.kmodel"
-init_script="scripts/S95supercombo_k230"
 
 if [ -x "${BIN_DIR}/k230_pandad" ]; then
   runtime_files+=("${BIN_DIR}/k230_pandad" "${BIN_DIR}/k230_k7_controlsd")
-fi
-
-if [ ! -f "${init_script}" ]; then
-  echo "Missing init script: ${init_script}" >&2
-  exit 1
 fi
 
 for runtime_file in "${runtime_files[@]}"; do
@@ -44,7 +38,8 @@ for runtime_file in "${runtime_files[@]}"; do
   fi
 done
 
-"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/model' '$DEST/params'"
+"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
+  "test -x /etc/init.d/S35supercombo_k230 || { echo 'Missing image-provided /etc/init.d/S35supercombo_k230' >&2; exit 1; }; rm -f /etc/init.d/S95supercombo_k230; mkdir -p '$DEST/model' '$DEST/params'"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "${runtime_files[@]}" "$BOARD:$DEST/"
 if [ -x "${BIN_DIR}/k230_k7_controlsd" ]; then
   "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/lib'"
@@ -62,9 +57,5 @@ fi
   params/k7_yg_steering.json \
   params/k7_yg_driving.json \
   "$BOARD:$DEST/params/"
-"${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \
-  "$init_script" "$BOARD:/etc/init.d/S95supercombo_k230"
-"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
-  "chmod 755 /etc/init.d/S95supercombo_k230"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "sync"
 echo "Uploaded runtime files to $BOARD:$DEST"

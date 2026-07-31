@@ -9,6 +9,7 @@ constexpr int kLateralControlN = 17;
 struct LateralTarget {
     bool valid = false;
     bool mpc_solution_valid = false;
+    bool laneless_mode = false;
     float lookahead_x = 0.0f;
     float target_y = 0.0f;
     float heading = 0.0f;

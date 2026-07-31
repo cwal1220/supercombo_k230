@@ -6,12 +6,8 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdlib>
-#include <sstream>
 #include <stdexcept>
 #include <string>
-
-// JSON 문자열 값을 출력 스트림에 안전하게 추가한다.
-void append_json_string(std::ostringstream *out, const std::string &value);
 
 // 단순 JSON 텍스트에서 bool 값을 읽는다.
 bool parse_json_bool_value(const std::string &text, const std::string &key, bool *out);

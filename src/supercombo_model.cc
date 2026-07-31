@@ -96,15 +96,6 @@ SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const 
         throw std::runtime_error("initialize image input history failed");
 }
 
-void SupercomboModel::reset_state()
-{
-    if (!clear_image_input(0) || !clear_image_input(1))
-        throw std::runtime_error("reset image input history failed");
-    std::fill(desire_.begin(), desire_.end(), 0.0f);
-    std::fill(prev_desire_.begin(), prev_desire_.end(), 0.0f);
-    std::fill(recurrent_state_.begin(), recurrent_state_.end(), 0.0f);
-}
-
 void SupercomboModel::set_desire(int desire)
 {
     for (int i = 1; i < static_cast<int>(desire_.size()); ++i) {

@@ -36,6 +36,8 @@ def param_meta(
     decrease: str,
     *,
     quick: bool = False,
+    quick_section: str | None = None,
+    quick_order: int | None = None,
 ) -> Dict[str, Any]:
     return {
         "label": label,
@@ -48,6 +50,8 @@ def param_meta(
         "increase": increase,
         "decrease": decrease,
         "quick": quick,
+        "quick_section": quick_section or section,
+        "quick_order": quick_order,
     }
 
 
@@ -117,25 +121,22 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "decrease": "끄면 base 변화량을 고정 사용합니다.",
         },
         "steer_max_base": param_meta(
-            "주행 최대 조향 토크", "빠른 조향 튜닝", "CAN torque", 5, 0, 384,
+            "주행 최대 조향 토크", "고정 조향 한계", "CAN torque", 5, 0, 384,
             "일반 주행에서 실제 사용하는 최대 조향 토크입니다.",
             "급커브에서 더 강한 조향을 허용합니다.",
             "조향 힘을 제한해 급커브 추종량이 줄어듭니다.",
-            quick=True,
         ),
         "steer_delta_up_base": param_meta(
-            "주행 토크 반응 속도", "빠른 조향 튜닝", "torque/frame", 1, 0, 20,
+            "주행 토크 반응 속도", "고정 조향 한계", "torque/frame", 1, 0, 20,
             "일반 주행에서 100 Hz 주기마다 토크를 올리는 최대량입니다.",
             "커브 진입 시 핸들이 더 빠르게 반응합니다.",
             "핸들 반응은 부드러워지지만 커브 진입이 늦을 수 있습니다.",
-            quick=True,
         ),
         "steer_delta_down_base": param_meta(
-            "주행 토크 해제 속도", "빠른 조향 튜닝", "torque/frame", 1, 0, 30,
+            "주행 토크 해제 속도", "고정 조향 한계", "torque/frame", 1, 0, 30,
             "일반 주행에서 100 Hz 주기마다 토크를 내리는 최대량입니다.",
             "커브 종료 시 토크가 더 빠르게 풀립니다.",
             "토크가 천천히 풀려 움직임이 부드럽지만 잔류할 수 있습니다.",
-            quick=True,
         ),
         "torque_max_lat_accel_raw": param_meta(
             "토크 기준 횡가속도", "토크 컨트롤러", "0.1 m/s²", 1, 1, 80,
@@ -148,28 +149,27 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "현재 횡가속도 오차에 바로 반응하는 비례 이득입니다.",
             "경로 오차를 더 빠르고 강하게 보정하지만 흔들림이 늘 수 있습니다.",
             "반응이 부드러워지지만 경로 오차 회복이 느려질 수 있습니다.",
-            quick=True,
+            quick=True, quick_section="조향 반응", quick_order=30,
         ),
         "torque_kf_raw": param_meta(
             "선행 보상 Kf", "토크 컨트롤러", "raw", 1, 0, 100,
             "목표 횡가속도에 미리 더하는 feed-forward 이득입니다.",
             "커브에서 기본 조향 토크가 커집니다.",
             "커브에서 선행 조향 토크가 작아집니다.",
-            quick=True,
+            quick=True, quick_section="조향 반응", quick_order=40,
         ),
         "torque_ki_raw": param_meta(
             "적분 이득 Ki", "토크 컨트롤러", "raw", 1, 0, 100,
             "지속되는 횡가속도 오차를 누적해 없애는 적분 이득입니다.",
             "지속 오차를 빨리 없애지만 오버슈트가 늘 수 있습니다.",
             "누적 보정이 느려져 일정한 편향이 오래 남을 수 있습니다.",
-            quick=True,
         ),
         "torque_friction_raw": param_meta(
             "조향 마찰 보상", "토크 컨트롤러", "0.001 m/s²", 5, 0, 300,
             "조향계 마찰을 넘기 위해 방향 전환 시 더하는 보상입니다.",
             "작은 커브에도 핸들이 더 즉각 움직이지만 좌우 튐이 생길 수 있습니다.",
             "미세 조향이 부드러워지지만 dead zone이 커질 수 있습니다.",
-            quick=True,
+            quick=True, quick_section="조향 반응", quick_order=50,
         ),
         "torque_use_angle": {
             "label": "조향각 기반 곡률",
@@ -183,6 +183,7 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "조향각 기반 오차에서 무시하는 작은 구간입니다.",
             "미세 오차에 덜 반응해 핸들 떨림이 줄 수 있습니다.",
             "작은 경로 오차에도 더 민감하게 반응합니다.",
+            quick=True, quick_section="조향 반응", quick_order=60,
         ),
         "torque_output_sign": param_meta(
             "토크 출력 방향", "고정 차량 설정", "부호", 2, -1, 1,
@@ -233,15 +234,15 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "타이어가 더 유연하게 반응한다고 계산합니다.",
         ),
         "steer_actuator_delay": param_meta(
-            "조향 반응 지연", "빠른 조향 튜닝", "초", 0.01, 0.01, 1,
+            "조향 반응 지연", "조향 반응", "초", 0.01, 0.01, 1,
             "현재 조향 명령이 차량에 반영되기까지의 예측 지연입니다.",
             "경로를 더 앞에서 읽어 커브 진입을 선행하지만 과하면 오버슈트할 수 있습니다.",
             "조향 선행량이 줄어 커브 반응이 늦어질 수 있습니다.",
-            quick=True,
+            quick=True, quick_section="조향 반응", quick_order=20,
         ),
         "max_steering_angle_deg": param_meta(
             "최대 자동 조향각", "LKAS fault 보호", "°", 5, 0, 360,
-            "fault 회피 모드가 꺼졌을 때 자동 조향을 허용하는 절대 각도입니다.",
+            "LKAS fault 회피가 꺼졌을 때 적용하는 절대 조향각입니다. 0은 제한을 끕니다.",
             "더 큰 핸들 각도까지 자동 조향을 허용합니다.",
             "더 이른 조향각에서 자동 조향을 제한합니다.",
         ),
@@ -297,7 +298,6 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "직진 상태의 조향각 센서 편차를 실제 곡률 계산 전에 뺍니다.",
             "현재 센서 각도를 더 작게 보정합니다.",
             "현재 센서 각도를 더 크게 보정합니다.",
-            quick=True,
         ),
         "roll_rad": param_meta(
             "차량 Roll 보정", "차량 모델", "rad", 0.001, -0.2, 0.2,
@@ -334,14 +334,13 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "차량 중심에 대한 카메라 위치를 차선 검출선에 보정합니다.",
             "목표 차선 중심이 차량 기준 오른쪽으로 이동합니다.",
             "목표 차선 중심이 차량 기준 왼쪽으로 이동합니다.",
-            quick=True,
         ),
         "path_offset_m": param_meta(
             "주행 경로 좌우 보정", "차량 중심 보정", "m", 0.01, -1, 1,
             "최종 모델 주행 경로 전체를 좌우로 평행 이동합니다.",
             "목표 주행 위치가 차량 기준 오른쪽으로 이동합니다.",
             "목표 주행 위치가 차량 기준 왼쪽으로 이동합니다.",
-            quick=True,
+            quick=True, quick_section="주행 위치", quick_order=10,
         ),
         "invert_steer": {
             "label": "목표 곡률 반전",
@@ -405,21 +404,14 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "목표 곡률이 시간에 따라 바뀌는 최대 속도를 제한합니다.",
             "커브 변화에 더 빠르게 반응하지만 조향이 급해질 수 있습니다.",
             "조향이 부드러워지지만 급커브 진입이 늦을 수 있습니다.",
-            quick=True,
+            quick=True, quick_section="주행 반응", quick_order=10,
         ),
         "max_lateral_accel": param_meta(
             "최대 횡가속도", "빠른 주행 튜닝", "m/s²", 0.1, 0.5, 5,
             "차량 속도에 따라 허용하는 목표 곡률을 횡가속도로 제한합니다.",
             "고속에서 더 큰 곡률과 적극적인 조향을 허용합니다.",
             "고속 커브 조향을 더 보수적으로 제한합니다.",
-            quick=True,
-        ),
-        "max_curvature": param_meta(
-            "최대 경로 곡률", "빠른 주행 튜닝", "1/m", 0.01, 0.01, 0.5,
-            "최종 목표 곡률의 절대 상한입니다. 0.2는 반경 약 5 m입니다.",
-            "더 급한 커브 경로를 허용합니다.",
-            "급커브에서 목표 조향량을 더 일찍 제한합니다.",
-            quick=True,
+            quick=True, quick_section="주행 반응", quick_order=20,
         ),
     },
 }
@@ -778,6 +770,17 @@ HTML = """<!doctype html>
     const status = document.getElementById("status");
     const connection = document.getElementById("connection");
     const count = document.getElementById("count");
+    const sectionOrder = {
+      steering: [
+        "기본 토크 제한", "토크 컨트롤러", "조향 반응", "차량 중심 보정",
+        "운전자 개입", "속도별 토크 제한", "Smooth steer", "차량 모델",
+        "LKAS fault 보호", "고정 조향 한계", "고정 차량 설정", "기타",
+      ],
+      driving: [
+        "빠른 주행 튜닝", "운전자 개입", "상태와 CAN", "데이터 상태",
+        "고정 차량 설정", "기타",
+      ],
+    };
 
     function setConnection(pids, saved = false) {
       const online = pids.length > 0;
@@ -810,6 +813,8 @@ HTML = """<!doctype html>
         increase: "값이 증가합니다.",
         decrease: "값이 감소합니다.",
         quick: false,
+        quick_section: "기타",
+        quick_order: Number.MAX_SAFE_INTEGER,
       };
     }
 
@@ -1026,14 +1031,34 @@ HTML = """<!doctype html>
         const meta = metadata[key] || genericMeta(key, value);
         return activeView === "all" || meta.quick;
       });
+      if (activeView === "quick") {
+        visible.sort(([keyA, valueA], [keyB, valueB]) => {
+          const metaA = metadata[keyA] || genericMeta(keyA, valueA);
+          const metaB = metadata[keyB] || genericMeta(keyB, valueB);
+          return (metaA.quick_order ?? Number.MAX_SAFE_INTEGER) -
+            (metaB.quick_order ?? Number.MAX_SAFE_INTEGER);
+        });
+      }
       count.textContent = `${visible.length}개 항목`;
       const grouped = new Map();
       for (const [key, value] of visible) {
         const meta = metadata[key] || genericMeta(key, value);
-        if (!grouped.has(meta.section)) grouped.set(meta.section, []);
-        grouped.get(meta.section).push([key, value, meta]);
+        const sectionName = activeView === "quick"
+          ? (meta.quick_section || meta.section)
+          : meta.section;
+        if (!grouped.has(sectionName)) grouped.set(sectionName, []);
+        grouped.get(sectionName).push([key, value, meta]);
       }
-      for (const [sectionName, entries] of grouped) {
+      const orderedGroups = [...grouped.entries()];
+      if (activeView === "all") {
+        const order = sectionOrder[activeGroup] || [];
+        orderedGroups.sort(([nameA], [nameB]) => {
+          const rankA = order.includes(nameA) ? order.indexOf(nameA) : order.length;
+          const rankB = order.includes(nameB) ? order.indexOf(nameB) : order.length;
+          return rankA - rankB;
+        });
+      }
+      for (const [sectionName, entries] of orderedGroups) {
         const section = document.createElement("section");
         section.className = "section";
         const heading = document.createElement("h2");

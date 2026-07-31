@@ -1,10 +1,33 @@
-# K230 native supercombo app
+# K230 x openpilot
+
+<p align="center">
+  <img src="docs/assets/k230-openpilot-k7-hero.png"
+       alt="K230 x openpilot for the KIA K7 YG HEV"
+       width="100%">
+</p>
+
+<p align="center">
+  <strong>Native openpilot perception and lateral control on Kendryte K230</strong><br>
+  KIA K7 YG HEV · dual-camera model input · Panda USB/CAN · 800x480 driving HUD
+</p>
+
+| Target | Vehicle | Model | Runtime |
+| --- | --- | --- | --- |
+| Kendryte K230 / 01Studio | KIA K7 YG HEV | openpilot supercombo | C++ split pipeline |
+
+**[Board setup](#board-setup) · [Build and deploy](#build-and-deploy) · [Runtime](#split-runtime) · [Model pipeline](#model-pipeline) · [Options](#runtime-options) · [Diagnostics](#diagnostics)**
+
+> [!WARNING]
+> This is experimental vehicle-control software. Keep Panda safety enabled and
+> validate changes in a controlled environment before road use.
+
+## Overview
 
 This is the final live app path for the K230 target. It uses the `supercombo`
 kmodel generated from the ONNX graph where `Elu_223` is kept native by inserting
 an identity depthwise 1x1 Conv before it.
 
-Final runtime artifact:
+### Model artifact
 
 - `models/supercombo.kmodel`
 
@@ -16,7 +39,7 @@ The rewritten ONNX is an intermediate generated artifact and is intentionally
 not tracked in this repository. See `tools/model/` for the rewrite/compile
 scripts and exact reproduction commands.
 
-Board prerequisites:
+## Board Setup
 
 For a freshly flashed board, install the build/runtime helper packages first:
 
@@ -28,6 +51,7 @@ apt-get install -y \
   curl \
   g++ \
   git \
+  libasound2-dev \
   libdrm-dev \
   libusb-1.0-0-dev \
   libopencv-dev \
@@ -36,9 +60,10 @@ apt-get install -y \
   python3-pip
 ```
 
-Package purpose:
+### Package purpose
 
 - `g++`, `make`, `cmake`: board-native C/C++ build
+- `libasound2-dev`: ALSA headers/library used by departure alert chimes
 - `libdrm-dev`: DRM headers used by the overlay/display path
 - `libusb-1.0-0-dev`: optional panda USB/CAN bridge build
 - `libopencv-dev`: OpenCV headers/libraries used by the overlay renderer
@@ -56,30 +81,34 @@ python3 -m pip install -r scripts/requirements-param-server.txt
 If the directory is copied to the board with all files already present, `git` is
 not needed for building. It is only needed for a fresh repository checkout.
 
-The flashed image must already include these runtime libraries/devices:
-  - `libdisplay.so`
-  - `libv4l2-drm.so`
-  - `libdrm.so.2`
+The flashed image must already include the K230 camera/display devices and these
+target runtime libraries:
 
-Build on the board:
+- `libdisplay.so`
+- `libv4l2-drm.so`
+- `libdrm.so.2`
+- `libasound.so`
+
+## Build And Deploy
+
+### Native board build
 
 ```sh
 cd /root/supercombo_k230
 ./scripts/fetch_nncase_runtime.sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j2
-cd build/bin
-../../scripts/k230_manager.py ../../models/supercombo.kmodel 0
+cmake -S . -B build-native \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DSUPERCOMBO_BUILD_PANDA=ON
+cmake --build build-native -j2
+cmake --install build-native --prefix /root/supercombo_k230
+./k230_manager.py
 ```
 
-Build the optional panda bridge when `libusb-1.0-0-dev` is installed:
+The Panda build is required by the manager's default full-pipeline mode. For a
+camera/model/display-only build, omit `SUPERCOMBO_BUILD_PANDA` and start the
+manager with `K230_ENABLE_CONTROL=0 K230_ENABLE_PANDA=0`.
 
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSUPERCOMBO_BUILD_PANDA=ON
-cmake --build build -j2
-```
-
-Mac Docker cross-build:
+### macOS SDK cross-build
 
 The repository can also be cross-built from macOS using the Buildroot host
 tools produced by `k230_linux_sdk`. This is required to keep the target glibc
@@ -108,16 +137,18 @@ docker run --rm --platform linux/amd64 \
   bash -lc 'export PATH=/sdk/bin:$PATH; cmake --build build-k230-sdk -j$(nproc)'
 ```
 
-Upload the rebuilt runtime files to the board:
+### Upload to the board
+
+Upload the rebuilt runtime files:
 
 ```sh
 K230_SSH="sshpass -p '<password>' ssh" \
 K230_SCP="sshpass -p '<password>' scp" \
-  scripts/upload_to_board.sh root@192.168.219.115
+  scripts/upload_to_board.sh root@192.168.219.111
 ```
 
 The upload script reads binaries from `build-k230-sdk/bin` by default. Set
-`K230_BUILD_DIR=build` for an on-board build or `K230_BIN_DIR` for a custom
+`K230_BUILD_DIR=build-native` for an on-board build or `K230_BIN_DIR` for a custom
 binary directory.
 
 All CMake executables are written below the selected build directory in `bin/`.
@@ -125,15 +156,9 @@ All CMake executables are written below the selected build directory in `bin/`.
 generic Ubuntu riscv64 compiler for board binaries: it can link against a newer
 glibc than the flashed K230 image provides.
 
-The historical Makefile is still kept as a rollback build path:
+## Split Runtime
 
-```sh
-make -j2
-```
-
-It also places linked executables in `build/bin/`.
-
-Openpilot-style split runtime:
+### Managed startup
 
 ```sh
 cd /root/supercombo_k230
@@ -143,27 +168,32 @@ cd /root/supercombo_k230
 The no-argument command selects the installed `model/supercombo.kmodel` (or the
 source-tree `models/supercombo.kmodel`), debug mode `0`, K7 control enabled,
 Panda TX enabled, and the FastAPI parameter server enabled. Each setting can
-still be overridden with `K230_KMODEL`, its existing environment variable, or
-a command-line argument.
+still be overridden with its environment variable; the model and debug mode can
+also be passed as command-line arguments.
 
-On the board, `/etc/init.d/S95supercombo_k230` starts the same command
-automatically after the ISP, network, ADB, and remote access services. It is
-installed by `scripts/upload_to_board.sh`. Manual service controls are:
+On the board, the image-provided `/etc/init.d/S35supercombo_k230` starts the
+same command automatically. `scripts/upload_to_board.sh` verifies that service
+and removes the legacy `S95supercombo_k230` script if present. Manual service
+controls are:
 
 ```sh
-/etc/init.d/S95supercombo_k230 start
-/etc/init.d/S95supercombo_k230 stop
-/etc/init.d/S95supercombo_k230 restart
-/etc/init.d/S95supercombo_k230 status
+/etc/init.d/S35supercombo_k230 start
+/etc/init.d/S35supercombo_k230 stop
+/etc/init.d/S35supercombo_k230 restart
+/etc/init.d/S35supercombo_k230 status
 ```
+
+### Runtime processes
 
 The split runtime gives the model pipeline priority and keeps display work to a
 minimal passive overlay subscriber:
 
 - `k230_manager.py`
-  - starts/stops/restarts `k230_overlay`, `k230_camerad`, and `k230_modeld`
+  - supervises `k230_overlay`, `k230_camerad`, and `k230_modeld`, plus
+    `k230_pandad`, `k230_k7_controlsd`, and the parameter server when enabled
   - publishes `managerState` to `/dev/shm/k230_manager_state`
-  - starts `k230_overlay`, then `k230_camerad`, then `k230_modeld`
+  - starts `k230_overlay`, waits for display readiness, then starts camera,
+    model, Panda, control, and parameter-server processes
   - runs `k230_modeld` at a higher priority than display overlay by default
 - `k230_overlay`
   - is overlay-only despite the historical name
@@ -175,9 +205,9 @@ minimal passive overlay subscriber:
   - subscribes to compact `modelState` and draws only plan/lane/road-edge/lead
     on a double-buffered ARGB8888 overlay plane
   - renders the K230 driving HUD adapted from `openpilot_c2_k230/previewd`,
-    using the same full `800x480` composition: center speed, top
-    `CRUISE`/`OPENPILOT` panels, middle `ROAD`/`SYSTEM` panels, bottom
-    `VEHICLE`/`K7 CONTROL` panels, and a centered status alert
+    using the full `800x480` composition: center speed, left-side
+    `OPENPILOT`/`CONTROL`/`DRIVE`/`TPMS` panels, right-side
+    `SYSTEM`/`HEALTH`/`CALIBRATION`/`LEAD` panels, and a centered status alert
   - fills that layout with camera/model/display FPS, inference time,
     CPU/temperature/memory, process health, Panda state, vehicle speed,
     steering torque, and K7 control state
@@ -197,7 +227,8 @@ minimal passive overlay subscriber:
     `-DSUPERCOMBO_BUILD_PANDA=ON`
   - connects to panda over `libusb`, publishes compact panda health and ordered
     CAN receive batches, and can relay ordered `sendcan` batches
-  - defaults to shadow mode: `K230_PANDA_TX=0`, so no CAN frames are transmitted
+  - standalone default is shadow mode (`K230_PANDA_TX=0`); the manager's
+    full-pipeline default enables TX
 - `k230_k7_controlsd` (optional K7 controller)
   - enabled with `K230_ENABLE_CONTROL=1`
   - runs the openpilot-compatible lane planner and Acados lateral MPC in a
@@ -213,6 +244,8 @@ does not consume the shared AI frame ring for display; preview stays on the
 K230 `v4l2_drm` display path, while `k230_modeld` consumes the shared `640x360`
 AI ring. This keeps the split runtime close to openpilot's process boundaries
 without paying the cost of Cap'n Proto/cereal in v1.
+
+## Model Pipeline
 
 The model path captures the AI stream as `NV12 640x360` through `/dev/video2`
 crop/resize, samples independent `512x256` medmodel and sbigmodel views from
@@ -235,7 +268,9 @@ measured camera pipeline. The medmodel transform feeds the current and previous
 frames into `input_imgs`; the wider C2 sbigmodel transform independently feeds
 its current and previous frames into `big_input_imgs`.
 
-Calibration/input-warp equivalence checks:
+## Verification
+
+### Calibration and input-warp equivalence
 
 - `benchmarks/verify_calibration_equivalence.cc` is a host-only verifier for
   the openpilot-derived calibration and input-warp math. It checks the
@@ -273,34 +308,11 @@ cmake -S . -B /tmp/supercombo_k230_verify \
   -DSUPERCOMBO_BUILD_BENCHMARKS=ON
 cmake --build /tmp/supercombo_k230_verify \
   --target verify_calibration_equivalence bench_input_warp_overhead -j2
-./verify_calibration_equivalence
-./build/bin/bench_input_warp_overhead 3000
+/tmp/supercombo_k230_verify/bin/verify_calibration_equivalence
+/tmp/supercombo_k230_verify/bin/bench_input_warp_overhead 3000
 ```
 
-Latest local/Pi checks:
-
-- macOS host: `verify_calibration_equivalence: PASS`
-- K230 C908: scalar and RVV medmodel/sbigmodel output buffers are bit-exact.
-- K230 full model replay: four recurrent frames produced identical scalar/RVV
-  raw-output hashes.
-- Original FP32 ONNX vs rewritten FP32 ONNX: all 6519 non-plan-probability
-  outputs are exact, and the intentional common-offset removal preserves plan
-  argmax in all 8 checked samples.
-- Original FP32 ONNX vs quantized Kmodel over 80 independent saved PTQ samples:
-  non-plan-probability MAE `0.0572`, recurrent-state MAE `0.00593`, and plan
-  argmax agreement `60/80`. This is quantization error, not an input-pipeline
-  optimization difference. Full results are in
-  `models/verification/openpilot_c2_master_comparison.json`.
-- K230 live pipeline over 1710 frames: `19.9-20.0 model FPS`, zero model errors,
-  and a `40.766 ms` average model path. Input work was `0.100 ms` source copy,
-  `9.988 ms` preprocessing, `0.172 ms` input sync/write, and `0.447 ms` history.
-  The prior staging/pack path averaged `46.635 ms` total.
-- Raspberry Pi 4 aarch64: `verify_calibration_equivalence: PASS`
-- Raspberry Pi 4 warp timing over 3000 frames:
-  direct pack `0.251 ms`, identity warp `1.821 ms`, pitch `1.836 ms`, so the
-  calibrated warp adds about `1.57-1.58 ms/frame` on Cortex-A72.
-
-Runtime structure:
+## Source Layout
 
 - `src/main.cc`
   - app bootstrap only: config load, signal handling, live/replay dispatch.
@@ -322,9 +334,8 @@ Runtime structure:
   - wraps pose-based online calibration, manual override, projection policy, and
     the model-input calibration feedback loop.
 - `src/projection.*`
-  - converts model road coordinates to display pixels. Default mode is
-    the K230 road-frame projection used by the pre-refactor runtime;
-    openpilot-style `view_from_calib` remains available for experiments.
+  - converts model road coordinates through the openpilot-style
+    `view_from_calib` matrix and compensates for the rotated `800x480` display.
 - `src/overlay_renderer.*`
   - draws plan/lane/road-edge/lead overlay with OpenCV into the CPU ARGB8888
     buffer used by the split DRM overlay process and monolithic rollback app.
@@ -332,10 +343,11 @@ Runtime structure:
   - applies openpilot lane probability/width logic, lane-change state, and the
     generated Acados lateral MPC solver to produce curvature targets.
 - `src/lateral_control.*`, `src/k7_lateral_controller.*`
-  - hold the planner target and apply openpilot lag-adjusted curvature before
-    the validated K7 torque/CAN path.
+  - expose model-side lateral diagnostics and apply the planner's lag-adjusted
+    curvature through the validated K7 torque/CAN path.
 - `src/supercombo_runtime.*`
-  - owns the live/replay pipeline and thread coordination.
+  - owns the monolithic live/replay compatibility pipeline and thread
+    coordination. Production uses the split runtime above.
 - `src/k230_ipc.*`
   - owns the `/dev/shm` latest-message channels and shared NV12 frame ring used
     by the split runtime.
@@ -353,19 +365,24 @@ Runtime structure:
     bus split, torque limits, counters, checksums, 60 kph MDPS helper, and a
     20 Hz planner worker separated from the 100 Hz control loop.
 
-Useful runtime options:
+## Runtime Options
 
+- `K230_KMODEL=/path/to/supercombo.kmodel`
+  - overrides the model selected by `k230_manager.py`.
+- `SUPERCOMBO_MODEL_FPS=N`
+  - selects the model loop target from 1 to 30 FPS. The default is 20 FPS.
 - `SUPERCOMBO_PROFILE=1`
   - prints model pipeline averages. `k230_overlay` also uses this for overlay
     draw/present timing.
 - `SUPERCOMBO_CALIB_ROLL_DEG`, `SUPERCOMBO_CALIB_PITCH_DEG`,
   `SUPERCOMBO_CALIB_YAW_DEG`
-  - overrides the overlay projection calibration in degrees. Defaults are all
-    zero. If any of these are set, manual projection calibration wins and online
-    calibration is not applied to the overlay.
+  - overrides the overlay projection calibration in degrees. If any value is
+    set, manual projection calibration wins and online calibration is not
+    applied to the overlay. Otherwise the saved calibration is restored and
+    automatic calibration remains active.
 - `SUPERCOMBO_CALIB_AUTO=0`
-  - disables pose-based online overlay calibration and keeps the fixed
-    zero/manual projection.
+  - disables pose-based online overlay calibration and keeps the restored or
+    manually supplied projection.
 - `SUPERCOMBO_LOG_CALIB=1`
   - prints the online calibrator status, accepted/rejected sample counts,
     valid block count, rpy, and spread.
@@ -389,9 +406,10 @@ Useful runtime options:
   - disables the C908 RVV input-warp kernel for diagnostics and uses the
     bit-exact scalar fallback.
 - `SUPERCOMBO_REPLAY_NV12=/path/to/replay.scnv12`
-  - runs headless from a preconverted `512x256 NV12` replay file instead of
-    opening the camera and display. This is for validating inference and online
-    calibration from collected logs.
+  - runs headless from an `SCNV12R1` NV12 replay file instead of opening the
+    camera and display. Width, height, and frame count are read from the replay
+    header. This is for validating inference and online calibration from
+    collected logs.
   - also works with `k230_modeld` directly for split-runtime parser/model tests.
 - `SUPERCOMBO_MAX_FRAMES=N`
   - stops after `N` inferred frames. This is mainly useful with replay mode.
@@ -399,7 +417,8 @@ Useful runtime options:
   - manager also starts `k230_pandad`. The binary must have been built with
     `-DSUPERCOMBO_BUILD_PANDA=ON`.
 - `K230_ENABLE_CONTROL=1`
-  - manager starts `k230_pandad` and `k230_k7_controlsd`.
+  - manager starts `k230_pandad` and `k230_k7_controlsd`. This is the manager
+    default.
   - no openpilot checkout or Python native extension is required.
 - `K230_PANDA_SAFETY=nooutput|silent|hyundai|hyundaiCommunity|allOutput`
   - panda safety mode for `k230_pandad`. Its standalone default is `nooutput`;
@@ -435,13 +454,20 @@ Useful runtime options:
 - `K230_PARAM_HOST=address`, `K230_PARAM_PORT=port`
   - select the parameter editor listen address and port. Defaults are
     `0.0.0.0:8080`.
+- `K230_ALERT_SOUND=0`
+  - disables the lead-departure and traffic-signal ALSA chime while preserving
+    LCD alerts. `K230_ALERT_PCM` overrides the playback device; its default is
+    `default`.
 
 The tracked JSON files in `params/` are the source of truth for K7 steering
 and driving configuration. Changes are written atomically, signaled to
 `k230_k7_controlsd`, and also detected by its 100 ms fallback poll. Every field
 is applied on the next control tick without an engage or standstill gate.
-`calibration.json` is board-specific runtime state and is intentionally ignored
-by Git and preserved by the upload script.
+`params/calibration.json` is also tracked as the initial calibration seed. The
+runtime replaces it atomically when a stable calibration is learned, while
+`scripts/upload_to_board.sh` installs the repository copy on each upload.
+
+### Live parameter editor
 
 Open the editor at `http://<board-ip>:8080`. It has no authentication and must
 only be exposed on a trusted vehicle or development network. It can also be
@@ -451,10 +477,11 @@ started directly:
 python3 scripts/k7_param_server.py --host 0.0.0.0 --port 8080
 ```
 
-Fixed production defaults:
+### Production defaults
 
-- AI capture is fixed at `/dev/video2`, `NV12 640x360`, full sensor crop
-  `1920x1080+0+0`.
+- AI capture defaults to `/dev/video2`, `NV12 640x360`, full sensor crop
+  `1920x1080+0+0`. `SUPERCOMBO_NV12_WIDTH/HEIGHT` and
+  `SUPERCOMBO_NV12_CROP_X/Y/WIDTH/HEIGHT` provide diagnostic overrides.
 - Preview is fixed at `/dev/video1`; the manager waits for
   `/tmp/k230_display_ready` before opening the AI stream.
 - The ready barrier waits for 30 displayed preview frames and times out after
@@ -462,34 +489,34 @@ Fixed production defaults:
 - Child process priorities are fixed as `camerad=0`, `modeld=-5`,
   `overlay=10`, optional `pandad=-10`, optional `controlsd=-8`.
 - The front-vehicle marker is always enabled with probability threshold `0.5`.
+- Final desired curvature is clamped to `0.3 1/m`; it is intentionally not a
+  runtime tuning option.
+
+## Diagnostics
 
 Benchmark and diagnostic utilities live under `benchmarks/` and are not built
 by default. Build them explicitly with:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSUPERCOMBO_BUILD_BENCHMARKS=ON
-cmake --build build -j2
+cmake -S . -B build/host-checks \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DSUPERCOMBO_BUILD_RUNTIME=OFF \
+  -DSUPERCOMBO_BUILD_BENCHMARKS=ON
+cmake --build build/host-checks -j2
 ```
 
 CAN/panda payload checks can be run on a host before connecting the car:
 
 ```sh
-cmake --build build --target check_panda_can_codec -j2
-./build/bin/check_panda_can_codec
+cmake --build build/host-checks --target check_panda_can_codec -j2
+./build/host-checks/bin/check_panda_can_codec
 ```
 
-Create a replay file on the host from collected openpilot logs:
+### NV12 replay
 
-```sh
-python3 ../export_replay_nv12.py \
-  --segment-dir /path/to/segment-with-fcamera \
-  --out /tmp/replay_120.scnv12 \
-  --frames 120
-```
-
-Then copy it to the board and run:
+To run an existing `SCNV12R1` replay on the board:
 
 ```sh
 SUPERCOMBO_REPLAY_NV12=/root/supercombo_k230/replay_120.scnv12 \
-  ./build/bin/supercombo.elf models/supercombo.kmodel 0
+  ./supercombo.elf model/supercombo.kmodel 0
 ```

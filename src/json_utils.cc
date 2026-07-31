@@ -4,32 +4,7 @@
 #include <cmath>
 #include <cctype>
 #include <cstdlib>
-#include <iomanip>
 #include <stdexcept>
-
-// JSON 문자열 값을 출력 스트림에 안전하게 추가한다.
-void append_json_string(std::ostringstream *out, const std::string &value) {
-  *out << '"';
-  for (const char ch : value) {
-    switch (ch) {
-      case '\\': *out << "\\\\"; break;
-      case '"': *out << "\\\""; break;
-      case '\n': *out << "\\n"; break;
-      case '\r': *out << "\\r"; break;
-      case '\t': *out << "\\t"; break;
-      default:
-        if (static_cast<unsigned char>(ch) < 0x20) {
-          *out << "\\u" << std::hex << std::setw(4) << std::setfill('0')
-               << static_cast<int>(static_cast<unsigned char>(ch))
-               << std::dec << std::setfill(' ');
-        } else {
-          *out << ch;
-        }
-        break;
-    }
-  }
-  *out << '"';
-}
 
 // 단순 JSON 텍스트에서 bool 값을 읽는다.
 bool parse_json_bool_value(const std::string &text, const std::string &key, bool *out) {

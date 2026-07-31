@@ -506,6 +506,8 @@ private:
         hud_.controller_enabled = control_fresh && latest_control_state_.enabled != 0;
         hud_.controller_engaged = control_fresh && latest_control_state_.engaged != 0;
         hud_.controller_active = control_fresh && latest_control_state_.active != 0;
+        hud_.lateral_mode_available = control_fresh;
+        hud_.laneless_mode = control_fresh && latest_control_state_.laneless_mode != 0;
         hud_.vehicle_fresh = control_fresh && latest_control_state_.vehicle_fresh != 0;
         hud_.steering_fault = control_fresh && latest_control_state_.steering_fault != 0;
         hud_.left_blinker = control_fresh && latest_control_state_.left_blinker != 0;

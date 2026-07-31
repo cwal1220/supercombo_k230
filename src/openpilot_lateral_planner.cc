@@ -376,6 +376,7 @@ struct OpenpilotLateralPlanner::Impl {
 
     target.valid = true;
     target.mpc_solution_valid = invalid_count < 2;
+    target.laneless_mode = use_model_path;
     target.lookahead_x = static_cast<float>(std::max(0.0f, v_ego) * path_t[1]);
     target.target_y = static_cast<float>(y_pts[1]);
     target.heading = static_cast<float>(mpc.states()[0][2]);

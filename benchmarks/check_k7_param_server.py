@@ -11,6 +11,18 @@ from scripts.k7_param_server import PARAM_METADATA, ParamStore
 
 
 class ParamStoreTest(unittest.TestCase):
+    EXPECTED_QUICK = {
+        "steering": [
+            "path_offset_m",
+            "steer_actuator_delay",
+            "torque_kp_raw",
+            "torque_kf_raw",
+            "torque_friction_raw",
+            "torque_angle_deadzone_raw",
+        ],
+        "driving": ["max_lateral_jerk", "max_lateral_accel"],
+    }
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)
@@ -65,6 +77,21 @@ class ParamStoreTest(unittest.TestCase):
                         self.assertIsInstance(
                             metadata.get(field), (int, float), f"{group}.{key}.{field}"
                         )
+
+    def test_quick_tuning_layout_is_explicit_and_stable(self):
+        for group, expected in self.EXPECTED_QUICK.items():
+            quick = {
+                key: metadata
+                for key, metadata in PARAM_METADATA[group].items()
+                if metadata.get("quick")
+            }
+            self.assertEqual(set(quick), set(expected))
+            self.assertTrue(all(metadata.get("quick_section") for metadata in quick.values()))
+            orders = [metadata.get("quick_order") for metadata in quick.values()]
+            self.assertTrue(all(isinstance(order, int) for order in orders))
+            self.assertEqual(len(orders), len(set(orders)))
+            ordered = sorted(quick, key=lambda key: quick[key]["quick_order"])
+            self.assertEqual(ordered, expected)
 
 
 if __name__ == "__main__":

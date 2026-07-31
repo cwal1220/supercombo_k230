@@ -269,6 +269,7 @@ struct K230ControlState {
     float tpms_pressure_rl = 0.0f;
     float tpms_pressure_rr = 0.0f;
     uint32_t tpms_warning = 0;
+    uint32_t laneless_mode = 0;
 };
 
 class K230LatestChannel {

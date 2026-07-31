@@ -36,19 +36,6 @@ int apply_hyundai_steer_torque_limits(int desired_torque, int last_torque, int d
   return apply_torque;
 }
 
-bool steering_gate_allows(const SteeringGateInput &input) {
-  if (!input.path_usable || !input.engaged || !input.panda_ready || input.steering_fault) {
-    return false;
-  }
-  if (!std::isfinite(input.v_ego_mps)) {
-    return false;
-  }
-  if (input.no_smart_mdps && input.v_ego_mps < input.min_enable_speed_mps) {
-    return false;
-  }
-  return true;
-}
-
 float mdps_speed_for_lkas(float cluster_speed, bool lkas_active, bool is_mph,
                           float spoof_speed_kph) {
   if (!std::isfinite(cluster_speed) || cluster_speed < 0.0f) return 0.0f;

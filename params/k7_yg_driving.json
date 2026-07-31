@@ -7,6 +7,5 @@
   "manual_steer_disable_frames": 50,
   "driver_torque_threshold": 170,
   "max_lateral_jerk": 5.0,
-  "max_lateral_accel": 3.0,
-  "max_curvature": 0.2
+  "max_lateral_accel": 3.3
 }

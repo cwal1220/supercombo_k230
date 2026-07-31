@@ -11,8 +11,7 @@ struct K7DrivingParams {
   int manual_steer_disable_frames = 50;
   int driver_torque_threshold = 170;
   float max_lateral_jerk = 5.0f;
-  float max_lateral_accel = 3.0f;
-  float max_curvature = 0.2f;
+  float max_lateral_accel = 3.3f;
 };
 
 bool load_k7_driving_params_json(const std::string &path,

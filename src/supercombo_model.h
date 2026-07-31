@@ -17,7 +17,6 @@ public:
     bool run_frame_nv12(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &raw_output);
     void set_input_calibration(const float rpy[3]);
     void set_desire(int desire);
-    void reset_state();
 
 private:
     static constexpr int kModelW = 512;

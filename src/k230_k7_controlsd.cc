@@ -480,6 +480,7 @@ int main() {
       control_state.active = last_result.active ? 1U : 0U;
       control_state.should_send = last_result.should_send ? 1U : 0U;
       control_state.path_usable = last_result.path_usable ? 1U : 0U;
+      control_state.laneless_mode = lateral_target.laneless_mode ? 1U : 0U;
       control_state.seeds_ready = last_result.seeds_ready ? 1U : 0U;
       control_state.vehicle_fresh = last_result.vehicle_fresh ? 1U : 0U;
       control_state.steering_fault = vehicle.steering_fault ? 1U : 0U;

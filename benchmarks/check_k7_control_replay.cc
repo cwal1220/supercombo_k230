@@ -54,6 +54,26 @@ LateralTarget replay_target() {
   return target;
 }
 
+K7VehicleCanState ready_vehicle(double timestamp_s = 1.0) {
+  K7VehicleCanState vehicle;
+  vehicle.has_lkas11_seed = true;
+  vehicle.has_clu11_seed = true;
+  vehicle.has_mdps12_seed = true;
+  vehicle.lkas11_time_s = timestamp_s;
+  vehicle.clu11_time_s = timestamp_s;
+  vehicle.sas11_time_s = timestamp_s;
+  vehicle.esp12_time_s = timestamp_s;
+  vehicle.mdps12_time_s = timestamp_s;
+  vehicle.tcs13_time_s = timestamp_s;
+  vehicle.tcs15_time_s = timestamp_s;
+  vehicle.e_ems11_time_s = timestamp_s;
+  vehicle.elect_gear_time_s = timestamp_s;
+  vehicle.cgw1_time_s = timestamp_s;
+  vehicle.cgw2_time_s = timestamp_s;
+  vehicle.gear = 5;
+  return vehicle;
+}
+
 float original_lag_adjusted_curvature(const LateralTarget &target, float speed_mps,
                                       float delay) {
   constexpr float desired_curvature_limit = 0.1f;
@@ -305,6 +325,46 @@ void verify_large_angle_fault_avoidance() {
           "resumed LKAS11 request and temporary-fault bits");
 }
 
+void verify_configured_steering_angle_limit() {
+  K7LateralControllerConfig config;
+  config.force_engaged = true;
+  config.driving_params.vehicle_state_timeout_ms = 2000;
+  config.steering_params.avoid_lkas_fault_enabled = false;
+  config.steering_params.max_steering_angle_deg = 80.0f;
+  K7LateralController controller(config);
+  K7VehicleCanState vehicle = ready_vehicle();
+  vehicle.cluster_speed = 72.0f;
+
+  vehicle.steering_angle_deg = 79.9f;
+  const auto below_limit =
+      controller.update(replay_path(), replay_target(), vehicle, 1.0, 0);
+  require(below_limit.active, "steering below configured angle limit must remain active");
+
+  vehicle.steering_angle_deg = 80.0f;
+  const auto at_limit =
+      controller.update(replay_path(), replay_target(), vehicle, 1.01, 1);
+  require(!at_limit.active && at_limit.active_block == "steering_angle_limit",
+          "configured steering angle limit must apply below 90 degrees");
+}
+
+void verify_fixed_max_curvature() {
+  K7LateralControllerConfig config;
+  config.force_engaged = true;
+  config.driving_params.vehicle_state_timeout_ms = 2000;
+  K7LateralController controller(config);
+  K7VehicleCanState vehicle = ready_vehicle();
+  vehicle.cluster_speed = 3.6f;
+
+  LateralTarget target = replay_target();
+  for (int i = 0; i < kLateralControlN; ++i) {
+    target.curvatures[i] = 0.5f;
+    target.psis[i] = 0.23f;
+  }
+  const auto result = controller.update(replay_path(), target, vehicle, 1.0, 0);
+  require(result.active && std::fabs(result.desired_curvature - 0.3f) < 1e-6f,
+          "K7 maximum curvature must remain fixed at 0.3 1/m");
+}
+
 void verify_runtime_params_apply_immediately() {
   K7LateralControllerConfig config;
   config.force_engaged = true;
@@ -497,6 +557,8 @@ int main(int argc, char **argv) {
     verify_mdps_fault_filter();
     verify_braking_does_not_disengage();
     verify_large_angle_fault_avoidance();
+    verify_configured_steering_angle_limit();
+    verify_fixed_max_curvature();
     verify_runtime_params_apply_immediately();
     verify_lkas_hud_state_stability();
     verify_panda_gate_and_handoff();

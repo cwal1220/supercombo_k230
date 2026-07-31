@@ -14,6 +14,8 @@ struct OverlayHudState {
     bool controller_enabled = false;
     bool controller_engaged = false;
     bool controller_active = false;
+    bool lateral_mode_available = false;
+    bool laneless_mode = false;
     bool vehicle_fresh = false;
     bool steering_fault = false;
     bool left_blinker = false;

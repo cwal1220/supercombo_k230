@@ -11,6 +11,7 @@ constexpr int kGearDrive = 5;
 constexpr int kSteeringPressedMinCount = 5;
 constexpr float kSmoothSteerRecoverStep = 0.005f;
 constexpr float kDesiredCurvatureLimit = 0.1f;
+constexpr float kMaxCurvature = 0.3f;
 constexpr float kGravity = 9.8f;
 
 float clamp_float(float value, float lo, float hi) {
@@ -187,22 +188,6 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
   return result;
 }
 
-// 현재 engage 상태를 반환한다.
-bool K7LateralController::engaged() const {
-  return engaged_;
-}
-
-// 제어 상태를 초기값으로 되돌린다.
-void K7LateralController::reset() {
-  engaged_ = false;
-  last_button_ = 0;
-  last_disengage_s_ = -1000.0;
-  steering_pressed_counter_ = 0;
-  reset_control_state();
-  lkas11_counter_valid_ = false;
-  lkas11_counter_ = 0;
-}
-
 // CLU 버튼 edge로 engage/disengage 상태를 갱신한다.
 void K7LateralController::update_button_state(int button, double now_s) {
   if (button == last_button_) return;
@@ -243,8 +228,8 @@ std::string K7LateralController::manual_blinker_block_reason() const {
 // openpilot K7 조향각 제한값을 현재 속도에 맞게 계산한다.
 float K7LateralController::steering_angle_limit_deg(float speed_kph) const {
   const float limit = config_.steering_params.max_steering_angle_deg;
-  if (limit < 90.0f) return 0.0f;
-  if (std::fabs(limit - 90.0f) < 1e-6f) return 90.0f;
+  if (limit <= 0.0f) return 0.0f;
+  if (limit <= 90.0f) return limit;
   const float speed = clamp_float(speed_kph, 0.0f, 20.0f);
   return (limit + 60.0f) + (speed / 20.0f) * (limit - (limit + 60.0f));
 }
@@ -438,8 +423,7 @@ float K7LateralController::lag_adjusted_desired_curvature(
       (config_.driving_params.max_lateral_accel + roll_compensation) /
           (limit_speed * limit_speed));
   desired_curvature = clamp_float(desired_curvature,
-                                  -config_.driving_params.max_curvature,
-                                  config_.driving_params.max_curvature);
+                                  -kMaxCurvature, kMaxCurvature);
   return config_.steering_params.invert_steer ? -desired_curvature : desired_curvature;
 }
 

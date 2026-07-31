@@ -65,8 +65,6 @@ bool load_k7_driving_params_json(const std::string &path,
                          &params->max_lateral_jerk);
     parse_optional_float(text, "max_lateral_accel", 0.5f, 5.0f,
                          &params->max_lateral_accel);
-    parse_optional_float(text, "max_curvature", 0.01f, 0.5f,
-                         &params->max_curvature);
   } catch (const std::exception &exc) {
     if (error) *error = exc.what();
     return false;

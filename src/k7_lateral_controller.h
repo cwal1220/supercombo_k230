@@ -58,12 +58,6 @@ public:
                                 bool panda_ready = true,
                                 bool panda_controls_allowed = true);
 
-  // 현재 engage 상태를 반환한다.
-  bool engaged() const;
-
-  // 제어 상태를 초기값으로 되돌린다.
-  void reset();
-
 private:
   // CLU 버튼 edge로 engage/disengage 상태를 갱신한다.
   void update_button_state(int button, double now_s);
