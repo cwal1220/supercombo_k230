@@ -21,6 +21,7 @@ struct OverlayHudState {
     bool left_blinker = false;
     bool right_blinker = false;
     bool cruise_active = false;
+    bool brake_hold = false;
     bool services_healthy = false;
     bool network_connected = false;
     unsigned panda_faults = 0;

@@ -635,6 +635,16 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     draw_stop_signal_indicator(frame, hud,
                                logical_width, logical_height, rotate_landscape);
 
+    if (hud.brake_hold) {
+        constexpr int auto_hold_w = 190;
+        constexpr int auto_hold_h = 40;
+        constexpr int auto_hold_y = 350;
+        const int auto_hold_x = (width - auto_hold_w) / 2;
+        ui.box(auto_hold_x, auto_hold_y, auto_hold_w, auto_hold_h, green);
+        ui.hud_text_center(width / 2, auto_hold_y + 10, "AUTO HOLD", 3,
+                           green, auto_hold_w - 18);
+    }
+
     constexpr int tpms_box_y = panel_y3;
     constexpr int tpms_col_offset = 112;
     constexpr int tpms_col_w = 108;
@@ -726,12 +736,16 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     }
 }
 
-bool append_projected_point(std::vector<cv::Point> *vertices,
-                            const ModelPoint &point, float y_offset, float z_offset,
-                            const ProjectionState &projection,
-                            int logical_width, int logical_height,
-                            bool rotate_landscape)
+bool project_display_point(const ModelPoint &point, float y_offset, float z_offset,
+                           const ProjectionState &projection,
+                           int logical_width, int logical_height,
+                           bool rotate_landscape, cv::Point *projected)
 {
+    if (projected == nullptr || !std::isfinite(point.x) ||
+        !std::isfinite(point.y) || !std::isfinite(point.z)) {
+        return false;
+    }
+
     int px = 0;
     int py = 0;
     if (!project_point(projection, point.x, point.y + y_offset, point.z + z_offset,
@@ -740,7 +754,23 @@ bool append_projected_point(std::vector<cv::Point> *vertices,
     }
 
     rotate_model_point_180(logical_width, logical_height, &px, &py);
-    vertices->push_back(display_point(px, py, logical_height, rotate_landscape));
+    *projected = display_point(px, py, logical_height, rotate_landscape);
+    return true;
+}
+
+bool append_projected_point(std::vector<cv::Point> *vertices,
+                            const ModelPoint &point, float y_offset, float z_offset,
+                            const ProjectionState &projection,
+                            int logical_width, int logical_height,
+                            bool rotate_landscape)
+{
+    cv::Point projected;
+    if (!project_display_point(point, y_offset, z_offset, projection,
+                               logical_width, logical_height, rotate_landscape,
+                               &projected)) {
+        return false;
+    }
+    vertices->push_back(projected);
     return true;
 }
 
@@ -750,24 +780,74 @@ void draw_model_ribbon(cv::Mat &img,
                        const cv::Scalar &color, const ProjectionState &projection,
                        int logical_width, int logical_height, bool rotate_landscape)
 {
-    int max_idx = 0;
-    while (max_idx + 1 < kTrajectorySize && points[max_idx + 1].x <= max_distance)
-        ++max_idx;
+    struct ProjectedPair {
+        cv::Point left;
+        cv::Point right;
+    };
+
+    std::vector<ProjectedPair> pairs;
+    pairs.reserve(kTrajectorySize);
+    float previous_x = -1.0f;
+    double polygon_winding = 0.0;
+
+    for (const ModelPoint &point : points) {
+        if (!std::isfinite(point.x) || !std::isfinite(point.y) ||
+            !std::isfinite(point.z)) {
+            if (!pairs.empty()) break;
+            continue;
+        }
+        if (point.x > max_distance) break;
+        if (point.x < 0.5f) continue;
+        if (!pairs.empty() && point.x <= previous_x) break;
+
+        ProjectedPair pair;
+        const bool projected =
+            project_display_point(point, -half_width, z_offset, projection,
+                                  logical_width, logical_height, rotate_landscape,
+                                  &pair.left) &&
+            project_display_point(point, half_width, z_offset, projection,
+                                  logical_width, logical_height, rotate_landscape,
+                                  &pair.right);
+        if (!projected) {
+            if (!pairs.empty()) break;
+            continue;
+        }
+
+        if (!pairs.empty()) {
+            const ProjectedPair &previous = pairs.back();
+            const cv::Point quad[] = {
+                previous.left, pair.left, pair.right, previous.right,
+            };
+            double area = 0.0;
+            for (int i = 0; i < 4; ++i) {
+                const cv::Point &a = quad[i];
+                const cv::Point &b = quad[(i + 1) % 4];
+                area += static_cast<double>(a.x) * b.y -
+                        static_cast<double>(b.x) * a.y;
+            }
+            area *= 0.5;
+            if (std::abs(area) < 0.5 ||
+                (polygon_winding != 0.0 && area * polygon_winding <= 0.0)) {
+                break;
+            }
+            if (polygon_winding == 0.0) polygon_winding = area;
+        }
+
+        pairs.push_back(pair);
+        previous_x = point.x;
+    }
+
+    if (pairs.size() < 2) return;
 
     std::vector<cv::Point> vertices;
-    vertices.reserve(static_cast<size_t>(max_idx + 1) * 2);
-    for (int i = 0; i <= max_idx; ++i)
-        append_projected_point(&vertices, points[i], -half_width, z_offset, projection,
-                               logical_width, logical_height, rotate_landscape);
-    for (int i = max_idx; i >= 0; --i)
-        append_projected_point(&vertices, points[i], half_width, z_offset, projection,
-                               logical_width, logical_height, rotate_landscape);
+    vertices.reserve(pairs.size() * 2);
+    for (const ProjectedPair &pair : pairs) vertices.push_back(pair.left);
+    for (auto it = pairs.rbegin(); it != pairs.rend(); ++it)
+        vertices.push_back(it->right);
 
-    if (vertices.size() >= 3) {
-        const cv::Point *polygon[] = {vertices.data()};
-        const int count[] = {static_cast<int>(vertices.size())};
-        cv::fillPoly(img, polygon, count, 1, color, cv::LINE_8);
-    }
+    const cv::Point *polygon[] = {vertices.data()};
+    const int count[] = {static_cast<int>(vertices.size())};
+    cv::fillPoly(img, polygon, count, 1, color, cv::LINE_8);
 }
 
 void draw_stop_line(cv::Mat &img, const ParsedStopLine &stop_line,

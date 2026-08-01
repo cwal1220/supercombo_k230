@@ -29,6 +29,9 @@ constexpr char kK230CanTopic[] = "/k230_can";
 constexpr char kK230SendCanTopic[] = "/k230_sendcan";
 constexpr char kK230PandaStateTopic[] = "/k230_panda_state";
 constexpr char kK230ControlStateTopic[] = "/k230_control_state";
+
+constexpr uint32_t kK230HudFlagLaneless = 1U << 0;
+constexpr uint32_t kK230HudFlagBrakeHold = 1U << 1;
 constexpr char kK230RoadAiFrameRing[] = "/k230_road_ai";
 constexpr unsigned kK230CanBatchMaxFrames = 256;
 constexpr unsigned kK230CanQueueSlots = 64;
@@ -269,7 +272,7 @@ struct K230ControlState {
     float tpms_pressure_rl = 0.0f;
     float tpms_pressure_rr = 0.0f;
     uint32_t tpms_warning = 0;
-    uint32_t laneless_mode = 0;
+    uint32_t hud_flags = 0;
 };
 
 class K230LatestChannel {

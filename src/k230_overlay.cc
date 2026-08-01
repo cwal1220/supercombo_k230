@@ -507,12 +507,17 @@ private:
         hud_.controller_engaged = control_fresh && latest_control_state_.engaged != 0;
         hud_.controller_active = control_fresh && latest_control_state_.active != 0;
         hud_.lateral_mode_available = control_fresh;
-        hud_.laneless_mode = control_fresh && latest_control_state_.laneless_mode != 0;
+        hud_.laneless_mode =
+            control_fresh &&
+            (latest_control_state_.hud_flags & kK230HudFlagLaneless) != 0;
         hud_.vehicle_fresh = control_fresh && latest_control_state_.vehicle_fresh != 0;
         hud_.steering_fault = control_fresh && latest_control_state_.steering_fault != 0;
         hud_.left_blinker = control_fresh && latest_control_state_.left_blinker != 0;
         hud_.right_blinker = control_fresh && latest_control_state_.right_blinker != 0;
         hud_.cruise_active = control_fresh && latest_control_state_.cruise_active != 0;
+        hud_.brake_hold =
+            control_fresh &&
+            (latest_control_state_.hud_flags & kK230HudFlagBrakeHold) != 0;
         hud_.gear = control_fresh ? latest_control_state_.gear : 0;
         hud_.speed_kph = control_fresh ? latest_control_state_.speed_kph : 0.0f;
         hud_.cruise_set_speed_kph =

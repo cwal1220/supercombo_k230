@@ -30,6 +30,8 @@ constexpr uint32_t kExpectedPandaSafetyModel = 24;
 constexpr uint32_t kExpectedPandaSafetyParam = 0;
 constexpr uint64_t kPandaStateTimeoutNs = 1100000000ULL;
 constexpr uint64_t kAlertModelTimeoutNs = 500000000ULL;
+constexpr float kLeadProbabilityThreshold = 0.5f;
+constexpr float kRadarToCameraDistanceM = 1.52f;
 constexpr uint64_t kMaxCanRxAgeNs = 100000000ULL;
 constexpr int kParamPollIntervalMs = 100;
 
@@ -318,7 +320,6 @@ int main() {
     unsigned send_queue_full = 0;
     unsigned stale_can_batches = 0;
     int control_frame = 0;
-    double last_alert_scc11_time_s = -1.0;
     uint32_t last_logged_alert_event_id = 0;
 
     using Clock = std::chrono::steady_clock;
@@ -423,32 +424,28 @@ int main() {
       const bool radar_lead_fresh =
           vehicle.scc11_time_s >= 0.0 && now_s >= vehicle.scc11_time_s &&
           now_s - vehicle.scc11_time_s <= 0.5;
-      const bool radar_updated =
-          vehicle.scc11_time_s > last_alert_scc11_time_s;
-      if (radar_updated)
-        last_alert_scc11_time_s = vehicle.scc11_time_s;
       const bool model_fresh =
           model.valid != 0 && model.model_timestamp_ns != 0 &&
           now_ns >= model.model_timestamp_ns &&
           now_ns - model.model_timestamp_ns <= kAlertModelTimeoutNs;
+      const bool vision_lead_valid =
+          model_fresh && model.lead.valid != 0 &&
+          model.lead.probability >= kLeadProbabilityThreshold &&
+          std::isfinite(model.lead.x) && std::isfinite(model.lead.velocity);
       DepartureAlertInput alert_input;
       alert_input.now_s = now_s;
       alert_input.vehicle_valid = last_result.vehicle_fresh;
       alert_input.gear = vehicle.gear;
       alert_input.speed_mps = vehicle_speed_mps(vehicle);
       alert_input.gas_pressed = vehicle.gas_pressed;
-      alert_input.radar_updated = radar_updated;
-      alert_input.radar_lead_valid =
-          radar_lead_fresh && vehicle.radar_lead_valid;
-      alert_input.radar_lead_distance_m = vehicle.radar_lead_distance_m;
-      alert_input.radar_lead_relative_speed_mps =
-          vehicle.radar_lead_relative_speed_mps;
+      alert_input.lead_updated = model_updated;
+      alert_input.lead_valid = vision_lead_valid;
+      alert_input.lead_distance_m =
+          vision_lead_valid ? model.lead.x - kRadarToCameraDistanceM : 0.0f;
+      alert_input.lead_relative_speed_mps =
+          vision_lead_valid ? model.lead.velocity - alert_input.speed_mps : 0.0f;
       alert_input.model_updated = model_updated;
       alert_input.model_valid = model_fresh;
-      alert_input.vision_lead_present =
-          model_fresh && model.lead.valid != 0 &&
-          model.lead.probability > 0.5f && model.lead.x > 0.0f &&
-          model.lead.x < 60.0f;
       alert_input.plan_distance_m =
           model_fresh ? model.plan[kTrajectorySize - 1].x : 0.0f;
       alert_input.stop_line_valid =
@@ -463,11 +460,13 @@ int main() {
         std::fprintf(
             stderr,
             "k230_k7_controlsd: departure alert=%s event=%u "
-            "lead=%.1fm rel=%.1fm/s plan=%.1fm stopline=%.1fm p=%.2f\n",
+            "visionLead=%.1fm rel=%.1fm/s p=%.2f plan=%.1fm "
+            "stopline=%.1fm p=%.2f\n",
             departure_alert_name(departure_alert.type),
             departure_alert.event_id,
-            vehicle.radar_lead_distance_m,
-            vehicle.radar_lead_relative_speed_mps,
+            alert_input.lead_distance_m,
+            alert_input.lead_relative_speed_mps,
+            model.lead.probability,
             alert_input.plan_distance_m,
             alert_input.stop_line_distance_m,
             alert_input.stop_line_probability);
@@ -480,7 +479,11 @@ int main() {
       control_state.active = last_result.active ? 1U : 0U;
       control_state.should_send = last_result.should_send ? 1U : 0U;
       control_state.path_usable = last_result.path_usable ? 1U : 0U;
-      control_state.laneless_mode = lateral_target.laneless_mode ? 1U : 0U;
+      control_state.hud_flags =
+          (lateral_target.laneless_mode ? kK230HudFlagLaneless : 0U) |
+          (last_result.vehicle_fresh && vehicle.brake_hold
+               ? kK230HudFlagBrakeHold
+               : 0U);
       control_state.seeds_ready = last_result.seeds_ready ? 1U : 0U;
       control_state.vehicle_fresh = last_result.vehicle_fresh ? 1U : 0U;
       control_state.steering_fault = vehicle.steering_fault ? 1U : 0U;

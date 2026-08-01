@@ -23,10 +23,10 @@ void verify_lead_departure() {
 
   for (int i = 0; i <= 20; ++i) {
     DepartureAlertInput input = stopped_input(i * 0.1);
-    input.radar_updated = true;
-    input.radar_lead_valid = true;
-    input.radar_lead_distance_m = 5.0f + (i % 2) * 0.2f;
-    input.radar_lead_relative_speed_mps = 0.2f;
+    input.lead_updated = true;
+    input.lead_valid = true;
+    input.lead_distance_m = 5.0f + (i % 2) * 0.2f;
+    input.lead_relative_speed_mps = 0.2f;
     output = detector.update(input);
   }
   require(output.type == DepartureAlertType::none,
@@ -35,10 +35,10 @@ void verify_lead_departure() {
 
   for (int i = 21; i <= 25; ++i) {
     DepartureAlertInput input = stopped_input(i * 0.1);
-    input.radar_updated = true;
-    input.radar_lead_valid = true;
-    input.radar_lead_distance_m = 6.3f;
-    input.radar_lead_relative_speed_mps = 1.5f;
+    input.lead_updated = true;
+    input.lead_valid = true;
+    input.lead_distance_m = 5.6f;
+    input.lead_relative_speed_mps = 1.0f;
     output = detector.update(input);
   }
   require(output.type == DepartureAlertType::lead_departed,
@@ -47,10 +47,10 @@ void verify_lead_departure() {
 
   for (int i = 26; i <= 50; ++i) {
     DepartureAlertInput input = stopped_input(i * 0.1);
-    input.radar_updated = true;
-    input.radar_lead_valid = true;
-    input.radar_lead_distance_m = 10.0f;
-    input.radar_lead_relative_speed_mps = 3.0f;
+    input.lead_updated = true;
+    input.lead_valid = true;
+    input.lead_distance_m = 10.0f;
+    input.lead_relative_speed_mps = 3.0f;
     output = detector.update(input);
   }
   require(output.event_id == 1,
@@ -100,23 +100,59 @@ void verify_green_light() {
   require(output.event_id == 1, "first green-light alert event id");
 }
 
-void verify_lead_suppresses_green_light() {
+void verify_three_second_display_uses_total_stop_time() {
   DepartureAlertDetector detector;
   DepartureAlertOutput output;
 
-  for (int i = 0; i <= 100; ++i) {
+  for (int i = 0; i < 60; ++i)
+    output = detector.update(stopped_input(i * 0.05));
+
+  DepartureAlertInput input = stopped_input(3.0);
+  input.model_updated = true;
+  input.model_valid = true;
+  input.plan_distance_m = 4.0f;
+  input.stop_line_valid = true;
+  input.stop_line_probability = 0.8f;
+  input.stop_line_distance_m = 3.0f;
+  output = detector.update(input);
+  require(output.green_light_armed,
+          "traffic signal must display after three seconds of total stop time");
+}
+
+void verify_signal_change_has_priority_over_lead_departure() {
+  DepartureAlertDetector detector;
+  DepartureAlertOutput output;
+
+  for (int i = 0; i <= 60; ++i) {
     DepartureAlertInput input = stopped_input(i * 0.05);
+    input.lead_updated = true;
+    input.lead_valid = true;
+    input.lead_distance_m = 5.0f;
     input.model_updated = true;
     input.model_valid = true;
-    input.vision_lead_present = true;
-    input.plan_distance_m = i < 80 ? 4.0f : 26.0f;
+    input.plan_distance_m = 4.0f;
     input.stop_line_valid = true;
     input.stop_line_probability = 0.8f;
     input.stop_line_distance_m = 3.0f;
     output = detector.update(input);
   }
-  require(output.type == DepartureAlertType::none && output.event_id == 0,
-          "a tracked lead must suppress green-light alerts");
+  require(output.green_light_armed,
+          "a tracked lead must not suppress the red traffic signal");
+
+  for (int i = 61; i <= 68; ++i) {
+    DepartureAlertInput input = stopped_input(i * 0.05);
+    input.lead_updated = true;
+    input.lead_valid = true;
+    input.lead_distance_m = 5.6f;
+    input.lead_relative_speed_mps = 1.0f;
+    input.model_updated = true;
+    input.model_valid = true;
+    input.plan_distance_m = 26.0f;
+    output = detector.update(input);
+  }
+  require(output.type == DepartureAlertType::green_light,
+          "signal change must take priority over a departing lead");
+  require(output.event_id == 1, "priority alert must emit one event");
 }
 
 void verify_distant_stop_line_does_not_arm() {
@@ -142,7 +178,8 @@ void verify_distant_stop_line_does_not_arm() {
 int main() {
   verify_lead_departure();
   verify_green_light();
-  verify_lead_suppresses_green_light();
+  verify_three_second_display_uses_total_stop_time();
+  verify_signal_change_has_priority_over_lead_departure();
   verify_distant_stop_line_does_not_arm();
   return 0;
 }

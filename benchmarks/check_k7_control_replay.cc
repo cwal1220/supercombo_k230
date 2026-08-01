@@ -186,6 +186,25 @@ void verify_tpms11() {
           "TPMS11 unavailable wheel pressure");
 }
 
+void verify_tcs15() {
+  std::array<uint8_t, 8> bytes{};
+  set_signal_le(&bytes, 29, 3, 2);
+  const Tcs15Values decoded = decode_tcs15(bytes);
+  require(decoded.brake_hold && !decoded.esp_disabled,
+          "TCS15 active Auto Hold decoding");
+
+  K7VehicleCanState vehicle;
+  update_k7_vehicle_can_state(&vehicle, kHyundaiTcs15Address, bytes,
+                              bytes.size(), kK7PowertrainBus, 1.0);
+  require(vehicle.brake_hold && vehicle.tcs15_time_s == 1.0,
+          "TCS15 Auto Hold vehicle-state update");
+
+  set_signal_le(&bytes, 29, 3, 3);
+  update_k7_vehicle_can_state(&vehicle, kHyundaiTcs15Address, bytes,
+                              bytes.size(), kK7PowertrainBus, 1.1);
+  require(!vehicle.brake_hold, "TCS15 ready state is not active Auto Hold");
+}
+
 void verify_scc11() {
   std::array<uint8_t, 8> bytes{};
   bytes[0] = 1;
@@ -553,6 +572,7 @@ int main(int argc, char **argv) {
     verify_mdps_speed_spoof();
     verify_lca11();
     verify_tpms11();
+    verify_tcs15();
     verify_scc11();
     verify_mdps_fault_filter();
     verify_braking_does_not_disengage();

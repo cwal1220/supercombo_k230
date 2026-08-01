@@ -17,14 +17,13 @@ struct DepartureAlertInput {
   float speed_mps = 0.0f;
   bool gas_pressed = false;
 
-  bool radar_updated = false;
-  bool radar_lead_valid = false;
-  float radar_lead_distance_m = 0.0f;
-  float radar_lead_relative_speed_mps = 0.0f;
+  bool lead_updated = false;
+  bool lead_valid = false;
+  float lead_distance_m = 0.0f;
+  float lead_relative_speed_mps = 0.0f;
 
   bool model_updated = false;
   bool model_valid = false;
-  bool vision_lead_present = false;
   float plan_distance_m = 0.0f;
   bool stop_line_valid = false;
   float stop_line_probability = 0.0f;
@@ -56,7 +55,6 @@ private:
   float lead_baseline_distance_m_ = 0.0f;
   bool lead_armed_ = false;
 
-  double green_light_arm_since_s_ = -1.0;
   double green_light_candidate_since_s_ = -1.0;
   bool green_light_armed_ = false;
 

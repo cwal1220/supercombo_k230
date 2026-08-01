@@ -13,8 +13,8 @@ constexpr double kMinimumStopTimeS = 1.0;
 constexpr float kMinimumLeadDistanceM = 1.0f;
 constexpr float kMaximumLeadDistanceM = 30.0f;
 constexpr double kLeadArmTimeS = 1.0;
-constexpr float kLeadDistanceChangeM = 1.0f;
-constexpr float kLeadRelativeSpeedMps = 1.0f;
+constexpr float kLeadDistanceChangeM = 0.5f;
+constexpr float kLeadRelativeSpeedMps = 0.5f;
 constexpr double kLeadConfirmTimeS = 0.3;
 
 constexpr float kStopLineProbability = 0.5f;
@@ -22,7 +22,7 @@ constexpr float kMaximumStopLineDistanceM = 5.0f;
 constexpr float kMinimumStoppedPlanDistanceM = -5.0f;
 constexpr float kStoppedPlanDistanceM = 5.0f;
 constexpr float kOpenPlanDistanceM = 25.0f;
-constexpr double kGreenLightArmTimeS = 3.0;
+constexpr double kTrafficSignalDisplayStopTimeS = 3.0;
 constexpr double kGreenLightConfirmTimeS = 0.3;
 constexpr double kAlertDisplayTimeS = 3.0;
 
@@ -70,86 +70,78 @@ DepartureAlertOutput DepartureAlertDetector::update(
       elapsed(input.now_s, stopped_since_s_, kMinimumStopTimeS);
   const bool stopped = stopped_since_s_ >= 0.0;
   if (stopped && !consumed_) {
-    const bool radar_lead_present =
-        input.radar_lead_valid &&
-        std::isfinite(input.radar_lead_distance_m) &&
-        input.radar_lead_distance_m >= kMinimumLeadDistanceM &&
-        input.radar_lead_distance_m <= kMaximumLeadDistanceM;
-    const bool any_lead_present =
-        radar_lead_present || input.vision_lead_present;
+    bool lead_departed = false;
+    bool green_light_changed = false;
+    const bool lead_present =
+        input.lead_valid && std::isfinite(input.lead_distance_m) &&
+        input.lead_distance_m >= kMinimumLeadDistanceM &&
+        input.lead_distance_m <= kMaximumLeadDistanceM;
 
-    if (radar_lead_present) {
-      reset_green_light();
-      if (stopped_long_enough && input.radar_updated) {
+    if (lead_present) {
+      if (stopped_long_enough && input.lead_updated) {
         if (lead_seen_since_s_ < 0.0) {
           lead_seen_since_s_ = input.now_s;
-          lead_baseline_distance_m_ = input.radar_lead_distance_m;
+          lead_baseline_distance_m_ = input.lead_distance_m;
         } else {
           lead_baseline_distance_m_ =
-              std::min(lead_baseline_distance_m_,
-                       input.radar_lead_distance_m);
+              std::min(lead_baseline_distance_m_, input.lead_distance_m);
         }
 
         lead_armed_ =
             elapsed(input.now_s, lead_seen_since_s_, kLeadArmTimeS);
         const bool departing =
             lead_armed_ &&
-            input.radar_lead_distance_m - lead_baseline_distance_m_ >
+            input.lead_distance_m - lead_baseline_distance_m_ >
                 kLeadDistanceChangeM &&
-            input.radar_lead_relative_speed_mps >
-                kLeadRelativeSpeedMps;
+            input.lead_relative_speed_mps > kLeadRelativeSpeedMps;
         if (departing) {
           if (lead_depart_candidate_since_s_ < 0.0)
             lead_depart_candidate_since_s_ = input.now_s;
-          if (elapsed(input.now_s, lead_depart_candidate_since_s_,
-                      kLeadConfirmTimeS)) {
-            trigger(DepartureAlertType::lead_departed, input.now_s);
-          }
+          lead_departed = elapsed(input.now_s, lead_depart_candidate_since_s_,
+                                  kLeadConfirmTimeS);
         } else {
           lead_depart_candidate_since_s_ = -1.0;
         }
       }
     } else {
       reset_lead();
-      if (input.model_updated && input.model_valid && !any_lead_present) {
-        const bool stop_line_near =
-            input.stop_line_valid &&
-            input.stop_line_probability > kStopLineProbability &&
-            std::isfinite(input.stop_line_distance_m) &&
-            input.stop_line_distance_m < kMaximumStopLineDistanceM;
-        const bool model_stopped =
-            std::isfinite(input.plan_distance_m) &&
-            input.plan_distance_m > kMinimumStoppedPlanDistanceM &&
-            input.plan_distance_m < kStoppedPlanDistanceM;
+    }
 
-        if (!green_light_armed_) {
-          if (stop_line_near && model_stopped) {
-            if (green_light_arm_since_s_ < 0.0)
-              green_light_arm_since_s_ = input.now_s;
-            green_light_armed_ =
-                elapsed(input.now_s, green_light_arm_since_s_,
-                        kGreenLightArmTimeS);
-          } else {
-            green_light_arm_since_s_ = -1.0;
-          }
-        }
+    if (!consumed_ && input.model_updated && input.model_valid) {
+      const bool stop_line_near =
+          input.stop_line_valid &&
+          input.stop_line_probability > kStopLineProbability &&
+          std::isfinite(input.stop_line_distance_m) &&
+          input.stop_line_distance_m < kMaximumStopLineDistanceM;
+      const bool model_stopped =
+          std::isfinite(input.plan_distance_m) &&
+          input.plan_distance_m > kMinimumStoppedPlanDistanceM &&
+          input.plan_distance_m < kStoppedPlanDistanceM;
 
-        const bool road_open =
-            green_light_armed_ &&
-            input.plan_distance_m > kOpenPlanDistanceM;
-        if (road_open) {
-          if (green_light_candidate_since_s_ < 0.0)
-            green_light_candidate_since_s_ = input.now_s;
-          if (elapsed(input.now_s, green_light_candidate_since_s_,
-                      kGreenLightConfirmTimeS)) {
-            trigger(DepartureAlertType::green_light, input.now_s);
-          }
-        } else {
-          green_light_candidate_since_s_ = -1.0;
-        }
-      } else if (any_lead_present) {
-        reset_green_light();
+      if (!green_light_armed_) {
+        green_light_armed_ =
+            stop_line_near && model_stopped &&
+            elapsed(input.now_s, stopped_since_s_,
+                    kTrafficSignalDisplayStopTimeS);
       }
+
+      const bool road_open =
+          green_light_armed_ && input.plan_distance_m > kOpenPlanDistanceM;
+      if (road_open) {
+        if (green_light_candidate_since_s_ < 0.0)
+          green_light_candidate_since_s_ = input.now_s;
+        green_light_changed =
+            elapsed(input.now_s, green_light_candidate_since_s_,
+                    kGreenLightConfirmTimeS);
+      } else {
+        green_light_candidate_since_s_ = -1.0;
+      }
+    }
+
+    if (green_light_changed) {
+      trigger(DepartureAlertType::green_light, input.now_s);
+    } else if (lead_departed && !green_light_armed_) {
+      trigger(DepartureAlertType::lead_departed, input.now_s);
     }
   }
 
@@ -176,7 +168,6 @@ void DepartureAlertDetector::reset_lead() {
 }
 
 void DepartureAlertDetector::reset_green_light() {
-  green_light_arm_since_s_ = -1.0;
   green_light_candidate_since_s_ = -1.0;
   green_light_armed_ = false;
 }
