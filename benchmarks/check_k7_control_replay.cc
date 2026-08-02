@@ -235,6 +235,93 @@ void verify_scc11() {
           "SCC11 imperial set speed conversion");
 }
 
+void update_clu11(K7VehicleCanState *vehicle, float speed, int button,
+                  bool unit_mph, double now_s) {
+  std::array<uint8_t, 8> bytes{};
+  set_signal_le(&bytes, 0, 3, static_cast<uint32_t>(button));
+  set_signal_le(&bytes, 8, 9,
+                static_cast<uint32_t>(std::lround(speed * 2.0f)));
+  set_signal_le(&bytes, 17, 1, unit_mph ? 1U : 0U);
+  update_k7_vehicle_can_state(vehicle, kHyundaiClu11Address, bytes, 4,
+                              kK7PowertrainBus, now_s);
+}
+
+void release_cruise_button(K7VehicleCanState *vehicle, float speed,
+                           bool unit_mph, double now_s) {
+  update_clu11(vehicle, speed, 0, unit_mph, now_s);
+}
+
+void verify_fixed_cruise_speed_estimate() {
+  K7VehicleCanState vehicle;
+  update_clu11(&vehicle, 64.0f, 2, false, 1.0);
+  require(vehicle.cruise_active &&
+              std::fabs(k7_cruise_set_speed_kph(vehicle) - 64.0f) < 0.001f,
+          "fixed cruise SET must latch cluster speed");
+
+  release_cruise_button(&vehicle, 64.0f, false, 1.1);
+  update_clu11(&vehicle, 64.0f, 1, false, 1.2);
+  require(std::fabs(k7_cruise_set_speed_kph(vehicle) - 66.0f) < 0.001f,
+          "fixed cruise RES must increment active target");
+  update_clu11(&vehicle, 64.0f, 1, false, 1.3);
+  require(std::fabs(k7_cruise_set_speed_kph(vehicle) - 66.0f) < 0.001f,
+          "held cruise button must not repeat without release");
+
+  release_cruise_button(&vehicle, 64.0f, false, 1.4);
+  update_clu11(&vehicle, 64.0f, 2, false, 1.5);
+  require(std::fabs(k7_cruise_set_speed_kph(vehicle) - 64.0f) < 0.001f,
+          "fixed cruise SET must decrement active target");
+  release_cruise_button(&vehicle, 64.0f, false, 1.6);
+  update_clu11(&vehicle, 64.0f, 4, false, 1.7);
+  require(!vehicle.cruise_active &&
+              std::fabs(k7_cruise_set_speed_kph(vehicle) - 64.0f) < 0.001f,
+          "fixed cruise CANCEL must preserve target");
+  release_cruise_button(&vehicle, 70.0f, false, 1.8);
+  update_clu11(&vehicle, 70.0f, 2, false, 1.9);
+  require(vehicle.cruise_active &&
+              std::fabs(k7_cruise_set_speed_kph(vehicle) - 70.0f) < 0.001f,
+          "fixed cruise SET after cancel must latch current speed");
+
+  std::array<uint8_t, 8> tcs13{};
+  set_signal_le(&tcs13, 55, 1, 1);
+  update_k7_vehicle_can_state(&vehicle, kHyundaiTcs13Address, tcs13,
+                              tcs13.size(), kK7PowertrainBus, 2.0);
+  require(!vehicle.cruise_active, "brake must cancel estimated cruise activity");
+  set_signal_le(&tcs13, 55, 1, 0);
+  update_k7_vehicle_can_state(&vehicle, kHyundaiTcs13Address, tcs13,
+                              tcs13.size(), kK7PowertrainBus, 2.1);
+  release_cruise_button(&vehicle, 60.0f, false, 2.2);
+  update_clu11(&vehicle, 60.0f, 1, false, 2.3);
+  require(vehicle.cruise_active &&
+              std::fabs(k7_cruise_set_speed_kph(vehicle) - 70.0f) < 0.001f,
+          "RES after brake must restore estimated target");
+
+  release_cruise_button(&vehicle, 70.0f, false, 2.4);
+  std::array<uint8_t, 8> clu_main{};
+  set_signal_le(&clu_main, 3, 1, 1);
+  set_signal_le(&clu_main, 8, 9, 140);
+  update_k7_vehicle_can_state(&vehicle, kHyundaiClu11Address, clu_main, 4,
+                              kK7PowertrainBus, 2.5);
+  require(!vehicle.cruise_active &&
+              std::fabs(k7_cruise_set_speed_kph(vehicle) - 70.0f) < 0.001f,
+          "cruise MAIN press must deactivate and preserve target");
+
+  K7VehicleCanState imperial;
+  update_clu11(&imperial, 40.0f, 2, true, 1.0);
+  require(std::fabs(k7_cruise_set_speed_kph(imperial) - 64.37376f) < 0.001f,
+          "fixed cruise imperial SET conversion");
+  release_cruise_button(&imperial, 40.0f, true, 1.1);
+  update_clu11(&imperial, 40.0f, 1, true, 1.2);
+  require(std::fabs(k7_cruise_set_speed_kph(imperial) - 67.592448f) < 0.001f,
+          "fixed cruise imperial increment");
+
+  std::array<uint8_t, 8> scc11{};
+  scc11[1] = 88;
+  update_k7_vehicle_can_state(&imperial, kHyundaiScc11Address, scc11,
+                              scc11.size(), kK7PowertrainBus, 1.3);
+  require(std::fabs(k7_cruise_set_speed_kph(imperial) - 141.622272f) < 0.001f,
+          "valid SCC set speed must override fixed cruise estimate");
+}
+
 void verify_mdps_fault_filter() {
   K7VehicleCanState vehicle;
   std::array<uint8_t, 8> bytes{};
@@ -574,6 +661,7 @@ int main(int argc, char **argv) {
     verify_tpms11();
     verify_tcs15();
     verify_scc11();
+    verify_fixed_cruise_speed_estimate();
     verify_mdps_fault_filter();
     verify_braking_does_not_disengage();
     verify_large_angle_fault_avoidance();

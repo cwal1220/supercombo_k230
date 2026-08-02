@@ -130,6 +130,7 @@ struct K7VehicleCanState {
   double tpms11_time_s = -1.0;
 
   int clu_button = 0;
+  int clu_main_button = 0;
   float cluster_speed = 0.0f;
   bool speed_unit_mph = false;
   int clu_alive_count = 0;
@@ -175,9 +176,13 @@ struct K7VehicleCanState {
   float tpms_pressure_rr = 0.0f;
   bool tpms_warning = false;
   int acc_mode = 0;
+  bool has_scc_cruise_state = false;
   bool cruise_main = false;
   bool cruise_active = false;
   float cruise_set_speed = 0.0f;
+  float estimated_cruise_set_speed_kph = 0.0f;
+  bool estimated_cruise_set_speed_valid = false;
+  bool estimated_cruise_active = false;
   bool radar_lead_valid = false;
   float radar_lead_distance_m = 0.0f;
   float radar_lead_relative_speed_mps = 0.0f;
@@ -237,5 +242,5 @@ bool k7_seed_frames_ready(const K7VehicleCanState &state);
 bool k7_tpms_state_fresh(const K7VehicleCanState &state, double now_s,
                          double timeout_s = 5.0);
 
-// SCC11 설정 속도를 CLU11 단위 설정에 따라 km/h로 변환한다.
+// SCC11 설정 속도를 사용하고, 없으면 고정형 크루즈 추정값을 반환한다.
 float k7_cruise_set_speed_kph(const K7VehicleCanState &state);

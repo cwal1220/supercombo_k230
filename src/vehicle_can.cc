@@ -9,6 +9,13 @@ namespace {
 
 constexpr int kMdpsToiUnavailableFaultFrames = 100;
 constexpr double kBlinkerHoldSeconds = 0.5;
+constexpr int kCruiseButtonResume = 1;
+constexpr int kCruiseButtonSet = 2;
+constexpr int kCruiseButtonCancel = 4;
+constexpr float kMphToKph = 1.609344f;
+constexpr float kFixedCruiseStep = 2.0f;
+constexpr float kMinimumCruiseSpeedKph = 30.0f;
+constexpr float kMinimumCruiseSpeedMph = 20.0f;
 
 // openpilot K7 parser와 같은 bus에서 온 frame만 차량 상태에 반영한다.
 bool expected_openpilot_k7_bus(uint32_t address, uint8_t bus) {
@@ -59,6 +66,64 @@ int32_t sign_extend(uint32_t raw, int bits) {
 // 특정 timestamp가 freshness timeout 안에 있는지 확인한다.
 bool fresh_time(double timestamp_s, double now_s, double timeout_s) {
   return timestamp_s >= 0.0 && now_s >= timestamp_s && now_s - timestamp_s <= timeout_s;
+}
+
+float cluster_speed_to_kph(float speed, bool unit_mph) {
+  return speed * (unit_mph ? kMphToKph : 1.0f);
+}
+
+float current_cluster_speed_kph(const HyundaiClu11Values &clu) {
+  return cluster_speed_to_kph(std::round(clu.speed + clu.speed_decimal),
+                              clu.speed_unit_mph);
+}
+
+// K7 HEV에는 유효한 SCC/LVR 목표 속도가 없고 E_EMS11 후보는 엔진 회전수와
+// 비트가 겹치므로 CLU11 버튼과 클러스터 속도로 고정형 크루즈 상태를 추정한다.
+void update_fixed_cruise_estimate(K7VehicleCanState *state,
+                                  const HyundaiClu11Values &clu) {
+  const bool main_pressed =
+      clu.cruise_sw_main != 0 && state->clu_main_button == 0;
+  const bool button_pressed =
+      clu.cruise_sw_state != 0 && state->clu_button == 0;
+  const float display_unit_kph = clu.speed_unit_mph ? kMphToKph : 1.0f;
+  const float step_kph = kFixedCruiseStep * display_unit_kph;
+  const float minimum_kph =
+      (clu.speed_unit_mph ? kMinimumCruiseSpeedMph
+                          : kMinimumCruiseSpeedKph) * display_unit_kph;
+
+  if (main_pressed) state->estimated_cruise_active = false;
+  if (button_pressed) {
+    if (clu.cruise_sw_state == kCruiseButtonCancel) {
+      state->estimated_cruise_active = false;
+    } else if (clu.cruise_sw_state == kCruiseButtonSet &&
+               !state->brake_pressed) {
+      if (state->estimated_cruise_active &&
+          state->estimated_cruise_set_speed_valid) {
+        state->estimated_cruise_set_speed_kph = std::max(
+            minimum_kph, state->estimated_cruise_set_speed_kph - step_kph);
+      } else {
+        state->estimated_cruise_set_speed_kph = std::max(
+            minimum_kph, current_cluster_speed_kph(clu));
+      }
+      state->estimated_cruise_set_speed_valid = true;
+      state->estimated_cruise_active = true;
+    } else if (clu.cruise_sw_state == kCruiseButtonResume &&
+               !state->brake_pressed) {
+      if (!state->estimated_cruise_set_speed_valid) {
+        state->estimated_cruise_set_speed_kph = std::max(
+            minimum_kph, current_cluster_speed_kph(clu));
+        state->estimated_cruise_set_speed_valid = true;
+      } else if (state->estimated_cruise_active) {
+        state->estimated_cruise_set_speed_kph += step_kph;
+      }
+      state->estimated_cruise_active = true;
+    }
+  }
+
+  state->clu_button = clu.cruise_sw_state;
+  state->clu_main_button = clu.cruise_sw_main;
+  if (!state->has_scc_cruise_state)
+    state->cruise_active = state->estimated_cruise_active;
 }
 
 }  // namespace
@@ -210,7 +275,7 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     state->clu11_seed = {{data[0], data[1], data[2], data[3]}};
     state->has_clu11_seed = true;
     const HyundaiClu11Values clu = decode_clu11(state->clu11_seed);
-    state->clu_button = clu.cruise_sw_state;
+    update_fixed_cruise_estimate(state, clu);
     state->cluster_speed = clu.speed + clu.speed_decimal;
     state->speed_unit_mph = clu.speed_unit_mph;
     state->clu_alive_count = clu.alive_count;
@@ -247,6 +312,7 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     state->scc11_time_s = now_s;
   } else if (address == kHyundaiScc12Address && length >= 8) {
     state->acc_mode = static_cast<int>(get_signal_le(data.data(), 13, 2));
+    state->has_scc_cruise_state = true;
     state->cruise_active = state->acc_mode != 0;
   } else if (address == kHyundaiTcs13Address && length >= 8) {
     const Tcs13Values tcs = decode_tcs13(data);
@@ -254,6 +320,10 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     state->brake_error = tcs.brake_error;
     state->park_brake = tcs.park_brake;
     state->brake_pressed = tcs.brake_pressed;
+    if (state->brake_pressed) {
+      state->estimated_cruise_active = false;
+      if (!state->has_scc_cruise_state) state->cruise_active = false;
+    }
     state->tcs13_time_s = now_s;
   } else if (address == kHyundaiTcs15Address && length >= 4) {
     const Tcs15Values tcs = decode_tcs15(data);
@@ -329,6 +399,10 @@ bool k7_tpms_state_fresh(const K7VehicleCanState &state, double now_s,
 }
 
 float k7_cruise_set_speed_kph(const K7VehicleCanState &state) {
-  if (state.cruise_set_speed <= 0.0f || state.cruise_set_speed >= 255.0f) return 0.0f;
-  return state.cruise_set_speed * (state.speed_unit_mph ? 1.609344f : 1.0f);
+  if (state.cruise_set_speed > 0.0f && state.cruise_set_speed < 255.0f) {
+    return cluster_speed_to_kph(state.cruise_set_speed, state.speed_unit_mph);
+  }
+  return state.estimated_cruise_set_speed_valid
+      ? state.estimated_cruise_set_speed_kph
+      : 0.0f;
 }
