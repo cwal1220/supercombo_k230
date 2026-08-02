@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "lead_probability_threshold": 0.5,
+  "standstill_gap_m": 5.0,
+  "following_time_s": 1.8,
+  "gap_correction_gain": 0.25,
+  "max_slowdown_correction_mps": 4.0,
+  "max_speedup_correction_mps": 2.5,
+  "deceleration_rate_kph_per_s": 1.5,
+  "lead_hold_s": 0.6,
+  "lead_restore_delay_s": 2.0,
+  "command_interval_s": 1.0,
+  "button_pulse_frames": 5
+}

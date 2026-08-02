@@ -14,10 +14,10 @@
 #include <cstring>
 
 static_assert(sizeof(K230IpcHeader) == 40, "K230IpcHeader layout is part of the Python manager ABI");
-static_assert(sizeof(K230ControlState) == 184,
+static_assert(sizeof(K230ControlState) == 192,
               "K230ControlState layout is shared by controlsd and overlay");
-static_assert(offsetof(K230ControlState, hud_flags) == 180,
-              "HUD flags must occupy the previous ABI tail padding");
+static_assert(offsetof(K230ControlState, hud_flags) == 184,
+              "K230ControlState HUD flag offset is part of the shared ABI");
 
 namespace {
 

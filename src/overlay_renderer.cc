@@ -581,21 +581,27 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     }
 
     constexpr int drive_box_y = panel_y2;
-    const bool set_speed_valid = std::isfinite(hud.cruise_set_speed_kph) &&
-                                 hud.cruise_set_speed_kph > 0.0f;
+    const bool maximum_speed_valid =
+        std::isfinite(hud.cruise_max_speed_kph) &&
+        hud.cruise_max_speed_kph > 0.0f;
+    const bool command_speed_valid =
+        std::isfinite(hud.cruise_command_speed_kph) &&
+        hud.cruise_command_speed_kph > 0.0f;
     draw_panel(left_box_x, drive_box_y, control_color, "DRIVE");
     ui.hud_text_center(left_box_x + box_w - 37, drive_box_y + 5,
                        !hud.lateral_mode_available ? "--" :
                            (hud.laneless_mode ? "LANELESS" : "LANE"),
                        1, lateral_mode_color, 68);
     ui.hud_text_left(left_x, drive_box_y + 22,
-                     set_speed_valid
-                         ? format_text("GEAR %s SET %.0F", gear_text(hud.gear),
-                                       hud.cruise_set_speed_kph)
-                         : format_text("GEAR %s SET --", gear_text(hud.gear)),
+                     maximum_speed_valid && command_speed_valid
+                         ? format_text("MAX %.0F  SET %.0F",
+                                       hud.cruise_max_speed_kph,
+                                       hud.cruise_command_speed_kph)
+                         : "MAX --  SET --",
                      2, control_color, col_w);
     ui.hud_text_left(left_x, drive_box_y + 47,
-                     format_text("CRZ %s  %s",
+                     format_text("GEAR %s  CRZ %s  %s",
+                                 gear_text(hud.gear),
                                  hud.cruise_active ? "ON" : "OFF",
                                  active_block_text(hud).c_str()),
                      1, control_color, col_w);

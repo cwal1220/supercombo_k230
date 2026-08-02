@@ -39,7 +39,7 @@ for runtime_file in "${runtime_files[@]}"; do
 done
 
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
-  "test -x /etc/init.d/S35supercombo_k230 || { echo 'Missing image-provided /etc/init.d/S35supercombo_k230' >&2; exit 1; }; rm -f /etc/init.d/S95supercombo_k230; mkdir -p '$DEST/model' '$DEST/params'"
+  "test -x /etc/init.d/S35supercombo_k230 || { echo 'Missing image-provided /etc/init.d/S35supercombo_k230' >&2; exit 1; }; rm -f /etc/init.d/S95supercombo_k230; mkdir -p '$DEST/model' '$DEST/params' '$DEST/params.defaults'"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "${runtime_files[@]}" "$BOARD:$DEST/"
 if [ -x "${BIN_DIR}/k230_k7_controlsd" ]; then
   "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/lib'"
@@ -54,8 +54,11 @@ fi
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "$model" "$BOARD:$DEST/model/"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \
   params/calibration.json \
+  params/k7_yg_adaptive_cruise.json \
   params/k7_yg_steering.json \
   params/k7_yg_driving.json \
-  "$BOARD:$DEST/params/"
+  "$BOARD:$DEST/params.defaults/"
+"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
+  "for name in calibration.json k7_yg_adaptive_cruise.json k7_yg_steering.json k7_yg_driving.json; do test -e '$DEST/params/'\"\$name\" || cp '$DEST/params.defaults/'\"\$name\" '$DEST/params/'\"\$name\"; done"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "sync"
 echo "Uploaded runtime files to $BOARD:$DEST"

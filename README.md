@@ -151,6 +151,10 @@ The upload script reads binaries from `build-k230-sdk/bin` by default. Set
 `K230_BUILD_DIR=build-native` for an on-board build or `K230_BIN_DIR` for a custom
 binary directory.
 
+Runtime tuning and calibration JSON files already present under `params/` are
+never overwritten by the upload script. Repository defaults are copied to
+`params.defaults/` and seed a runtime file only when that file does not exist.
+
 All CMake executables are written below the selected build directory in `bin/`.
 `build-k230-sdk/` is local generated output and is not tracked. Do not use a
 generic Ubuntu riscv64 compiler for board binaries: it can link against a newer
@@ -235,6 +239,12 @@ minimal passive overlay subscriber:
     worker, with the KIA K7 YG HEV torque controller and
     `LKAS11`/`CLU11`/`MDPS12` packer at 100 Hz
   - consumes model path, lane, road-edge, and vehicle-state IPC
+  - uses the vision lead distance and relative speed to adjust the stock
+    fixed-speed cruise setting with rate-limited `SET-`/`RES+` CLU11 pulses;
+    the first driver SET speed remains the maximum. Closing distance is
+    projected through the measured 1.5 km/h/s vehicle response, repeated
+    `SET-` pulses wait for that response, and `RES+` cannot immediately reverse
+    a recent slowdown
   - publishes generated raw `sendcan` batches for `k230_pandad`
   - publishes compact `controlState` diagnostics for the display HUD
   - does not transmit by itself; actual TX still requires `K230_PANDA_TX=1`
@@ -443,11 +453,22 @@ cmake --build /tmp/supercombo_k230_verify \
 - `K230_K7_FORCE_ENGAGED=0|1`
   - bypasses the SET/CANCEL engage latch for offline replay only. Default is
     `0` and must remain `0` in a vehicle.
+- `K230_K7_ADAPTIVE_CRUISE=0|1`
+  - enables vision-based adjustment of the stock fixed-speed cruise setpoint.
+    Default is `1`. The JSON defaults send at most one five-frame button pulse
+    per second and pace repeated `SET-` commands with the measured vehicle
+    deceleration response. It yields to driver buttons and pedals and never
+    commands brakes; the driver remains responsible for braking when the stock
+    cruise cannot maintain a safe following distance.
 - `K230_K7_STEERING_PARAMS=/path/to/steering_params.json`
   - overrides the default `params/k7_yg_steering.json` file.
 - `K230_K7_DRIVING_PARAMS=/path/to/driving_params.json`
   - overrides `params/k7_yg_driving.json`, which contains model/CAN freshness,
     inactive release, MDPS 60 kph spoof, and lateral motion limits.
+- `K230_K7_ADAPTIVE_CRUISE_PARAMS=/path/to/adaptive_cruise.json`
+  - overrides `params/k7_yg_adaptive_cruise.json`. The web editor exposes it
+    as a separate vision-cruise menu; valid changes are hot-reloaded on the
+    next 100 Hz control tick without restarting the pipeline.
 - `K230_ENABLE_PARAM_SERVER=0|1`
   - starts the FastAPI parameter editor with the manager. It defaults to `1`
     when `K230_ENABLE_CONTROL=1`.
@@ -459,13 +480,15 @@ cmake --build /tmp/supercombo_k230_verify \
     LCD alerts. `K230_ALERT_PCM` overrides the playback device; its default is
     `default`.
 
-The tracked JSON files in `params/` are the source of truth for K7 steering
-and driving configuration. Changes are written atomically, signaled to
-`k230_k7_controlsd`, and also detected by its 100 ms fallback poll. Every field
-is applied on the next control tick without an engage or standstill gate.
+The tracked JSON files in `params/` are the source of truth for K7 steering,
+driving, and vision-cruise configuration. Changes are written atomically,
+signaled to `k230_k7_controlsd`, and also detected by its 100 ms fallback poll.
+Every field is applied on the next control tick without an engage or
+standstill gate.
 `params/calibration.json` is also tracked as the initial calibration seed. The
 runtime replaces it atomically when a stable calibration is learned, while
-`scripts/upload_to_board.sh` installs the repository copy on each upload.
+`scripts/upload_to_board.sh` preserves an existing runtime copy and installs
+the repository copy under `params.defaults/` as a fallback.
 
 ### Live parameter editor
 

@@ -319,6 +319,7 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     state->brake_light = tcs.brake_light;
     state->brake_error = tcs.brake_error;
     state->park_brake = tcs.park_brake;
+    state->driver_override = tcs.driver_override;
     state->brake_pressed = tcs.brake_pressed;
     if (state->brake_pressed) {
       state->estimated_cruise_active = false;

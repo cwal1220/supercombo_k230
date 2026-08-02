@@ -21,6 +21,10 @@ CONTROLSD_NAME = "k230_k7_controlsd"
 GROUP_ENV = {
     "steering": ("K230_K7_STEERING_PARAMS", "k7_yg_steering.json"),
     "driving": ("K230_K7_DRIVING_PARAMS", "k7_yg_driving.json"),
+    "adaptive_cruise": (
+        "K230_K7_ADAPTIVE_CRUISE_PARAMS",
+        "k7_yg_adaptive_cruise.json",
+    ),
 }
 
 
@@ -414,6 +418,90 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             quick=True, quick_section="주행 반응", quick_order=20,
         ),
     },
+    "adaptive_cruise": {
+        "enabled": {
+            "label": "비전 크루즈",
+            "section": "동작",
+            "description": "비전 선행차를 기준으로 순정 크루즈의 SET-/RES+ 버튼을 자동 조절합니다.",
+            "increase": "켜면 최초 SET 속도를 상한으로 비전 기반 속도 조절을 시작합니다.",
+            "decrease": "끄면 자동 버튼 명령을 중지하고 현재 순정 크루즈 설정에 개입하지 않습니다.",
+            "quick": True,
+            "quick_section": "동작",
+            "quick_order": 10,
+        },
+        "following_time_s": param_meta(
+            "주행 차간시간", "차간 거리", "초", 0.1, 0.8, 4.0,
+            "현재 속도에 곱해 선행차와 유지할 동적 거리를 계산합니다.",
+            "속도에 비례한 차간거리가 늘어 더 일찍 감속합니다.",
+            "차간거리가 짧아지고 선행차에 더 가깝게 주행합니다.",
+            quick=True, quick_section="차간 거리", quick_order=20,
+        ),
+        "standstill_gap_m": param_meta(
+            "기본 차간거리", "차간 거리", "m", 0.5, 2.0, 20.0,
+            "속도와 무관하게 목표 차간거리에 더하는 기본 거리입니다.",
+            "모든 속도에서 선행차와 더 멀리 떨어집니다.",
+            "모든 속도에서 선행차와 더 가까워집니다.",
+            quick=True, quick_section="차간 거리", quick_order=30,
+        ),
+        "gap_correction_gain": param_meta(
+            "거리 오차 반응", "속도 반응", "gain", 0.05, 0.05, 1.0,
+            "실제 거리와 목표 거리의 차이를 목표 속도 보정으로 바꾸는 비율입니다.",
+            "차간거리 변화에 더 빠르고 크게 반응하지만 속도 변동이 늘 수 있습니다.",
+            "반응이 부드러워지지만 가까워지는 차량에 늦게 대응할 수 있습니다.",
+            quick=True, quick_section="속도 반응", quick_order=40,
+        ),
+        "max_slowdown_correction_mps": param_meta(
+            "최대 감속 보정", "속도 반응", "m/s", 0.5, 0.5, 10.0,
+            "선행차가 가깝거나 느릴 때 목표 속도를 낮추는 최대 보정량입니다.",
+            "더 낮은 크루즈 설정을 요청해 감속 반응이 적극적이 됩니다.",
+            "목표 속도 감소 폭이 작아져 감속 반응이 완만해집니다.",
+            quick=True, quick_section="속도 반응", quick_order=50,
+        ),
+        "max_speedup_correction_mps": param_meta(
+            "최대 가속 보정", "속도 반응", "m/s", 0.5, 0.0, 5.0,
+            "차간거리가 충분할 때 선행차 속도보다 높게 잡을 수 있는 최대 보정량입니다.",
+            "저장된 최대 속도로 더 빠르게 복귀할 수 있습니다.",
+            "속도 복귀가 보수적이고 느려집니다.",
+        ),
+        "deceleration_rate_kph_per_s": param_meta(
+            "실측 감속 응답", "속도 반응", "km/h/s", 0.1, 0.5, 5.0,
+            "SET- 명령 뒤 실제 차량 속도가 1초 동안 감소하는 실측값입니다. 다음 감속 명령 간격과 예상 차간거리 계산에 사용합니다.",
+            "차량이 더 빨리 감속한다고 판단해 다음 SET-를 더 일찍 허용합니다.",
+            "SET- 효과를 더 오래 기다리고 선행차와 가까워질 거리를 더 멀리 예측합니다.",
+        ),
+        "lead_restore_delay_s": param_meta(
+            "선행차 소실 후 복귀", "복귀 동작", "초", 0.5, 1.0, 10.0,
+            "선행차가 사라진 뒤 저장된 최대 속도로 복귀하기 전 기다리는 시간입니다.",
+            "비전 검출이 끊겼을 때 현재 속도를 더 오래 유지합니다.",
+            "선행차가 사라지면 최대 속도로 더 빨리 복귀합니다.",
+            quick=True, quick_section="복귀 동작", quick_order=60,
+        ),
+        "command_interval_s": param_meta(
+            "속도 변경 명령 간격", "버튼 송신", "초", 0.1, 0.5, 5.0,
+            "연속 SET-/RES+ 버튼 펄스를 시작할 수 있는 최소 시간 간격입니다.",
+            "크루즈 설정 속도가 더 천천히 변합니다.",
+            "크루즈 설정 속도가 더 빠르게 변하지만 잦은 버튼 명령이 발생합니다.",
+            quick=True, quick_section="속도 반응", quick_order=70,
+        ),
+        "lead_probability_threshold": param_meta(
+            "선행차 인식 확률", "비전 판정", "0~1", 0.05, 0.2, 0.99,
+            "모델 선행차를 속도 제어에 사용하기 위한 최소 확률입니다. 값은 0~1 비율입니다.",
+            "확실한 선행차만 사용해 오검출은 줄지만 검출이 늦을 수 있습니다.",
+            "선행차를 더 빨리 받아들이지만 오검출 가능성이 커집니다.",
+        ),
+        "lead_hold_s": param_meta(
+            "선행차 유지 시간", "비전 판정", "초", 0.1, 0.1, 2.0,
+            "일시적으로 비전 lead가 끊겨도 마지막 선행차를 유효하게 유지하는 시간입니다.",
+            "짧은 검출 누락에 덜 흔들리지만 오래된 lead를 더 오래 사용합니다.",
+            "오래된 lead를 빨리 버리지만 검출 흔들림에 민감해집니다.",
+        ),
+        "button_pulse_frames": param_meta(
+            "버튼 펄스 길이", "버튼 송신", "100 Hz frame", 1, 1, 10,
+            "한 번의 SET-/RES+ 조작을 차량에 전달할 연속 CAN 프레임 수입니다.",
+            "차량이 버튼을 인식하기 쉬워지지만 길게 누른 것으로 해석될 수 있습니다.",
+            "펄스가 짧아지며 너무 작으면 차량이 명령을 놓칠 수 있습니다.",
+        ),
+    },
 }
 
 
@@ -422,6 +510,14 @@ def configured_paths() -> Dict[str, Path]:
     return {
         group: Path(os.environ.get(env_name, params_dir / filename))
         for group, (env_name, filename) in GROUP_ENV.items()
+    }
+
+
+def configured_default_paths() -> Dict[str, Path]:
+    params_dir = Path(os.environ.get("K230_PARAM_DEFAULTS_DIR", "params.defaults"))
+    return {
+        group: params_dir / filename
+        for group, (_, filename) in GROUP_ENV.items()
     }
 
 
@@ -458,10 +554,37 @@ class ParamStore:
         self,
         paths: Dict[str, Path] | None = None,
         notifier: Callable[[], list[int]] = notify_controlsd,
+        default_paths: Dict[str, Path] | None = None,
     ):
         self.paths = paths or configured_paths()
         self.notifier = notifier
         self.lock = threading.Lock()
+        self.default_paths = (
+            default_paths
+            if default_paths is not None
+            else (configured_default_paths() if paths is None else {})
+        )
+        self._merge_missing_defaults()
+
+    def _merge_missing_defaults(self) -> None:
+        for group, default_path in self.default_paths.items():
+            runtime_path = self.paths.get(group)
+            if runtime_path is None or not default_path.is_file():
+                continue
+            try:
+                defaults = json.loads(default_path.read_text(encoding="utf-8"))
+                runtime = (
+                    json.loads(runtime_path.read_text(encoding="utf-8"))
+                    if runtime_path.is_file()
+                    else {}
+                )
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(defaults, dict) or not isinstance(runtime, dict):
+                continue
+            merged = {**defaults, **runtime}
+            if merged != runtime:
+                self._atomic_write(runtime_path, merged)
 
     def read_group(self, group: str) -> Dict[str, Any]:
         path = self._path(group)
@@ -586,7 +709,7 @@ HTML = """<!doctype html>
     .icon-button:hover { background: #31373c; }
     .group-tabs {
       position: sticky; top: 64px; z-index: 4;
-      display: grid; grid-template-columns: 1fr 1fr;
+      display: grid; grid-template-columns: repeat(3, 1fr);
       padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
       background: #171a1d; border-bottom: 1px solid var(--line);
     }
@@ -616,6 +739,12 @@ HTML = """<!doctype html>
     .view-tab:last-child { border-right: 0; }
     .view-tab.active { background: #2b343a; color: #fff; }
     .count { color: var(--muted); font-size: 13px; }
+    .group-note {
+      display: none; margin-bottom: 14px; padding: 11px 12px;
+      border: 1px solid #6a5630; border-radius: 6px;
+      background: #241f16; color: #e6c985; font-size: 13px; line-height: 1.45;
+    }
+    .group-note.visible { display: block; }
     #message {
       display: none; margin-bottom: 14px; padding: 10px 12px;
       border: 1px solid #366249; border-radius: 6px;
@@ -741,6 +870,7 @@ HTML = """<!doctype html>
   <nav class="group-tabs" aria-label="파라미터 그룹">
     <button class="group-tab active" data-group="steering" type="button">조향</button>
     <button class="group-tab" data-group="driving" type="button">주행 제한</button>
+    <button class="group-tab" data-group="adaptive_cruise" type="button">비전 크루즈</button>
   </nav>
   <main>
     <div class="view-bar">
@@ -750,6 +880,7 @@ HTML = """<!doctype html>
       </div>
       <div id="count" class="count"></div>
     </div>
+    <div id="group-note" class="group-note"></div>
     <div id="message" role="status"></div>
     <div id="sections"></div>
     <details>
@@ -770,6 +901,7 @@ HTML = """<!doctype html>
     const status = document.getElementById("status");
     const connection = document.getElementById("connection");
     const count = document.getElementById("count");
+    const groupNote = document.getElementById("group-note");
     const sectionOrder = {
       steering: [
         "기본 토크 제한", "토크 컨트롤러", "조향 반응", "차량 중심 보정",
@@ -779,6 +911,10 @@ HTML = """<!doctype html>
       driving: [
         "빠른 주행 튜닝", "운전자 개입", "상태와 CAN", "데이터 상태",
         "고정 차량 설정", "기타",
+      ],
+      adaptive_cruise: [
+        "동작", "차간 거리", "속도 반응", "복귀 동작", "비전 판정",
+        "버튼 송신", "기타",
       ],
     };
 
@@ -1025,6 +1161,10 @@ HTML = """<!doctype html>
       if (!snapshot) return;
       sections.replaceChildren();
       path.textContent = snapshot.paths[activeGroup];
+      groupNote.textContent = activeGroup === "adaptive_cruise"
+        ? "변경값은 즉시 적용됩니다. 이 기능은 순정 크루즈 버튼만 조절하며 브레이크를 직접 제어하지 않습니다."
+        : "";
+      groupNote.classList.toggle("visible", activeGroup === "adaptive_cruise");
       const params = snapshot.params[activeGroup];
       const metadata = snapshot.metadata[activeGroup] || {};
       const visible = Object.entries(params).filter(([key, value]) => {

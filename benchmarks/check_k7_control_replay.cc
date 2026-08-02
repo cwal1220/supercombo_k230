@@ -205,6 +205,20 @@ void verify_tcs15() {
   require(!vehicle.brake_hold, "TCS15 ready state is not active Auto Hold");
 }
 
+void verify_tcs13_driver_override() {
+  std::array<uint8_t, 8> bytes{};
+  set_signal_le(&bytes, 45, 2, 2);
+  const Tcs13Values decoded = decode_tcs13(bytes);
+  require(decoded.driver_override == 2,
+          "TCS13 driver accelerator override decoding");
+
+  K7VehicleCanState vehicle;
+  update_k7_vehicle_can_state(&vehicle, kHyundaiTcs13Address, bytes,
+                              bytes.size(), kK7PowertrainBus, 1.0);
+  require(vehicle.driver_override == 2,
+          "TCS13 driver accelerator override vehicle-state update");
+}
+
 void verify_scc11() {
   std::array<uint8_t, 8> bytes{};
   bytes[0] = 1;
@@ -660,6 +674,7 @@ int main(int argc, char **argv) {
     verify_lca11();
     verify_tpms11();
     verify_tcs15();
+    verify_tcs13_driver_override();
     verify_scc11();
     verify_fixed_cruise_speed_estimate();
     verify_mdps_fault_filter();

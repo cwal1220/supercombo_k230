@@ -51,6 +51,7 @@ add_library(k7_control_core STATIC
   src/hyundai_can.cc
   src/hyundai_steering.cc
   src/json_utils.cc
+  src/k7_adaptive_cruise.cc
   src/k7_lateral_controller.cc
   src/k7_path.cc
   src/steering_params.cc
@@ -284,6 +285,11 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
   target_link_libraries(check_departure_alert PRIVATE k7_control_core)
   target_include_directories(check_departure_alert PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_compile_options(check_departure_alert PRIVATE ${PROJECT_WARNINGS})
+
+  add_executable(check_adaptive_cruise benchmarks/check_adaptive_cruise.cc)
+  target_link_libraries(check_adaptive_cruise PRIVATE k7_control_core)
+  target_include_directories(check_adaptive_cruise PRIVATE ${PROJECT_LOCAL_INCLUDES})
+  target_compile_options(check_adaptive_cruise PRIVATE ${PROJECT_WARNINGS})
 
   add_executable(bench_input_warp_overhead
     benchmarks/bench_input_warp_overhead.cc

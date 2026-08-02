@@ -21,6 +21,15 @@ class ParamStoreTest(unittest.TestCase):
             "torque_angle_deadzone_raw",
         ],
         "driving": ["max_lateral_jerk", "max_lateral_accel"],
+        "adaptive_cruise": [
+            "enabled",
+            "following_time_s",
+            "standstill_gap_m",
+            "gap_correction_gain",
+            "max_slowdown_correction_mps",
+            "lead_restore_delay_s",
+            "command_interval_s",
+        ],
     }
 
     def setUp(self):
@@ -29,12 +38,16 @@ class ParamStoreTest(unittest.TestCase):
         self.paths = {
             "steering": root / "steering.json",
             "driving": root / "driving.json",
+            "adaptive_cruise": root / "adaptive_cruise.json",
         }
         self.paths["steering"].write_text(
             json.dumps({"gain": 10, "enabled": True}), encoding="utf-8"
         )
         self.paths["driving"].write_text(
             json.dumps({"delay": 0.4}), encoding="utf-8"
+        )
+        self.paths["adaptive_cruise"].write_text(
+            json.dumps({"following_time_s": 1.8}), encoding="utf-8"
         )
         self.notifications = 0
 
@@ -60,11 +73,31 @@ class ParamStoreTest(unittest.TestCase):
         self.assertEqual(self.notifications, 0)
         self.assertEqual(self.store.read_group("driving"), {"delay": 0.4})
 
+    def test_missing_defaults_are_added_without_overwriting_tuning(self):
+        defaults = Path(self.temporary.name) / "adaptive.defaults.json"
+        defaults.write_text(
+            json.dumps({"following_time_s": 1.8, "deceleration_rate_kph_per_s": 1.5}),
+            encoding="utf-8",
+        )
+        self.paths["adaptive_cruise"].write_text(
+            json.dumps({"following_time_s": 2.2}), encoding="utf-8"
+        )
+        store = ParamStore(
+            self.paths,
+            lambda: [],
+            {"adaptive_cruise": defaults},
+        )
+        self.assertEqual(
+            store.read_group("adaptive_cruise"),
+            {"following_time_s": 2.2, "deceleration_rate_kph_per_s": 1.5},
+        )
+
     def test_repository_params_have_complete_ui_metadata(self):
         root = Path(__file__).resolve().parents[1]
         for group, filename in (
             ("steering", "k7_yg_steering.json"),
             ("driving", "k7_yg_driving.json"),
+            ("adaptive_cruise", "k7_yg_adaptive_cruise.json"),
         ):
             params = json.loads((root / "params" / filename).read_text(encoding="utf-8"))
             self.assertEqual(set(params), set(PARAM_METADATA[group]))

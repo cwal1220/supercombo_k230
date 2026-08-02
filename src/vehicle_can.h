@@ -152,6 +152,7 @@ struct K7VehicleCanState {
   bool brake_light = false;
   bool brake_error = false;
   bool park_brake = false;
+  int driver_override = 0;
   bool esp_disabled = false;
   bool brake_hold = false;
   int gas = 0;
