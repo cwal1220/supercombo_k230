@@ -14,6 +14,7 @@ k230_modeld
 k230_overlay
 k230_pandad
 k230_k7_controlsd
+k230_recordd
 check_k7_control_replay
 check_model_output_parser
 check_panda_can_codec
@@ -25,4 +26,5 @@ __pycache__/
 *.raw
 *.scnv12
 *.mp4
+/recordings/
 models/*.onnx

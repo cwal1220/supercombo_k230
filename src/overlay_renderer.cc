@@ -472,6 +472,15 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
         ui.panel(x, y, box_w, panel_h, accent);
         ui.hud_text_left(x + 10, y + 5, title, 1, dim, col_w);
     };
+    constexpr int metric_inner_margin = 8;
+    constexpr int metric_inner_w = box_w - 2 * metric_inner_margin;
+    auto draw_metric_separators = [&](int x, int y, int columns) {
+        const int column_w = metric_inner_w / columns;
+        for (int column = 1; column < columns; ++column) {
+            ui.fill_rect(x + metric_inner_margin + column * column_w,
+                         y + 22, 1, 36, argb(38, 255, 255, 255));
+        }
+    };
 
     ui.hud_text_center(width / 2, 12,
                        format_text("%.0F", std::max(0.0f, hud.speed_kph)),
@@ -499,20 +508,28 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
                      1, panda_color, col_w);
 
     draw_panel(left_box_x, panel_y1, control_color, "CONTROL");
-    ui.hud_text_left(left_x, panel_y1 + 21,
-                     format_text("ANGLE %.1F", hud.steering_angle_deg),
-                     2, control_color, col_w);
-    ui.hud_text_left(left_x, panel_y1 + 42,
-                     format_text("TORQUE D %d A %d",
-                                 hud.desired_torque, hud.apply_torque),
-                     1, control_color, col_w);
-    ui.hud_text_left(left_x, panel_y1 + 53,
-                     format_text("DRIVER %d", hud.driver_torque),
-                     1, hud.services_healthy ? dim : orange, col_w);
+    constexpr int control_col_w = metric_inner_w / 4;
+    draw_metric_separators(left_box_x, panel_y1, 4);
+    const char *control_labels[] = {"ANGLE", "DES", "APPLY", "DRIVER"};
+    const std::string control_values[] = {
+        format_text("%.0F", hud.steering_angle_deg),
+        format_text("%d", hud.desired_torque),
+        format_text("%d", hud.apply_torque),
+        format_text("%d", hud.driver_torque),
+    };
+    for (int col = 0; col < 4; ++col) {
+        const int center_x = left_box_x + metric_inner_margin +
+                             col * control_col_w + control_col_w / 2;
+        ui.hud_text_center(center_x, panel_y1 + 22, control_labels[col],
+                           1, dim, control_col_w - 4);
+        ui.hud_text_center(center_x, panel_y1 + 39, control_values[col],
+                           2, control_color, control_col_w - 4);
+    }
 
-    const uint32_t cpu_color = hud.cpu_percent >= 90.0f || hud.cpu_temp_c >= 85.0f ? red :
-                               (hud.cpu_percent >= 75.0f || hud.cpu_temp_c >= 75.0f ? orange :
-                                (hud.cpu_percent >= 60.0f || hud.cpu_temp_c >= 65.0f ? yellow : dim));
+    const uint32_t health_color =
+        hud.cpu_percent >= 90.0f || hud.cpu_temp_c >= 85.0f || hud.storage_percent >= 95.0f ? red :
+        (hud.cpu_percent >= 75.0f || hud.cpu_temp_c >= 75.0f || hud.storage_percent >= 85.0f ? orange :
+         (hud.cpu_percent >= 60.0f || hud.cpu_temp_c >= 65.0f || hud.storage_percent >= 75.0f ? yellow : dim));
     const char *calibration_status = !hud.calibration_available ? "--" :
                                      (hud.calibration_status == 1 ? "OK" :
                                       (hud.calibration_status == 2 ? "BAD" : "WAIT"));
@@ -543,27 +560,32 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
                          : "NET OFFLINE",
                      1, network_color, col_w);
 
-    draw_panel(right_box_x, panel_y1, cpu_color, "HEALTH");
-    ui.hud_text_left(right_x, panel_y1 + 22,
-                     format_text("CPU %.0F%% TEMP %.0FC",
-                                 hud.cpu_percent, hud.cpu_temp_c),
-                     2, cpu_color, col_w);
-    ui.hud_text_left(right_x, panel_y1 + 47,
-                     format_text("MEM %.0F%%", hud.memory_percent),
-                     2, cpu_color, col_w);
+    draw_panel(right_box_x, panel_y1, health_color, "HEALTH");
+    constexpr int health_col_w = metric_inner_w / 4;
+    draw_metric_separators(right_box_x, panel_y1, 4);
+    const char *health_labels[] = {"CPU", "TEMP", "MEM", "DISK"};
+    const float health_values[] = {
+        hud.cpu_percent, hud.cpu_temp_c, hud.memory_percent, hud.storage_percent,
+    };
+    for (int col = 0; col < 4; ++col) {
+        const int center_x = right_box_x + metric_inner_margin +
+                             col * health_col_w + health_col_w / 2;
+        ui.hud_text_center(center_x, panel_y1 + 22, health_labels[col],
+                           1, dim, health_col_w - 4);
+        ui.hud_text_center(center_x, panel_y1 + 39,
+                           col == 1 ? format_text("%.0FC", health_values[col])
+                                    : format_text("%.0F%%", health_values[col]),
+                           2, health_color, health_col_w - 4);
+    }
 
     draw_panel(right_box_x, panel_y2, calibration_color, "CALIBRATION");
     ui.hud_text_center(right_box_x + box_w - 37, panel_y2 + 5,
                        format_text("%s B%d", calibration_status,
                                    std::max(0, hud.calibration_valid_blocks)),
                        1, calibration_color, 68);
-    const int calibration_inner_x = right_box_x + 8;
-    constexpr int calibration_inner_w = box_w - 16;
-    constexpr int calibration_col_w = calibration_inner_w / 3;
-    for (int col = 1; col < 3; ++col) {
-        ui.fill_rect(calibration_inner_x + col * calibration_col_w,
-                     panel_y2 + 22, 1, 36, argb(38, 255, 255, 255));
-    }
+    const int calibration_inner_x = right_box_x + metric_inner_margin;
+    constexpr int calibration_col_w = metric_inner_w / 3;
+    draw_metric_separators(right_box_x, panel_y2, 3);
     const char *calibration_labels[] = {"ROLL", "PITCH", "YAW"};
     const float calibration_values[] = {
         hud.calibration_roll_deg,

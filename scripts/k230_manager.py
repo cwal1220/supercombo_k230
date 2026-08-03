@@ -15,12 +15,12 @@ IPC_VERSION = 1
 HEADER = struct.Struct("<IIIIQQII")
 HEADER_SIZE = HEADER.size
 PROCESS = struct.Struct("<16sIiiIQ")
-MAX_PROCESSES = 6
+MAX_PROCESSES = 7
 MANAGER_STATE_SIZE = 8 + 4 + 4 + PROCESS.size * MAX_PROCESSES
 DISPLAY_READY_FILE = "/tmp/k230_display_ready"
 DISPLAY_READY_TIMEOUT_MS = 7000
-START_ORDER = ("k230_overlay", "k230_camerad", "k230_modeld")
-PROCESS_ORDER = ("k230_camerad", "k230_modeld", "k230_overlay")
+START_ORDER = ("k230_overlay", "k230_camerad", "k230_recordd", "k230_modeld")
+PROCESS_ORDER = ("k230_camerad", "k230_modeld", "k230_overlay", "k230_recordd")
 DEFAULT_KMODEL_CANDIDATES = (
     "model/supercombo.kmodel",
     "models/supercombo.kmodel",
@@ -170,6 +170,7 @@ class Manager:
             ProcSpec("k230_camerad", ["./k230_camerad"], 0),
             ProcSpec("k230_modeld", ["./k230_modeld", self.kmodel, self.debug], -5),
             ProcSpec("k230_overlay", ["./k230_overlay"], 10),
+            ProcSpec("k230_recordd", ["./k230_recordd"], 15),
         ]
         if env_enabled("K230_ENABLE_PANDA") or enable_control:
             specs.append(ProcSpec("k230_pandad", ["./k230_pandad"], -10))

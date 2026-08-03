@@ -195,6 +195,19 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     ${OpenCV_LIBS}
   )
 
+  add_executable(k230_recordd
+    src/k230_recordd.cc
+    src/json_utils.cc
+    src/k230_can_queue.cc
+    src/k230_ipc.cc
+    src/lateral_control.cc
+    src/model_output.cc
+    src/mvx_v4l2_encoder.cc
+    src/projection.cc
+    src/recording_writer.cc
+  )
+  configure_k230_target(k230_recordd)
+
   if(SUPERCOMBO_BUILD_PANDA)
     set(ACADOS_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/acados/include")
     set(ACADOS_SOLVER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/acados/lateral_solver")
@@ -327,7 +340,7 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
 endif()
 
 if(SUPERCOMBO_BUILD_RUNTIME)
-  install(TARGETS supercombo_elf k230_camerad k230_modeld k230_overlay
+  install(TARGETS supercombo_elf k230_camerad k230_modeld k230_overlay k230_recordd
     RUNTIME DESTINATION .
   )
   if(SUPERCOMBO_BUILD_PANDA)

@@ -50,6 +50,7 @@ struct OverlayHudState {
     int driver_torque = 0;
     float cpu_percent = 0.0f;
     float memory_percent = 0.0f;
+    float storage_percent = 0.0f;
     float cpu_temp_c = 0.0f;
     float preview_fps = 0.0f;
     float model_fps = 0.0f;

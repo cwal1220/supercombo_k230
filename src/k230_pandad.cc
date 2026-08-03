@@ -153,14 +153,22 @@ int main()
     try {
         K230CanQueue can_pub;
         K230CanQueue sendcan_sub;
+        K230CanQueue can_log_pub;
+        K230CanQueue sendcan_log_pub;
         K230LatestChannel panda_state_pub;
         if (!can_pub.open(kK230CanTopic, kK230CanQueueSlots, true))
             throw std::runtime_error("open can ipc failed");
         if (!sendcan_sub.open(kK230SendCanTopic, kK230CanQueueSlots, true))
             throw std::runtime_error("open sendcan ipc failed");
+        if (!can_log_pub.open(kK230CanLogTopic, kK230CanQueueSlots, true))
+            throw std::runtime_error("open CAN log ipc failed");
+        if (!sendcan_log_pub.open(kK230SendCanLogTopic, kK230CanQueueSlots, true))
+            throw std::runtime_error("open sendcan log ipc failed");
         if (!panda_state_pub.open(kK230PandaStateTopic, sizeof(K230PandaState), true))
             throw std::runtime_error("open pandaState ipc failed");
         can_pub.reset();
+        can_log_pub.reset();
+        sendcan_log_pub.reset();
 
         const bool tx_enabled = env_enabled("K230_PANDA_TX", false) ||
                                 env_enabled("K230_PANDA_ENABLE_TX", false);
@@ -195,6 +203,8 @@ int main()
         unsigned tx_frames = 0;
         unsigned tx_batches = 0;
         unsigned rx_queue_full = 0;
+        unsigned rx_log_queue_full = 0;
+        unsigned tx_log_queue_full = 0;
         unsigned tx_stale = 0;
         unsigned tx_blocked = 0;
         unsigned rx_rejected = 0;
@@ -281,6 +291,7 @@ int main()
                     ++rx_queue_full;
                     ++errors;
                 }
+                if (!can_log_pub.push(batch)) ++rx_log_queue_full;
                 pending_rx.clear();
                 pending_dropped = 0;
                 last_can_publish_ns = now;
@@ -299,6 +310,7 @@ int main()
                     continue;
                 }
                 const std::vector<PandaCanFrame> tx = frames_from_batch(send_batch);
+                if (!sendcan_log_pub.push(send_batch)) ++tx_log_queue_full;
                 if (tx_enabled) {
                     if (panda.send(tx)) {
                         tx_frames += static_cast<unsigned>(tx.size());
@@ -323,7 +335,7 @@ int main()
                 const bool got_health = panda.get_health(&health);
                 std::fprintf(stderr,
                              "k230_pandad: rx=%u tx=%u batches=%u stale=%u "
-                             "queue=%llu/%llu rxFull=%u "
+                             "queue=%llu/%llu rxFull=%u logFull=%u/%u "
                              "blocked=%u rejected=%u errors=%u "
                              "canerr=%u/%u/%u pandaBlocked=%u "
                              "heartbeatLost=%u controls=%u usb=%u/%u malformed=%u "
@@ -332,6 +344,7 @@ int main()
                              static_cast<unsigned long long>(sendcan_sub.depth()),
                              static_cast<unsigned long long>(can_pub.depth()),
                              rx_queue_full,
+                             rx_log_queue_full, tx_log_queue_full,
                              tx_blocked, rx_rejected, errors,
                              got_health ? health.can_rx_errs : 0,
                              got_health ? health.can_send_errs : 0,
@@ -353,8 +366,9 @@ int main()
                                  "k230_pandad: rejected addr=0x%x bus=%u count=%u\n",
                                  key.first, key.second, count);
                 }
-                rx_frames = tx_frames = tx_batches = rx_queue_full = tx_stale =
-                    tx_blocked = rx_rejected = errors = 0;
+                rx_frames = tx_frames = tx_batches = rx_queue_full =
+                    rx_log_queue_full = tx_log_queue_full = tx_stale = tx_blocked =
+                    rx_rejected = errors = 0;
                 rejected_frames.clear();
                 last_log_ns = now;
             }

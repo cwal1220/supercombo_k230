@@ -30,6 +30,7 @@ class ParamStoreTest(unittest.TestCase):
             "lead_restore_delay_s",
             "command_interval_s",
         ],
+        "recording": ["enabled"],
     }
 
     def setUp(self):
@@ -39,6 +40,7 @@ class ParamStoreTest(unittest.TestCase):
             "steering": root / "steering.json",
             "driving": root / "driving.json",
             "adaptive_cruise": root / "adaptive_cruise.json",
+            "recording": root / "recording.json",
         }
         self.paths["steering"].write_text(
             json.dumps({"gain": 10, "enabled": True}), encoding="utf-8"
@@ -48,6 +50,9 @@ class ParamStoreTest(unittest.TestCase):
         )
         self.paths["adaptive_cruise"].write_text(
             json.dumps({"following_time_s": 1.8}), encoding="utf-8"
+        )
+        self.paths["recording"].write_text(
+            json.dumps({"enabled": False}), encoding="utf-8"
         )
         self.notifications = 0
 
@@ -72,6 +77,11 @@ class ParamStoreTest(unittest.TestCase):
             self.store.update("driving", {"unknown": 1})
         self.assertEqual(self.notifications, 0)
         self.assertEqual(self.store.read_group("driving"), {"delay": 0.4})
+
+    def test_recording_toggle_does_not_signal_controlsd(self):
+        result = self.store.update("recording", {"enabled": True})
+        self.assertEqual(result["notified_pids"], [])
+        self.assertEqual(self.notifications, 0)
 
     def test_missing_defaults_are_added_without_overwriting_tuning(self):
         defaults = Path(self.temporary.name) / "adaptive.defaults.json"
@@ -98,6 +108,7 @@ class ParamStoreTest(unittest.TestCase):
             ("steering", "k7_yg_steering.json"),
             ("driving", "k7_yg_driving.json"),
             ("adaptive_cruise", "k7_yg_adaptive_cruise.json"),
+            ("recording", "recording.json"),
         ):
             params = json.loads((root / "params" / filename).read_text(encoding="utf-8"))
             self.assertEqual(set(params), set(PARAM_METADATA[group]))

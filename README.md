@@ -193,7 +193,8 @@ The split runtime gives the model pipeline priority and keeps display work to a
 minimal passive overlay subscriber:
 
 - `k230_manager.py`
-  - supervises `k230_overlay`, `k230_camerad`, and `k230_modeld`, plus
+  - supervises `k230_overlay`, `k230_camerad`, `k230_modeld`, and
+    `k230_recordd`, plus
     `k230_pandad`, `k230_k7_controlsd`, and the parameter server when enabled
   - publishes `managerState` to `/dev/shm/k230_manager_state`
   - starts `k230_overlay`, waits for display readiness, then starts camera,
@@ -213,7 +214,7 @@ minimal passive overlay subscriber:
     `OPENPILOT`/`CONTROL`/`DRIVE`/`TPMS` panels, right-side
     `SYSTEM`/`HEALTH`/`CALIBRATION`/`LEAD` panels, and a centered status alert
   - fills that layout with camera/model/display FPS, inference time,
-    CPU/temperature/memory, process health, Panda state, vehicle speed,
+    CPU/temperature/memory/storage, process health, Panda state, vehicle speed,
     steering torque, and K7 control state
   - writes `/tmp/k230_display_ready` after preview/display setup is complete
     and several preview frames have actually been displayed
@@ -226,6 +227,17 @@ minimal passive overlay subscriber:
   - subscribes to latest `roadAiFrame`, reads the shared frame slot, runs
     nncase, parses supercombo output, updates calibration/control diagnostics,
     and publishes compact `modelState`
+- `k230_recordd`
+  - follows the exact frame selected by `k230_modeld` instead of independently
+    sampling the camera stream
+  - keeps `/dev/video0` MVX ready, but while recording is off performs only one
+    warm-up encode and then leaves the VPU idle
+  - records `NV12 640x360` as 5 Mbps HEVC at 20 FPS with 60-second,
+    independently decodable segments; `frames.bin` preserves each source frame
+    ID and capture timestamp
+  - records dedicated non-blocking CAN RX/TX copies plus model, control, and
+    Panda state in `events.bin`, and snapshots all runtime JSON parameters
+  - runs at nice level 15 so logging cannot take priority over model or control
 - `k230_pandad` (optional)
   - enabled with `K230_ENABLE_PANDA=1` when built with
     `-DSUPERCOMBO_BUILD_PANDA=ON`
@@ -252,7 +264,8 @@ minimal passive overlay subscriber:
 Large AI frames are never sent through the small-message IPC. `k230_overlay`
 does not consume the shared AI frame ring for display; preview stays on the
 K230 `v4l2_drm` display path, while `k230_modeld` consumes the shared `640x360`
-AI ring. This keeps the split runtime close to openpilot's process boundaries
+AI ring and publishes its selected frame metadata to `k230_recordd`. This keeps
+the split runtime close to openpilot's process boundaries
 without paying the cost of Cap'n Proto/cereal in v1.
 
 ## Model Pipeline
@@ -364,6 +377,9 @@ cmake --build /tmp/supercombo_k230_verify \
 - `src/k230_overlay.cc`, `src/k230_camerad.cc`, `src/k230_modeld.cc`
   - openpilot-style process split. `k230_overlay` is the direct DRM overlay process;
     `k230_camerad` and `k230_modeld` keep the camera/model path independent.
+- `src/k230_recordd.cc`, `src/mvx_v4l2_encoder.*`, `src/recording_writer.*`
+  - low-priority data recorder, direct MVX V4L2 M2M encoder, timestamp index,
+    compact event log, route segmentation, and storage-reserve guard.
 - `k230_manager.py`
   - minimal supervisor and heartbeat publisher. It is intentionally not a full
     openpilot manager clone.
@@ -402,6 +418,12 @@ cmake --build /tmp/supercombo_k230_verify \
   - stable online calibration is stored atomically in
     `params/calibration.json` and restored before the first model frame.
     Manual `SUPERCOMBO_CALIB_*` values take precedence and seed this file.
+- `K230_RECORD_ROOT=/path/to/recordings`
+  - overrides the route output directory. The default is `recordings/` under
+    the runtime working directory. Recording is toggled live through the web
+    UI or `params/recording.json`; at least 5 GiB and 10% free space is kept.
+- `K230_RECORD_CODEC=/dev/video0`
+  - overrides the MVX hardware codec device used by `k230_recordd`.
 - `SUPERCOMBO_INPUT_WARP_ROLL_DEG`, `SUPERCOMBO_INPUT_WARP_PITCH_DEG`,
   `SUPERCOMBO_INPUT_WARP_YAW_DEG`
   - optional model-input warp calibration in degrees. If unset, the input warp

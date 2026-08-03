@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 
 CONTROLSD_NAME = "k230_k7_controlsd"
+RECORDD_NAME = "k230_recordd"
 GROUP_ENV = {
     "steering": ("K230_K7_STEERING_PARAMS", "k7_yg_steering.json"),
     "driving": ("K230_K7_DRIVING_PARAMS", "k7_yg_driving.json"),
@@ -25,6 +26,7 @@ GROUP_ENV = {
         "K230_K7_ADAPTIVE_CRUISE_PARAMS",
         "k7_yg_adaptive_cruise.json",
     ),
+    "recording": ("K230_RECORDING_PARAMS", "recording.json"),
 }
 
 
@@ -502,6 +504,18 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "펄스가 짧아지며 너무 작으면 차량이 명령을 놓칠 수 있습니다.",
         ),
     },
+    "recording": {
+        "enabled": {
+            "label": "주행 데이터 기록",
+            "section": "기록",
+            "description": "모델이 실제 사용한 영상과 CAN 송수신, 모델·제어 상태를 함께 저장합니다.",
+            "increase": "켜면 하드웨어 H.265 인코더로 기록을 시작합니다.",
+            "decrease": "끄면 현재 기록을 안전하게 닫고 인코더를 유휴 상태로 둡니다.",
+            "quick": True,
+            "quick_section": "기록",
+            "quick_order": 10,
+        },
+    },
 }
 
 
@@ -521,7 +535,7 @@ def configured_default_paths() -> Dict[str, Path]:
     }
 
 
-def find_controlsd_pids() -> list[int]:
+def find_process_pids(process_name: str) -> list[int]:
     pids = []
     proc = Path("/proc")
     if not proc.is_dir():
@@ -531,11 +545,19 @@ def find_controlsd_pids() -> list[int]:
             continue
         try:
             argv0 = (entry / "cmdline").read_bytes().split(b"\0", 1)[0]
-            if Path(os.fsdecode(argv0)).name == CONTROLSD_NAME:
+            if Path(os.fsdecode(argv0)).name == process_name:
                 pids.append(int(entry.name))
         except (FileNotFoundError, PermissionError, ProcessLookupError, ValueError):
             continue
     return sorted(pids)
+
+
+def find_controlsd_pids() -> list[int]:
+    return find_process_pids(CONTROLSD_NAME)
+
+
+def find_recordd_pids() -> list[int]:
+    return find_process_pids(RECORDD_NAME)
 
 
 def notify_controlsd() -> list[int]:
@@ -606,6 +628,7 @@ class ParamStore:
             "metadata": PARAM_METADATA,
             "paths": {group: str(path) for group, path in self.paths.items()},
             "controlsd_pids": find_controlsd_pids(),
+            "recordd_pids": find_recordd_pids(),
         }
 
     def update(self, group: str, values: Dict[str, Any]) -> Dict[str, Any]:
@@ -618,12 +641,14 @@ class ParamStore:
                 raise KeyError(", ".join(unknown))
             document.update(values)
             self._atomic_write(self._path(group), document)
-        notified = self.notifier()
+        notified = [] if group == "recording" else self.notifier()
         return {
             "group": group,
             "values": values,
             "params": document,
             "notified_pids": notified,
+            "controlsd_pids": find_controlsd_pids(),
+            "recordd_pids": find_recordd_pids(),
         }
 
     def _path(self, group: str) -> Path:
@@ -709,7 +734,7 @@ HTML = """<!doctype html>
     .icon-button:hover { background: #31373c; }
     .group-tabs {
       position: sticky; top: 64px; z-index: 4;
-      display: grid; grid-template-columns: repeat(3, 1fr);
+      display: grid; grid-template-columns: repeat(4, 1fr);
       padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
       background: #171a1d; border-bottom: 1px solid var(--line);
     }
@@ -871,6 +896,7 @@ HTML = """<!doctype html>
     <button class="group-tab active" data-group="steering" type="button">조향</button>
     <button class="group-tab" data-group="driving" type="button">주행 제한</button>
     <button class="group-tab" data-group="adaptive_cruise" type="button">비전 크루즈</button>
+    <button class="group-tab" data-group="recording" type="button">주행 기록</button>
   </nav>
   <main>
     <div class="view-bar">
@@ -916,13 +942,23 @@ HTML = """<!doctype html>
         "동작", "차간 거리", "속도 반응", "복귀 동작", "비전 판정",
         "버튼 송신", "기타",
       ],
+      recording: ["기록"],
     };
 
-    function setConnection(pids, saved = false) {
+    function setConnection(pids, saved = false, recording = false) {
       const online = pids.length > 0;
       dot.classList.toggle("online", online);
-      connection.title = online ? `controlsd PID ${pids.join(", ")}` : "controlsd가 실행 중이 아닙니다";
-      status.textContent = online ? (saved ? "실시간 적용됨" : "제어 연결됨") : (saved ? "저장됨 · 제어 미연결" : "제어 미연결");
+      const process = recording ? "recordd" : "controlsd";
+      connection.title = online ? `${process} PID ${pids.join(", ")}` : `${process}가 실행 중이 아닙니다`;
+      status.textContent = online
+        ? (saved ? (recording ? "기록 설정됨" : "실시간 적용됨") : (recording ? "기록기 연결됨" : "제어 연결됨"))
+        : (saved ? "저장됨 · 프로세스 미연결" : "프로세스 미연결");
+    }
+
+    function refreshConnection(saved = false) {
+      const recording = activeGroup === "recording";
+      const pids = recording ? snapshot.recordd_pids : snapshot.controlsd_pids;
+      setConnection(pids || [], saved, recording);
     }
 
     function setMessage(text, failed = false) {
@@ -971,7 +1007,7 @@ HTML = """<!doctype html>
         const response = await fetch("/api/params", {cache: "no-store"});
         if (!response.ok) throw new Error(await response.text());
         snapshot = await response.json();
-        setConnection(snapshot.controlsd_pids);
+        refreshConnection();
         if (showMessage) setMessage("최신 값을 불러왔습니다.");
         render();
       } catch (error) {
@@ -996,13 +1032,14 @@ HTML = """<!doctype html>
         if (!response.ok) throw new Error(await response.text());
         const update = await response.json();
         snapshot.params[group] = update.params;
-        snapshot.controlsd_pids = update.notified_pids;
+        snapshot.controlsd_pids = update.controlsd_pids || update.notified_pids;
+        snapshot.recordd_pids = update.recordd_pids || [];
         const applied = update.params[key];
         if (input) input.value = String(applied);
         card.classList.add("saved");
         cardStatus.textContent = `적용됨 ${new Date().toLocaleTimeString("ko-KR", {hour12: false})}`;
         cardStatus.className = "card-status ok";
-        setConnection(update.notified_pids, true);
+        refreshConnection(true);
         window.setTimeout(() => card.classList.remove("saved"), 900);
         return applied;
       } catch (error) {
@@ -1163,8 +1200,10 @@ HTML = """<!doctype html>
       path.textContent = snapshot.paths[activeGroup];
       groupNote.textContent = activeGroup === "adaptive_cruise"
         ? "변경값은 즉시 적용됩니다. 이 기능은 순정 크루즈 버튼만 조절하며 브레이크를 직접 제어하지 않습니다."
-        : "";
-      groupNote.classList.toggle("visible", activeGroup === "adaptive_cruise");
+        : activeGroup === "recording"
+          ? "기록은 모델 입력과 같은 640x360 프레임을 사용합니다. 영상·CAN·상태·파라미터가 한 경로에 함께 저장됩니다."
+          : "";
+      groupNote.classList.toggle("visible", activeGroup === "adaptive_cruise" || activeGroup === "recording");
       const params = snapshot.params[activeGroup];
       const metadata = snapshot.metadata[activeGroup] || {};
       const visible = Object.entries(params).filter(([key, value]) => {
@@ -1228,6 +1267,7 @@ HTML = """<!doctype html>
         document.querySelectorAll(".group-tab").forEach(item => item.classList.remove("active"));
         tab.classList.add("active");
         activeGroup = tab.dataset.group;
+        refreshConnection();
         render();
         window.scrollTo({top: 0, behavior: "smooth"});
       });

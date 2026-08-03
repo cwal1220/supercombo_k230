@@ -131,7 +131,8 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
     return processed > 0 && errors == 0 ? 0 : 1;
 }
 
-int run_live(const AppConfig &config, K230LatestChannel &model_pub)
+int run_live(const AppConfig &config, K230LatestChannel &model_pub,
+             K230LatestChannel &record_frame_pub)
 {
     K230LatestChannel frame_sub;
     K230FrameRing frame_ring;
@@ -217,6 +218,12 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub)
         }
         model.set_desire(desire);
 
+        // The recorder follows the exact frame selected by modeld, rather than
+        // sampling camerad's higher-rate latest-frame stream independently.
+        if (!record_frame_pub.publish(&meta, sizeof(meta))) {
+            std::fprintf(stderr, "\nmodeld: publish recordFrame failed\n");
+        }
+
         const uint64_t t0 = steady_ns();
         const bool ok = model.run_frame_nv12(nv12, meta.width, meta.height, raw);
         const uint64_t t1 = steady_ns();
@@ -276,11 +283,14 @@ int main(int argc, char *argv[])
     try {
         AppConfig config = AppConfig::from_env(argc, argv);
         K230LatestChannel model_pub;
+        K230LatestChannel record_frame_pub;
         if (!model_pub.open(kK230ModelStateTopic, sizeof(K230ModelState), true))
             throw std::runtime_error("open modelState ipc failed");
+        if (!record_frame_pub.open(kK230RecordFrameTopic, sizeof(K230RoadAiFrame), true))
+            throw std::runtime_error("open recordFrame ipc failed");
 
         if (config.replay_enabled()) return run_replay(config, model_pub);
-        return run_live(config, model_pub);
+        return run_live(config, model_pub, record_frame_pub);
     } catch (const std::exception &e) {
         std::fprintf(stderr, "modeld error: %s\n", e.what());
         std::fprintf(stderr, "%s\n", AppConfig::usage(argc > 0 ? argv[0] : "k230_modeld").c_str());

@@ -13,6 +13,7 @@
 #include <linux/videodev2.h>
 #include <net/if.h>
 #include <signal.h>
+#include <sys/statvfs.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -85,6 +86,7 @@ public:
         if (!hud) return;
         sample_cpu(&hud->cpu_percent);
         sample_memory(&hud->memory_percent);
+        sample_storage(&hud->storage_percent);
         sample_temperature(&hud->cpu_temp_c);
         sample_network(hud);
     }
@@ -138,6 +140,16 @@ private:
             *percent = static_cast<float>(100.0 *
                 (1.0 - static_cast<double>(std::min(available_kb, total_kb)) / total_kb));
         }
+    }
+
+    void sample_storage(float *percent)
+    {
+        struct statvfs space {};
+        if (statvfs("/", &space) != 0 || space.f_blocks == 0) return;
+        const uint64_t available = space.f_bavail;
+        const uint64_t total = space.f_blocks;
+        *percent = static_cast<float>(100.0 *
+            (1.0 - static_cast<double>(std::min(available, total)) / total));
     }
 
     void sample_temperature(float *temperature_c)
@@ -384,19 +396,21 @@ private:
             pending_redraw_ = true;
             if (profile_) {
                 std::fprintf(stderr,
-                             "overlay: poll=%.2f display=%.2f preview=%.2f model=%.2f overlay=%.2f model_seq=%llu draw=%.2fms present=%.2fms cpu=%.1f%% mem=%.1f%% temp=%.1fC errors=%u          \r",
+                             "overlay: poll=%.2f display=%.2f preview=%.2f model=%.2f overlay=%.2f model_seq=%llu draw=%.2fms present=%.2fms cpu=%.1f%% mem=%.1f%% disk=%.1f%% temp=%.1fC errors=%u          \r",
                              poll_fps, display_fps, camera_fps, model_fps, overlay_fps,
                              static_cast<unsigned long long>(latest_model_seq_),
                              overlay_stats_.avg_ms_and_reset(),
                              present_stats_.avg_ms_and_reset(),
-                             hud_.cpu_percent, hud_.memory_percent, hud_.cpu_temp_c,
+                             hud_.cpu_percent, hud_.memory_percent, hud_.storage_percent,
+                             hud_.cpu_temp_c,
                              errors_);
             } else {
                 std::fprintf(stderr,
-                             "overlay: poll=%.2f display=%.2f preview=%.2f model=%.2f overlay=%.2f model_seq=%llu cpu=%.1f%% mem=%.1f%% temp=%.1fC errors=%u          \r",
+                             "overlay: poll=%.2f display=%.2f preview=%.2f model=%.2f overlay=%.2f model_seq=%llu cpu=%.1f%% mem=%.1f%% disk=%.1f%% temp=%.1fC errors=%u          \r",
                              poll_fps, display_fps, camera_fps, model_fps, overlay_fps,
                              static_cast<unsigned long long>(latest_model_seq_),
-                             hud_.cpu_percent, hud_.memory_percent, hud_.cpu_temp_c,
+                             hud_.cpu_percent, hud_.memory_percent, hud_.storage_percent,
+                             hud_.cpu_temp_c,
                              errors_);
             }
             std::fflush(stderr);
