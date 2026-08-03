@@ -27,6 +27,10 @@ runtime_files=(
   scripts/requirements-param-server.txt
 )
 model="models/supercombo.kmodel"
+ui_assets=(
+  assets/ui/traffic_wait_red_retro-270x155-v3.png
+  assets/ui/traffic_go_green_retro-270x155-v3.png
+)
 
 if [ -x "${BIN_DIR}/k230_pandad" ]; then
   runtime_files+=("${BIN_DIR}/k230_pandad" "${BIN_DIR}/k230_k7_controlsd")
@@ -38,11 +42,21 @@ for runtime_file in "${runtime_files[@]}"; do
     exit 1
   fi
 done
+for ui_asset in "${ui_assets[@]}"; do
+  if [ ! -f "${ui_asset}" ]; then
+    echo "Missing UI asset: ${ui_asset}" >&2
+    exit 1
+  fi
+done
 
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
   "test -x /etc/init.d/S35supercombo_k230 || { echo 'Missing image-provided /etc/init.d/S35supercombo_k230' >&2; exit 1; }; rm -f /etc/init.d/S95supercombo_k230; rm -rf '$DEST/.upload'; mkdir -p '$DEST/.upload' '$DEST/model' '$DEST/params' '$DEST/params.defaults'"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "${runtime_files[@]}" "$BOARD:$DEST/.upload/"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "for source in '$DEST/.upload/'*; do mv \"\$source\" '$DEST/'; done"
+"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/.upload/assets/ui' '$DEST/assets/ui'"
+"${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "${ui_assets[@]}" "$BOARD:$DEST/.upload/assets/ui/"
+"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
+  "rm -f '$DEST/assets/ui/'*.png; for source in '$DEST/.upload/assets/ui/'*; do mv \"\$source\" '$DEST/assets/ui/'; done"
 if [ -x "${BIN_DIR}/k230_k7_controlsd" ]; then
   "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/lib' '$DEST/.upload/lib'"
   "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \

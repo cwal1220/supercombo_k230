@@ -1,6 +1,7 @@
 #include "overlay_renderer.h"
 
 #include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
 #include <algorithm>
@@ -11,6 +12,63 @@
 namespace {
 
 constexpr float kRadarToCameraDistanceM = 1.52f;
+constexpr int kTrafficSpriteWidth = 270;
+constexpr int kTrafficSpriteHeight = 155;
+
+struct TrafficSignalSprite {
+    cv::Mat logical;
+    cv::Mat logical_mask;
+    cv::Mat rotated;
+    cv::Mat rotated_mask;
+
+    bool load(const char *path)
+    {
+        logical = cv::imread(path, cv::IMREAD_UNCHANGED);
+        if (logical.type() != CV_8UC4 || logical.cols != kTrafficSpriteWidth ||
+            logical.rows != kTrafficSpriteHeight) {
+            logical.release();
+            return false;
+        }
+        cv::extractChannel(logical, logical_mask, 3);
+        cv::rotate(logical, rotated, cv::ROTATE_90_CLOCKWISE);
+        cv::rotate(logical_mask, rotated_mask, cv::ROTATE_90_CLOCKWISE);
+        return true;
+    }
+};
+
+struct TrafficSignalSprites {
+    TrafficSignalSprite red;
+    TrafficSignalSprite green;
+    bool ready = false;
+
+    TrafficSignalSprites()
+    {
+        ready = red.load("assets/ui/traffic_wait_red_retro-270x155-v3.png") &&
+                green.load("assets/ui/traffic_go_green_retro-270x155-v3.png");
+        if (!ready)
+            std::fprintf(stderr, "overlay: traffic signal PNG assets unavailable\n");
+    }
+};
+
+TrafficSignalSprites &traffic_signal_sprites()
+{
+    static TrafficSignalSprites sprites;
+    return sprites;
+}
+
+void blit_traffic_signal(cv::Mat &frame, const TrafficSignalSprite &sprite,
+                         int logical_x, int logical_y, int logical_height,
+                         bool rotate_landscape)
+{
+    const cv::Mat &image = rotate_landscape ? sprite.rotated : sprite.logical;
+    const cv::Mat &mask = rotate_landscape ? sprite.rotated_mask : sprite.logical_mask;
+    const cv::Rect target = rotate_landscape
+        ? cv::Rect(logical_height - logical_y - kTrafficSpriteHeight,
+                   logical_x, kTrafficSpriteHeight, kTrafficSpriteWidth)
+        : cv::Rect(logical_x, logical_y, kTrafficSpriteWidth, kTrafficSpriteHeight);
+    if ((target & cv::Rect(0, 0, frame.cols, frame.rows)) != target) return;
+    image.copyTo(frame(target), mask);
+}
 
 float display_lead_distance_m(const OverlayHudState &hud,
                               const ParsedLeadPoint *vision_lead)
@@ -366,73 +424,17 @@ void draw_stop_signal_indicator(cv::Mat &img, const OverlayHudState &hud,
     if (!green && !red) return;
 
     constexpr int kRightOffset = 126;
-    constexpr int kCenterY = 350;
-    constexpr int kHalfWidth = 58;
-    constexpr int kHalfHeight = 24;
-    constexpr int kCorner = 6;
+    constexpr int kSpriteCenterY = 320;
+    constexpr int kHousingCenterX = 174;
+    constexpr int kHousingCenterY = 39;
     const int center_x = logical_width - kRightOffset;
 
-    auto housing_points = [&](int offset_x, int offset_y) {
-        const int left = center_x - kHalfWidth + offset_x;
-        const int right = center_x + kHalfWidth + offset_x;
-        const int top = kCenterY - kHalfHeight + offset_y;
-        const int bottom = kCenterY + kHalfHeight + offset_y;
-        std::array<cv::Point, 8> points = {
-            display_point(left + kCorner, top, logical_height, rotate_landscape),
-            display_point(right - kCorner, top, logical_height, rotate_landscape),
-            display_point(right, top + kCorner, logical_height, rotate_landscape),
-            display_point(right, bottom - kCorner, logical_height, rotate_landscape),
-            display_point(right - kCorner, bottom, logical_height, rotate_landscape),
-            display_point(left + kCorner, bottom, logical_height, rotate_landscape),
-            display_point(left, bottom - kCorner, logical_height, rotate_landscape),
-            display_point(left, top + kCorner, logical_height, rotate_landscape),
-        };
-        return points;
-    };
-
-    auto fill_housing = [&](const std::array<cv::Point, 8> &points,
-                            const cv::Scalar &color) {
-        const cv::Point *polygon[] = {points.data()};
-        const int count[] = {static_cast<int>(points.size())};
-        cv::fillPoly(img, polygon, count, 1, color, cv::LINE_8);
-    };
-
-    const std::array<cv::Point, 8> shadow = housing_points(3, 3);
-    fill_housing(shadow, bgra(0, 0, 0, 90));
-    const std::array<cv::Point, 8> housing = housing_points(0, 0);
-    fill_housing(housing, bgra(16, 19, 22, 235));
-    const cv::Point *outline[] = {housing.data()};
-    const int outline_count[] = {static_cast<int>(housing.size())};
-    cv::polylines(img, outline, outline_count, 1, true,
-                  bgra(105, 115, 125, 210), 1, cv::LINE_8);
-
-    auto draw_lamp = [&](int logical_x, const cv::Scalar &off_color,
-                         const cv::Scalar &on_color, bool active) {
-        const cv::Point center = display_point(
-            logical_x, kCenterY, logical_height, rotate_landscape);
-        cv::circle(img, center, 14, bgra(0, 0, 0, 230),
-                   cv::FILLED, cv::LINE_8);
-        if (active) {
-            cv::circle(img, center, 12,
-                       cv::Scalar(on_color[0], on_color[1], on_color[2], 80),
-                       cv::FILLED, cv::LINE_8);
-            cv::circle(img, center, 9, on_color, cv::FILLED, cv::LINE_8);
-            const cv::Point highlight = display_point(
-                logical_x - 3, kCenterY - 3,
-                logical_height, rotate_landscape);
-            cv::circle(img, highlight, 3, bgra(225, 235, 245, 190),
-                       cv::FILLED, cv::LINE_8);
-        } else {
-            cv::circle(img, center, 9, off_color, cv::FILLED, cv::LINE_8);
-        }
-    };
-
-    draw_lamp(center_x - 33, bgra(8, 12, 60, 210),
-              bgra(25, 45, 255, 245), red && !green);
-    draw_lamp(center_x, bgra(8, 45, 60, 210),
-              bgra(20, 210, 255, 245), false);
-    draw_lamp(center_x + 33, bgra(12, 55, 12, 210),
-              bgra(25, 245, 35, 245), green);
+    const TrafficSignalSprites &sprites = traffic_signal_sprites();
+    if (!sprites.ready) return;
+    blit_traffic_signal(img, green ? sprites.green : sprites.red,
+                        center_x - kHousingCenterX,
+                        kSpriteCenterY - kHousingCenterY,
+                        logical_height, rotate_landscape);
 }
 
 void draw_hud(cv::Mat &frame, const OverlayHudState &hud,

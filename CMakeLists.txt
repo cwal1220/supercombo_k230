@@ -61,7 +61,7 @@ target_include_directories(k7_control_core PUBLIC ${PROJECT_LOCAL_INCLUDES})
 target_compile_options(k7_control_core PRIVATE ${PROJECT_WARNINGS})
 
 if(SUPERCOMBO_BUILD_RUNTIME)
-  find_package(OpenCV REQUIRED COMPONENTS core imgproc)
+  find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
   find_package(PkgConfig QUIET)
   if(SUPERCOMBO_BUILD_PANDA)
     if(PkgConfig_FOUND)
@@ -342,6 +342,11 @@ endif()
 if(SUPERCOMBO_BUILD_RUNTIME)
   install(TARGETS supercombo_elf k230_camerad k230_modeld k230_overlay k230_recordd
     RUNTIME DESTINATION .
+  )
+  install(FILES
+    assets/ui/traffic_wait_red_retro-270x155-v3.png
+    assets/ui/traffic_go_green_retro-270x155-v3.png
+    DESTINATION assets/ui
   )
   if(SUPERCOMBO_BUILD_PANDA)
     install(TARGETS k230_pandad k230_k7_controlsd RUNTIME DESTINATION .)
