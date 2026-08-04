@@ -497,16 +497,20 @@ cmake --build /tmp/supercombo_k230_verify \
 - `K230_PARAM_HOST=address`, `K230_PARAM_PORT=port`
   - select the parameter editor listen address and port. Defaults are
     `0.0.0.0:8080`.
+- `K230_DISPLAY_PARAMS=/path/to/display.json`
+  - overrides `params/display.json`. The web editor controls the active-high
+    GPIO25 backlight and its 20 kHz PWM5 brightness without stopping the video
+    pipeline.
 - `K230_ALERT_SOUND=0`
   - disables the lead-departure and traffic-signal ALSA chime while preserving
     LCD alerts. `K230_ALERT_PCM` overrides the playback device; its default is
     `default`.
 
 The tracked JSON files in `params/` are the source of truth for K7 steering,
-driving, and vision-cruise configuration. Changes are written atomically,
-signaled to `k230_k7_controlsd`, and also detected by its 100 ms fallback poll.
-Every field is applied on the next control tick without an engage or
-standstill gate.
+driving, vision-cruise, recording, and display configuration. Changes are
+written atomically. Control changes are signaled to `k230_k7_controlsd` and
+also detected by its 100 ms fallback poll, while recording and display changes
+are applied directly by their owning processes.
 `params/calibration.json` is also tracked as the initial calibration seed. The
 runtime replaces it atomically when a stable calibration is learned, while
 `scripts/upload_to_board.sh` preserves an existing runtime copy and installs

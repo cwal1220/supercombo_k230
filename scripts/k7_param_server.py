@@ -16,6 +16,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+if __package__:
+    from .k230_display_control import DisplayBacklight
+else:
+    from k230_display_control import DisplayBacklight
+
 
 CONTROLSD_NAME = "k230_k7_controlsd"
 RECORDD_NAME = "k230_recordd"
@@ -27,6 +32,7 @@ GROUP_ENV = {
         "k7_yg_adaptive_cruise.json",
     ),
     "recording": ("K230_RECORDING_PARAMS", "recording.json"),
+    "display": ("K230_DISPLAY_PARAMS", "display.json"),
 }
 
 
@@ -44,8 +50,9 @@ def param_meta(
     quick: bool = False,
     quick_section: str | None = None,
     quick_order: int | None = None,
+    control: str | None = None,
 ) -> Dict[str, Any]:
-    return {
+    metadata = {
         "label": label,
         "section": section,
         "unit": unit,
@@ -59,6 +66,9 @@ def param_meta(
         "quick_section": quick_section or section,
         "quick_order": quick_order,
     }
+    if control is not None:
+        metadata["control"] = control
+    return metadata
 
 
 PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
@@ -516,6 +526,26 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "quick_order": 10,
         },
     },
+    "display": {
+        "enabled": {
+            "label": "디스플레이 전원",
+            "section": "백라이트",
+            "description": "LCD 영상 출력은 유지한 채 백라이트만 켜거나 끕니다.",
+            "increase": "GPIO25를 High로 설정하거나 저장된 밝기의 PWM을 다시 켭니다.",
+            "decrease": "GPIO25를 Low로 설정해 백라이트를 완전히 끕니다.",
+            "quick": True,
+            "quick_section": "백라이트",
+            "quick_order": 10,
+        },
+        "brightness_percent": param_meta(
+            "화면 밝기", "백라이트", "%", 1, 1, 100,
+            "패널의 저·고밝기 구간을 나누어 실측 보정한 20 kHz PWM입니다. 전원을 꺼도 이 값은 유지됩니다.",
+            "화면이 밝아집니다. 100%에서는 GPIO High를 사용합니다.",
+            "화면이 어두워집니다. 완전히 끄려면 전원 스위치를 사용합니다.",
+            quick=True, quick_section="백라이트", quick_order=20,
+            control="slider",
+        ),
+    },
 }
 
 
@@ -577,6 +607,7 @@ class ParamStore:
         paths: Dict[str, Path] | None = None,
         notifier: Callable[[], list[int]] = notify_controlsd,
         default_paths: Dict[str, Path] | None = None,
+        display_controller: DisplayBacklight | None = None,
     ):
         self.paths = paths or configured_paths()
         self.notifier = notifier
@@ -586,7 +617,13 @@ class ParamStore:
             if default_paths is not None
             else (configured_default_paths() if paths is None else {})
         )
+        self.display_controller = display_controller
         self._merge_missing_defaults()
+        if self.display_controller is not None and "display" in self.paths:
+            try:
+                self.display_controller.apply(self.read_group("display"))
+            except (RuntimeError, ValueError):
+                pass
 
     def _merge_missing_defaults(self) -> None:
         for group, default_path in self.default_paths.items():
@@ -629,6 +666,7 @@ class ParamStore:
             "paths": {group: str(path) for group, path in self.paths.items()},
             "controlsd_pids": find_controlsd_pids(),
             "recordd_pids": find_recordd_pids(),
+            "display_status": self._display_status(),
         }
 
     def update(self, group: str, values: Dict[str, Any]) -> Dict[str, Any]:
@@ -640,8 +678,12 @@ class ParamStore:
             if unknown:
                 raise KeyError(", ".join(unknown))
             document.update(values)
+            if group == "display":
+                if self.display_controller is None:
+                    raise ValueError("display backlight control is unavailable")
+                self.display_controller.apply(document)
             self._atomic_write(self._path(group), document)
-        notified = [] if group == "recording" else self.notifier()
+        notified = [] if group in ("recording", "display") else self.notifier()
         return {
             "group": group,
             "values": values,
@@ -649,7 +691,19 @@ class ParamStore:
             "notified_pids": notified,
             "controlsd_pids": find_controlsd_pids(),
             "recordd_pids": find_recordd_pids(),
+            "display_status": self._display_status(),
         }
+
+    def _display_status(self) -> Dict[str, Any]:
+        if self.display_controller is None:
+            return {
+                "available": False,
+                "enabled": False,
+                "brightness_percent": 0,
+                "mode": "unavailable",
+                "error": "display backlight control is unavailable",
+            }
+        return self.display_controller.status()
 
     def _path(self, group: str) -> Path:
         if group not in self.paths:
@@ -734,14 +788,14 @@ HTML = """<!doctype html>
     .icon-button:hover { background: #31373c; }
     .group-tabs {
       position: sticky; top: 64px; z-index: 4;
-      display: grid; grid-template-columns: repeat(4, 1fr);
+      display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
       padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
       background: #171a1d; border-bottom: 1px solid var(--line);
     }
     .group-tab {
       min-height: 50px; border: 0; border-bottom: 3px solid transparent;
       border-radius: 0; background: transparent; color: var(--muted);
-      cursor: pointer; font-weight: 750;
+      padding: 0 4px; cursor: pointer; font-size: 13px; font-weight: 750;
     }
     .group-tab.active { color: #fff; border-bottom-color: var(--accent); }
     main {
@@ -854,6 +908,17 @@ HTML = """<!doctype html>
     }
     .toggle-control[aria-checked="true"] .toggle { background: var(--good); }
     .toggle-control[aria-checked="true"] .toggle::after { transform: translateX(24px); }
+    .slider-control {
+      display: grid; grid-template-columns: minmax(0, 1fr) 72px;
+      align-items: center; gap: 12px; height: 50px;
+    }
+    .brightness-slider { width: 100%; accent-color: var(--good); cursor: pointer; }
+    .slider-value {
+      display: flex; align-items: center; justify-content: center;
+      height: 42px; border: 1px solid #535c63; border-radius: 6px;
+      background: #0d0f11; color: #fff; font-size: 18px;
+      font-weight: 750; font-variant-numeric: tabular-nums;
+    }
     .card-status { min-height: 18px; margin-top: 7px; color: #7f8991; font-size: 11px; text-align: right; }
     .card-status.ok { color: var(--good); }
     .card-status.fail { color: var(--bad); }
@@ -874,6 +939,7 @@ HTML = """<!doctype html>
     }
     @media (max-width: 460px) {
       h1 { font-size: 17px; }
+      .group-tab { font-size: 11px; }
       .connection span:last-child { max-width: 92px; overflow: hidden; text-overflow: ellipsis; }
       .view-bar { align-items: stretch; flex-direction: column; }
       .view-tabs { width: 100%; }
@@ -897,6 +963,7 @@ HTML = """<!doctype html>
     <button class="group-tab" data-group="driving" type="button">주행 제한</button>
     <button class="group-tab" data-group="adaptive_cruise" type="button">비전 크루즈</button>
     <button class="group-tab" data-group="recording" type="button">주행 기록</button>
+    <button class="group-tab" data-group="display" type="button">디스플레이</button>
   </nav>
   <main>
     <div class="view-bar">
@@ -943,6 +1010,12 @@ HTML = """<!doctype html>
         "버튼 송신", "기타",
       ],
       recording: ["기록"],
+      display: ["백라이트"],
+    };
+    const groupNotes = {
+      adaptive_cruise: "변경값은 즉시 적용됩니다. 이 기능은 순정 크루즈 버튼만 조절하며 브레이크를 직접 제어하지 않습니다.",
+      recording: "기록은 모델 입력과 같은 640x360 프레임을 사용합니다. 영상·CAN·상태·파라미터가 한 경로에 함께 저장됩니다.",
+      display: "전원을 꺼도 영상 파이프라인은 계속 동작합니다. 밝기 값은 다음에 켤 때 그대로 복원됩니다.",
     };
 
     function setConnection(pids, saved = false, recording = false) {
@@ -956,6 +1029,16 @@ HTML = """<!doctype html>
     }
 
     function refreshConnection(saved = false) {
+      if (activeGroup === "display") {
+        const display = snapshot.display_status || {};
+        const online = Boolean(display.available) && !display.error;
+        dot.classList.toggle("online", online);
+        connection.title = display.error || `백라이트 모드: ${display.mode}`;
+        status.textContent = online
+          ? (saved ? "디스플레이 적용됨" : "백라이트 연결됨")
+          : "백라이트 제어 오류";
+        return;
+      }
       const recording = activeGroup === "recording";
       const pids = recording ? snapshot.recordd_pids : snapshot.controlsd_pids;
       setConnection(pids || [], saved, recording);
@@ -1034,6 +1117,7 @@ HTML = """<!doctype html>
         snapshot.params[group] = update.params;
         snapshot.controlsd_pids = update.controlsd_pids || update.notified_pids;
         snapshot.recordd_pids = update.recordd_pids || [];
+        snapshot.display_status = update.display_status || snapshot.display_status;
         const applied = update.params[key];
         if (input) input.value = String(applied);
         card.classList.add("saved");
@@ -1162,6 +1246,38 @@ HTML = """<!doctype html>
       return button;
     }
 
+    function createSliderControl(key, value, meta, card) {
+      const control = document.createElement("div");
+      control.className = "slider-control";
+      const input = document.createElement("input");
+      input.className = "brightness-slider";
+      input.type = "range";
+      input.min = String(meta.min);
+      input.max = String(meta.max);
+      input.step = String(meta.step);
+      input.value = String(value);
+      input.setAttribute("aria-label", `${meta.label} 현재값`);
+      const output = document.createElement("output");
+      output.className = "slider-value";
+      output.textContent = `${value}${meta.unit}`;
+      input.addEventListener("input", () => {
+        output.textContent = `${input.value}${meta.unit}`;
+      });
+      input.addEventListener("change", async () => {
+        const previous = snapshot.params[activeGroup][key];
+        const next = clampAndRound(Number(input.value), meta);
+        try {
+          const applied = await applyValue(key, next, card, input);
+          output.textContent = `${applied}${meta.unit}`;
+        } catch (_) {
+          input.value = String(previous);
+          output.textContent = `${previous}${meta.unit}`;
+        }
+      });
+      control.append(input, output);
+      return control;
+    }
+
     function createCard(key, value, meta) {
       const card = document.createElement("article");
       card.className = "param-card";
@@ -1185,12 +1301,15 @@ HTML = """<!doctype html>
       const cardStatus = document.createElement("div");
       cardStatus.className = "card-status";
       card.append(head, description, createEffects(meta, typeof value === "boolean"));
-      card.append(
-        typeof value === "boolean"
-          ? createToggleControl(key, value, meta, card)
-          : createNumberControl(key, value, meta, card),
-        cardStatus,
-      );
+      let editor;
+      if (typeof value === "boolean") {
+        editor = createToggleControl(key, value, meta, card);
+      } else if (meta.control === "slider") {
+        editor = createSliderControl(key, value, meta, card);
+      } else {
+        editor = createNumberControl(key, value, meta, card);
+      }
+      card.append(editor, cardStatus);
       return card;
     }
 
@@ -1198,12 +1317,9 @@ HTML = """<!doctype html>
       if (!snapshot) return;
       sections.replaceChildren();
       path.textContent = snapshot.paths[activeGroup];
-      groupNote.textContent = activeGroup === "adaptive_cruise"
-        ? "변경값은 즉시 적용됩니다. 이 기능은 순정 크루즈 버튼만 조절하며 브레이크를 직접 제어하지 않습니다."
-        : activeGroup === "recording"
-          ? "기록은 모델 입력과 같은 640x360 프레임을 사용합니다. 영상·CAN·상태·파라미터가 한 경로에 함께 저장됩니다."
-          : "";
-      groupNote.classList.toggle("visible", activeGroup === "adaptive_cruise" || activeGroup === "recording");
+      const note = groupNotes[activeGroup] || "";
+      groupNote.textContent = note;
+      groupNote.classList.toggle("visible", Boolean(note));
       const params = snapshot.params[activeGroup];
       const metadata = snapshot.metadata[activeGroup] || {};
       const visible = Object.entries(params).filter(([key, value]) => {
@@ -1289,7 +1405,7 @@ HTML = """<!doctype html>
 
 
 def create_app(store: ParamStore | None = None) -> FastAPI:
-    param_store = store or ParamStore()
+    param_store = store or ParamStore(display_controller=DisplayBacklight())
     application = FastAPI(title="K7 parameter server", docs_url="/docs")
 
     @application.get("/", response_class=HTMLResponse)
@@ -1311,6 +1427,8 @@ def create_app(store: ParamStore | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"unknown parameter: {exc}") from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return application
 

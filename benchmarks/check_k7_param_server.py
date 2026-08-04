@@ -7,7 +7,26 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts.k230_display_control import duty_cycle_ns
 from scripts.k7_param_server import PARAM_METADATA, ParamStore
+
+
+class FakeDisplayController:
+    def __init__(self):
+        self.applied = []
+
+    def apply(self, document):
+        self.applied.append(dict(document))
+
+    def status(self):
+        latest = self.applied[-1] if self.applied else {}
+        return {
+            "available": True,
+            "enabled": latest.get("enabled", True),
+            "brightness_percent": latest.get("brightness_percent", 100),
+            "mode": "test",
+            "error": "",
+        }
 
 
 class ParamStoreTest(unittest.TestCase):
@@ -31,6 +50,7 @@ class ParamStoreTest(unittest.TestCase):
             "command_interval_s",
         ],
         "recording": ["enabled"],
+        "display": ["enabled", "brightness_percent"],
     }
 
     def setUp(self):
@@ -41,6 +61,7 @@ class ParamStoreTest(unittest.TestCase):
             "driving": root / "driving.json",
             "adaptive_cruise": root / "adaptive_cruise.json",
             "recording": root / "recording.json",
+            "display": root / "display.json",
         }
         self.paths["steering"].write_text(
             json.dumps({"gain": 10, "enabled": True}), encoding="utf-8"
@@ -53,6 +74,9 @@ class ParamStoreTest(unittest.TestCase):
         )
         self.paths["recording"].write_text(
             json.dumps({"enabled": False}), encoding="utf-8"
+        )
+        self.paths["display"].write_text(
+            json.dumps({"enabled": True, "brightness_percent": 100}), encoding="utf-8"
         )
         self.notifications = 0
 
@@ -83,6 +107,28 @@ class ParamStoreTest(unittest.TestCase):
         self.assertEqual(result["notified_pids"], [])
         self.assertEqual(self.notifications, 0)
 
+    def test_display_update_applies_hardware_without_signaling_controlsd(self):
+        controller = FakeDisplayController()
+        store = ParamStore(
+            self.paths,
+            self.store.notifier,
+            display_controller=controller,
+        )
+        controller.applied.clear()
+        result = store.update("display", {"brightness_percent": 35})
+        self.assertEqual(result["notified_pids"], [])
+        self.assertEqual(controller.applied, [{"enabled": True, "brightness_percent": 35}])
+        self.assertEqual(store.read_group("display")["brightness_percent"], 35)
+
+    def test_display_pwm_duty_uses_inversed_polarity_formula(self):
+        self.assertEqual(duty_cycle_ns(100), 0)
+        self.assertEqual(duty_cycle_ns(99), 4_250)
+        self.assertEqual(duty_cycle_ns(90), 42_500)
+        self.assertEqual(duty_cycle_ns(50), 45_691)
+        self.assertEqual(duty_cycle_ns(10), 48_882)
+        self.assertEqual(duty_cycle_ns(1), 49_600)
+        self.assertEqual(duty_cycle_ns(0), 50_000)
+
     def test_missing_defaults_are_added_without_overwriting_tuning(self):
         defaults = Path(self.temporary.name) / "adaptive.defaults.json"
         defaults.write_text(
@@ -109,6 +155,7 @@ class ParamStoreTest(unittest.TestCase):
             ("driving", "k7_yg_driving.json"),
             ("adaptive_cruise", "k7_yg_adaptive_cruise.json"),
             ("recording", "recording.json"),
+            ("display", "display.json"),
         ):
             params = json.loads((root / "params" / filename).read_text(encoding="utf-8"))
             self.assertEqual(set(params), set(PARAM_METADATA[group]))

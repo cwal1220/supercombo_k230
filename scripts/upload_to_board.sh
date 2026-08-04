@@ -24,6 +24,7 @@ runtime_files=(
   "${BIN_DIR}/k230_recordd"
   scripts/k230_manager.py
   scripts/k7_param_server.py
+  scripts/k230_display_control.py
   scripts/requirements-param-server.txt
 )
 model="models/supercombo.kmodel"
@@ -76,8 +77,9 @@ fi
   params/k7_yg_steering.json \
   params/k7_yg_driving.json \
   params/recording.json \
+  params/display.json \
   "$BOARD:$DEST/params.defaults/"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
-  "for name in calibration.json k7_yg_adaptive_cruise.json k7_yg_steering.json k7_yg_driving.json recording.json; do test -e '$DEST/params/'\"\$name\" || cp '$DEST/params.defaults/'\"\$name\" '$DEST/params/'\"\$name\"; done"
+  "for name in calibration.json k7_yg_adaptive_cruise.json k7_yg_steering.json k7_yg_driving.json recording.json display.json; do test -e '$DEST/params/'\"\$name\" || cp '$DEST/params.defaults/'\"\$name\" '$DEST/params/'\"\$name\"; done"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "rm -rf '$DEST/.upload'; sync"
 echo "Uploaded runtime files to $BOARD:$DEST"
