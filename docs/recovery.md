@@ -4,21 +4,20 @@ This directory is the final reusable native C++ app bundle for K230.
 
 ## Final model
 
-Use the `iddwelu223` model. This is the graph where `Elu_223` is kept on the
-native K230 path by inserting a mathematically identity depthwise 1x1 Conv before
-that ELU.
+Use the modern six-input `driving_supercombo` artifact documented in
+`modern_model_migration.md`. The legacy `iddwelu223` five-input model is not
+ABI-compatible with the current runtime.
 
 Required runtime artifact:
 
 - `models/supercombo.kmodel`
 
-The original ONNX is available in the openpilot fork:
+Required SHA-256:
 
-- [supercombo.onnx](https://github.com/cwal1220/openpilot_c2/blob/master/selfdrive/modeld/models/supercombo.onnx)
+`908ec08594776d0060e26dbd7adca68831dc88433a175940a7fe89cce30c151d`
 
-The rewritten ONNX is an intermediate generated artifact and is intentionally
-not tracked in this repository. See `tools/model/` for the rewrite/compile
-scripts and exact reproduction commands.
+The exact provenance, ABI, board measurements and staged activation gates are
+in `docs/modern_model_migration.md`.
 
 ## What must be preserved
 

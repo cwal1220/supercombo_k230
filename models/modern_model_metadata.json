@@ -1,0 +1,41 @@
+{
+  "artifact": "models/supercombo.kmodel",
+  "sha256": "908ec08594776d0060e26dbd7adca68831dc88433a175940a7fe89cce30c151d",
+  "size_bytes": 32036896,
+  "source": {
+    "fork": "sunnypilot",
+    "commit": "1a07e4722853c0606b0e1caa8f300a371e342948",
+    "onnx": "driving_supercombo.onnx",
+    "onnx_sha256": "659727c4d4839adc4992a254409a54259a8756a743f2d567bf5fdc6579f8009b",
+    "k230_lowered_onnx_sha256": "a5f92c39da3db830d9adbb36005aa35d1dc5ce8569fb4c90f8a2715af092e675"
+  },
+  "compiler": {
+    "target": "k230",
+    "nncase": "2.11.0",
+    "calibration_samples": 288,
+    "calibration_method": "Kld",
+    "default_activation_quantization": "uint8",
+    "weight_quantization": "uint8",
+    "mixed_precision": "selected image-stem and late node36+ activation path uses int16",
+    "output_affine": "embedded 2576-channel scale and bias"
+  },
+  "inputs": [
+    {"index": 0, "name": "img", "dtype": "uint8", "shape": [1, 12, 128, 256]},
+    {"index": 1, "name": "big_img", "dtype": "uint8", "shape": [1, 12, 128, 256]},
+    {"index": 2, "name": "features_buffer", "dtype": "float16", "shape": [1, 24, 512]},
+    {"index": 3, "name": "desire_pulse", "dtype": "float16", "shape": [1, 25, 8]},
+    {"index": 4, "name": "traffic_convention", "dtype": "float16", "shape": [1, 2]},
+    {"index": 5, "name": "action_t", "dtype": "float16", "shape": [1, 2]}
+  ],
+  "outputs": [
+    {"index": 0, "name": "outputs", "dtype": "float32", "shape": [1, 2576]}
+  ],
+  "runtime_contract": {
+    "frame_skip": 4,
+    "hidden_state_slice": [1064, 1576],
+    "plan_slice": [1576, 2566],
+    "desire_state_slice": [2566, 2574],
+    "stop_line_head": false,
+    "default_action_t_seconds": [0.2, 0.5]
+  }
+}

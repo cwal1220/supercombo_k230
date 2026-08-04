@@ -67,6 +67,8 @@ public:
      */
     runtime_tensor get_input_tensor(size_t idx);
 
+    runtime_tensor get_output_tensor(size_t idx);
+
     /**
      * @brief 推理kmodel
      * @return None
@@ -85,6 +87,8 @@ protected:
     vector<float *> p_outputs_;            // kmodel输出对应的指针列表
     vector<vector<int>> input_shapes_;     //{{N,C,H,W},{N,C,H,W}...}
     vector<vector<int>> output_shapes_;    //{{N,C,H,W},{N,C,H,W}...}} 或 {{N,C},{N,C}...}}等
+    vector<nncase::typecode_t> input_dtypes_;
+    vector<nncase::typecode_t> output_dtypes_;
     vector<int> each_input_size_by_byte_;  //{0,layer1_length,layer1_length+layer2_length,...}
     vector<int> each_output_size_by_byte_; //{0,layer1_length,layer1_length+layer2_length,...}
 private:

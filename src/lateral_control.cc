@@ -80,7 +80,8 @@ LateralTarget LateralControlDraft::update(const ParsedPlan &plan)
     }
 
     const ModelPoint &point = plan.points[idx];
-    if (!finite_point(point) || point.x < 1.0f) return target;
+    if (!finite_point(point) || point.x < 1.0f || point.x > 100.0f ||
+        std::fabs(point.y) > 20.0f) return target;
 
     int prev_idx = std::max(0, idx - 1);
     while (prev_idx > 0 && !finite_point(plan.points[prev_idx]))
@@ -90,12 +91,16 @@ LateralTarget LateralControlDraft::update(const ParsedPlan &plan)
 
     const float dx = point.x - prev.x;
     const float dy = point.y - prev.y;
-    target.valid = true;
-    target.mpc_solution_valid = true;
     target.lookahead_x = point.x;
     target.target_y = point.y;
     target.heading = std::atan2(dy, std::fabs(dx) > 0.001f ? dx : 0.001f);
     target.curvature = 2.0f * point.y / (point.x * point.x + point.y * point.y);
+    if (!std::isfinite(target.heading) || !std::isfinite(target.curvature) ||
+        std::fabs(target.heading) > 1.2f || std::fabs(target.curvature) > 0.2f) {
+        return LateralTarget{};
+    }
+    target.valid = true;
+    target.mpc_solution_valid = true;
 
     for (int i = 0; i < kLateralControlN; ++i) {
         target.d_path_points[i] = finite_point(plan.points[i]) ? plan.points[i].y : 0.0f;

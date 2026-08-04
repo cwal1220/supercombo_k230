@@ -8,7 +8,8 @@
 
 constexpr int kTrajectorySize = 33;
 constexpr int kLeadMhpSelection = 3;
-constexpr int kLeadMhpN = 2;
+// The current model emits one direct trajectory for each 0/2/4 second lead selection.
+constexpr int kLeadMhpN = kLeadMhpSelection;
 constexpr int kLeadTrajLen = 6;
 constexpr int kDesireLen = 8;
 constexpr float kModelHeight = 1.22f;

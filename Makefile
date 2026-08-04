@@ -27,6 +27,7 @@ CORE_OBJS := build/app_config.o \
 	build/json_utils.o \
 	build/lateral_control.o \
 	build/k230_ipc.o \
+	build/model_context.o \
 	build/model_input_transform.o \
 	build/supercombo_model.o \
 	build/online_calibrator.o \
@@ -50,6 +51,7 @@ MODELD_OBJS := build/k230_modeld.o \
 	build/json_utils.o \
 	build/lateral_control.o \
 	build/k230_ipc.o \
+	build/model_context.o \
 	build/model_input_transform.o \
 	build/supercombo_model.o \
 	build/online_calibrator.o \
@@ -71,7 +73,7 @@ PANDAD_OBJS := build/k230_pandad.o \
 	build/projection.o \
 	build/lateral_control.o
 
-.PHONY: all clean k230_camerad k230_modeld k230_overlayd k230_pandad
+.PHONY: all clean k230_camerad k230_modeld k230_overlayd k230_pandad check-context
 
 all: $(BINDIR)/k230_camerad $(BINDIR)/k230_modeld $(BINDIR)/k230_overlayd
 
@@ -85,6 +87,9 @@ k230_pandad: $(BINDIR)/k230_pandad
 
 check-parser: build/check_model_output_parser
 	./build/check_model_output_parser $(RAW_DUMP)
+
+check-context: build/check_model_context
+	./build/check_model_context
 
 build:
 	mkdir -p build
@@ -108,6 +113,12 @@ build/check_model_output_parser.o: benchmarks/check_model_output_parser.cc | bui
 	$(CXX) $(CXXFLAGS) -Isrc -c $< -o $@
 
 build/check_model_output_parser: build/check_model_output_parser.o build/model_output.o
+	$(CXX) $(CXXFLAGS) $^ -o $@
+
+build/check_model_context.o: benchmarks/check_model_context.cc | build
+	$(CXX) $(CXXFLAGS) -Isrc -c $< -o $@
+
+build/check_model_context: build/check_model_context.o build/model_context.o
 	$(CXX) $(CXXFLAGS) $^ -o $@
 
 build/libmmz.a: build/mmz.o

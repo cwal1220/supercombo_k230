@@ -139,6 +139,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     src/json_utils.cc
     src/k230_ipc.cc
     src/lateral_control.cc
+    src/model_context.cc
     src/model_input_transform.cc
     src/online_calibrator.cc
     src/supercombo_model.cc
@@ -251,6 +252,13 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
   target_include_directories(check_model_output_parser PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_include_directories(check_model_output_parser SYSTEM PRIVATE ${PROJECT_SYSTEM_INCLUDES})
   target_compile_options(check_model_output_parser PRIVATE ${PROJECT_WARNINGS})
+
+  add_executable(check_model_context
+    benchmarks/check_model_context.cc
+    src/model_context.cc
+  )
+  target_include_directories(check_model_context PRIVATE ${PROJECT_LOCAL_INCLUDES})
+  target_compile_options(check_model_context PRIVATE ${PROJECT_WARNINGS})
 
   add_executable(bench_nv12_to_yuv6 benchmarks/bench_nv12_to_yuv6.cc)
   target_compile_options(bench_nv12_to_yuv6 PRIVATE ${PROJECT_WARNINGS})

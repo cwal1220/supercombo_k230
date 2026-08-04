@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ "${ALLOW_LEGACY_SUPERCOMBO_BUILD:-0}" != "1" ]; then
+  cat >&2 <<'EOF'
+This script rebuilds the legacy five-input Elu/GRU model and cannot produce the
+six-input artifact required by the current runtime. It is disabled to prevent
+an ABI-incompatible models/supercombo.kmodel from being installed.
+
+See docs/modern_model_migration.md and models/modern_model_metadata.json for the
+selected model, conversion provenance and exact SHA-256. Set
+ALLOW_LEGACY_SUPERCOMBO_BUILD=1 only when intentionally reproducing the archived
+legacy artifact outside a deployment workflow.
+EOF
+  exit 2
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 MODEL_DIR="${REPO_DIR}/models"

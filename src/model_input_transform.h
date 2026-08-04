@@ -22,6 +22,8 @@ public:
     void projection_matrix(float *projection) const;
     void nv12_to_yuv6_warped(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &out);
     void nv12_to_yuv6_warped(const uint8_t *nv12, int src_w, int src_h, float *out);
+    void nv12_to_yuv6_warped(const uint8_t *nv12, int src_w, int src_h, std::vector<uint8_t> &out);
+    void nv12_to_yuv6_warped(const uint8_t *nv12, int src_w, int src_h, uint8_t *out);
     void nv12_to_yuv6_warped_scalar(const uint8_t *nv12, int src_w, int src_h, float *out);
     void nv12_to_yuv6_warped_rvv(const uint8_t *nv12, int src_w, int src_h, float *out);
     static bool rvv_available();
@@ -53,6 +55,8 @@ private:
                           size_t index, int channel);
     void warp_scalar(const uint8_t *nv12, int src_w, int src_h, float *out) const;
     void warp_rvv(const uint8_t *nv12, int src_w, int src_h, float *out) const;
+    void warp_scalar_u8(const uint8_t *nv12, int src_w, int src_h, uint8_t *out) const;
+    void warp_rvv_u8(const uint8_t *nv12, int src_w, int src_h, uint8_t *out) const;
 
     bool map_valid_ = false;
     int map_src_w_ = 0;

@@ -1,0 +1,91 @@
+{
+  "date": "2026-08-05",
+  "board": "Kendryte K230 / 01Studio",
+  "branch": "feat/modern-openpilot-k230",
+  "model_sha256": "908ec08594776d0060e26dbd7adca68831dc88433a175940a7fe89cce30c151d",
+  "result": {
+    "offline_runtime_gate": "pass",
+    "parked_camera_gate": "pass",
+    "moving_vehicle_closed_loop_gate": "not_run",
+    "control_enable_recommendation": "keep disabled until the staged road-test gates in docs/modern_model_migration.md pass"
+  },
+  "standalone_kmodel": {
+    "frames": 120,
+    "warmup_frames": 3,
+    "npu_run_mean_ms": 33.729,
+    "total_mean_ms": 34.692,
+    "throughput_fps": 28.825
+  },
+  "full_runtime_replay": {
+    "frames": 1200,
+    "errors": 0,
+    "throughput_fps": 22.48,
+    "steady_samples": 1195,
+    "latency_ms": {
+      "mean": 44.102,
+      "p50": 43.803,
+      "p95": 46.424,
+      "p99": 47.490,
+      "max": 48.484
+    },
+    "over_50_ms": 0
+  },
+  "live_camera_runtime": {
+    "model_frames": 1200,
+    "camera_frames": 2000,
+    "model_errors": 0,
+    "camera_errors": 0,
+    "camera_fps": 29.99,
+    "steady_model_cadence_fps": 20.003,
+    "steady_latency_samples": 1195,
+    "latency_ms": {
+      "mean": 46.276,
+      "p50": 46.027,
+      "p95": 49.209,
+      "p99": 50.282,
+      "max": 51.783
+    },
+    "over_50_ms": 23,
+    "over_50_ms_fraction": 0.01925,
+    "cadence_samples": 1194,
+    "cadence_interval_ms": {
+      "mean": 49.993,
+      "p95": 54.661,
+      "p99": 56.335,
+      "max": 57.882
+    }
+  },
+  "quality_evidence": {
+    "held_out_96_frame_sequence": {
+      "overall_cosine": 0.923582,
+      "plan_cosine": 0.906119,
+      "lane_line_cosine": 0.956611,
+      "road_edge_cosine": 0.934028,
+      "hidden_state_cosine": 0.840204
+    },
+    "fresh_local_120_frame_sequence": {
+      "overall_cosine": 0.960342,
+      "lane_line_cosine": 0.987518,
+      "road_edge_cosine": 0.989939,
+      "plan_cosine": 0.596157,
+      "note": "This comparison uses a separately captured reference path and is retained as a warning; it is not treated as a closed-loop plan-quality pass."
+    },
+    "runtime_output_sanity": {
+      "frames": 120,
+      "all_finite": true,
+      "parser_valid_frames": 120,
+      "plan_last_x_m_range": [48.56, 66.61],
+      "plan_abs_y_m_p95": 0.553,
+      "plan_abs_y_m_max": 2.024,
+      "minimum_x_increment_m": 0.055
+    }
+  },
+  "host_regression": {
+    "model_context": "pass",
+    "modern_output_parser": "pass",
+    "direct_uint8_warp_bit_exact": true,
+    "opencl_warp_worst_mean_abs_pixel_error": 0.314,
+    "opencl_warp_worst_max_abs_pixel_error": 7,
+    "control_and_can_checks": "pass"
+  }
+}

@@ -56,6 +56,7 @@ struct AppConfig {
     unsigned max_frames = 0;
 
     std::string replay_nv12_path;
+    std::string raw_output_dump_path;
 
     bool calibration_auto = true;
     bool manual_calibration = false;
@@ -64,6 +65,10 @@ struct AppConfig {
     float manual_yaw = 0.0f;
     bool log_calibration = false;
     bool profile = false;
+
+    // Modern openpilot policy latency inputs, in seconds.
+    float lateral_action_t = 0.2f;
+    float longitudinal_action_t = 0.5f;
 
     float input_warp_fx = kDefaultInputWarpFx;
     float input_warp_fy = kDefaultInputWarpFy;

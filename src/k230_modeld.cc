@@ -7,13 +7,17 @@
 #include "supercombo_model.h"
 
 #include <signal.h>
-#include <sys/time.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <numeric>
 #include <stdexcept>
 #include <vector>
 
@@ -22,10 +26,65 @@ namespace {
 volatile sig_atomic_t g_stop = 0;
 constexpr uint64_t kControlStateTimeoutNs = 500000000ULL;
 
+void signal_handler(int)
+{
+    g_stop = 1;
+}
+
 uint64_t steady_ns()
 {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+void sleep_until_ns(uint64_t deadline_ns)
+{
+    timespec deadline {};
+    deadline.tv_sec = static_cast<time_t>(deadline_ns / 1000000000ULL);
+    deadline.tv_nsec = static_cast<long>(deadline_ns % 1000000000ULL);
+    while (!g_stop) {
+        const int result = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &deadline, nullptr);
+        if (result != EINTR) break;
+    }
+}
+
+void print_latency_summary(const std::vector<double> &samples_ms, size_t warmup)
+{
+    if (samples_ms.size() <= warmup) return;
+    std::vector<double> values(samples_ms.begin() + warmup, samples_ms.end());
+    std::sort(values.begin(), values.end());
+    auto percentile = [&](double fraction) {
+        const size_t index = static_cast<size_t>(
+            std::ceil(fraction * static_cast<double>(values.size())) - 1.0);
+        return values[std::min(index, values.size() - 1)];
+    };
+    const double sum = std::accumulate(values.begin(), values.end(), 0.0);
+    const size_t deadline_misses = static_cast<size_t>(std::count_if(
+        values.begin(), values.end(), [](double value) { return value > 50.0; }));
+    std::fprintf(stderr,
+                 "modeld latency steady ms: n=%zu mean=%.3f p50=%.3f p95=%.3f p99=%.3f max=%.3f over50=%zu\n",
+                 values.size(), sum / values.size(), percentile(0.50), percentile(0.95),
+                 percentile(0.99), values.back(), deadline_misses);
+}
+
+void print_cadence_summary(const std::vector<double> &intervals_ms, size_t warmup)
+{
+    if (intervals_ms.size() <= warmup) return;
+    std::vector<double> values(intervals_ms.begin() + warmup, intervals_ms.end());
+    std::sort(values.begin(), values.end());
+    auto percentile = [&](double fraction) {
+        const size_t index = static_cast<size_t>(
+            std::ceil(fraction * static_cast<double>(values.size())) - 1.0);
+        return values[std::min(index, values.size() - 1)];
+    };
+    const double sum = std::accumulate(values.begin(), values.end(), 0.0);
+    const double mean = sum / values.size();
+    const size_t late = static_cast<size_t>(std::count_if(
+        values.begin(), values.end(), [](double value) { return value > 55.0; }));
+    std::fprintf(stderr,
+                 "modeld cadence steady: n=%zu fps=%.3f mean_ms=%.3f p95=%.3f p99=%.3f max=%.3f over55=%zu\n",
+                 values.size(), 1000.0 / mean, mean, percentile(0.95),
+                 percentile(0.99), values.back(), late);
 }
 
 bool publish_output(K230LatestChannel &model_pub, SupercomboModel &model, const ParsedModelOutput &parsed,
@@ -74,51 +133,77 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
 
     Nv12Frame frame;
     std::vector<float> raw;
+    std::fstream raw_dump;
+    uint32_t raw_dump_frames = 0;
+    if (!config.raw_output_dump_path.empty()) {
+        raw_dump.open(config.raw_output_dump_path,
+                      std::ios::binary | std::ios::out | std::ios::trunc);
+        if (!raw_dump) throw std::runtime_error("open raw output dump failed");
+        const char magic[8] = {'S', 'C', 'O', 'D', 'M', 'P', '1', '\0'};
+        const uint32_t output_floats = 2576;
+        raw_dump.write(magic, sizeof(magic));
+        raw_dump.write(reinterpret_cast<const char *>(&output_floats), sizeof(output_floats));
+        raw_dump.write(reinterpret_cast<const char *>(&raw_dump_frames), sizeof(raw_dump_frames));
+    }
     unsigned processed = 0;
     unsigned errors = 0;
-    timeval start {};
-    timeval last {};
-    gettimeofday(&start, nullptr);
-    last = start;
+    std::vector<double> frame_latency_ms;
+    const uint64_t start_ns = steady_ns();
+    uint64_t last_report_ns = start_ns;
 
     while (!g_stop && source.read(frame)) {
         const uint64_t t0 = steady_ns();
-        const bool ok = model.run_frame_nv12_stable(frame.data.data(), frame.width, frame.height, raw);
+        const bool ok = model.run_frame_nv12(frame.data.data(), frame.width, frame.height, raw);
         const uint64_t t1 = steady_ns();
         if (ok) {
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);
+            if (!parsed.valid || !parsed.plan.valid) {
+                std::fprintf(stderr, "\nmodeld: rejected unhealthy model output at frame %u\n", processed);
+                ++errors;
+                continue;
+            }
+            if (raw_dump.is_open()) {
+                raw_dump.write(reinterpret_cast<const char *>(raw.data()),
+                               static_cast<std::streamsize>(raw.size() * sizeof(float)));
+                if (!raw_dump) throw std::runtime_error("write raw output dump failed");
+                ++raw_dump_frames;
+            }
             const float model_ms = static_cast<float>((t1 - t0) / 1000000.0);
             if (!publish_output(model_pub, model, parsed, calibration, lateral_control,
                                 processed, k230_now_ns(), model_ms, 0.0f)) {
                 std::fprintf(stderr, "\nmodeld: publish modelState failed\n");
                 ++errors;
             }
+            frame_latency_ms.push_back((steady_ns() - t0) / 1000000.0);
             ++processed;
         } else {
             ++errors;
         }
 
-        timeval now {};
-        gettimeofday(&now, nullptr);
-        const uint64_t since_last = timeval_us(now) - timeval_us(last);
-        if (since_last >= 1000000ULL) {
-            const uint64_t since_start = timeval_us(now) - timeval_us(start);
-            const double fps = since_start > 0 ? processed * 1000000.0 / since_start : 0.0;
+        const uint64_t now_ns = steady_ns();
+        const uint64_t since_last_ns = now_ns - last_report_ns;
+        if (since_last_ns >= 1000000000ULL) {
+            const uint64_t since_start_ns = now_ns - start_ns;
+            const double fps = since_start_ns > 0 ? processed * 1000000000.0 / since_start_ns : 0.0;
             std::fprintf(stderr, "modeld replay: frames=%u/%u fps=%.2f errors=%u          \r",
                          processed, target_frames, fps, errors);
             std::fflush(stderr);
-            last = now;
+            last_report_ns = now_ns;
         }
 
         if (config.max_frames > 0 && processed >= config.max_frames) break;
     }
 
-    timeval end {};
-    gettimeofday(&end, nullptr);
-    const uint64_t duration = timeval_us(end) - timeval_us(start);
-    const double fps = duration > 0 ? processed * 1000000.0 / duration : 0.0;
+    const uint64_t duration_ns = steady_ns() - start_ns;
+    const double fps = duration_ns > 0 ? processed * 1000000000.0 / duration_ns : 0.0;
     std::fprintf(stderr, "\nmodeld replay done frames=%u errors=%u fps=%.2f\n",
                  processed, errors, fps);
+    print_latency_summary(frame_latency_ms, 5);
+    if (raw_dump.is_open()) {
+        raw_dump.seekp(12, std::ios::beg);
+        raw_dump.write(reinterpret_cast<const char *>(&raw_dump_frames), sizeof(raw_dump_frames));
+        raw_dump.close();
+    }
     return processed > 0 && errors == 0 ? 0 : 1;
 }
 
@@ -157,14 +242,15 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
     const unsigned target_fps = std::max(1U, std::min(config.model_fps, 30U));
     const uint64_t model_interval_ns = 1000000000ULL / target_fps;
     uint64_t next_model_start_ns = 0;
+    std::vector<double> validation_latency_ms;
+    std::vector<double> validation_cadence_ms;
+    uint64_t previous_publish_ns = 0;
+    std::vector<uint8_t> frame_copy(frame_ring.frame_bytes());
 
-    timeval start {};
-    timeval last {};
-    gettimeofday(&start, nullptr);
-    last = start;
+    const uint64_t start_ns = steady_ns();
+    uint64_t last_report_ns = start_ns;
     unsigned last_processed = 0;
     unsigned last_errors = 0;
-    std::vector<uint8_t> frame_copy(frame_ring.frame_bytes());
 
     std::fprintf(stderr, "modeld: live shared ring slots=%u frame=%ux%u bytes=%u target=%uHz\n",
                  frame_ring.slot_count(), frame_ring.width(), frame_ring.height(),
@@ -173,8 +259,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
     while (!g_stop) {
         const uint64_t now_ns = steady_ns();
         if (next_model_start_ns > now_ns) {
-            const uint64_t sleep_us = (next_model_start_ns - now_ns) / 1000ULL;
-            if (sleep_us > 0) usleep(static_cast<useconds_t>(sleep_us));
+            sleep_until_ns(next_model_start_ns);
         }
         if (g_stop) break;
 
@@ -232,16 +317,39 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
         }
 
         const uint64_t t0 = steady_ns();
-        const bool ok = model.run_frame_nv12_stable(nv12, meta.width, meta.height, raw);
+        const bool ok = model.run_frame_nv12(nv12, meta.width, meta.height, raw);
         const uint64_t t1 = steady_ns();
-        next_model_start_ns = t0 + model_interval_ns;
+        if (next_model_start_ns == 0) {
+            next_model_start_ns = t0 + model_interval_ns;
+        } else {
+            next_model_start_ns += model_interval_ns;
+            // Keep an absolute 20 Hz phase so sleep overshoot does not accumulate.
+            // If the process falls more than one full cycle behind, drop that cycle
+            // rather than creating an unbounded catch-up burst.
+            if (next_model_start_ns + model_interval_ns < t0)
+                next_model_start_ns = t0 + model_interval_ns;
+        }
         if (ok) {
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);
+            if (!parsed.valid || !parsed.plan.valid) {
+                std::fprintf(stderr, "\nmodeld: rejected unhealthy model output at frame %llu\n",
+                             static_cast<unsigned long long>(meta.frame_id));
+                ++errors;
+                continue;
+            }
             const float model_ms = static_cast<float>((t1 - t0) / 1000000.0);
             if (!publish_output(model_pub, model, parsed, calibration, lateral_control,
                                 meta.frame_id, meta.timestamp_ns, model_ms, v_ego)) {
                 std::fprintf(stderr, "\nmodeld: publish modelState failed\n");
                 ++errors;
+            }
+            if (config.max_frames > 0)
+                validation_latency_ms.push_back((steady_ns() - t0) / 1000000.0);
+            if (config.max_frames > 0) {
+                const uint64_t publish_ns = steady_ns();
+                if (previous_publish_ns != 0)
+                    validation_cadence_ms.push_back((publish_ns - previous_publish_ns) / 1000000.0);
+                previous_publish_ns = publish_ns;
             }
             ++processed;
         } else {
@@ -250,15 +358,14 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
 
         if (config.max_frames > 0 && processed >= config.max_frames) break;
 
-        timeval now {};
-        gettimeofday(&now, nullptr);
-        const uint64_t duration = timeval_us(now) - timeval_us(last);
-        if (duration >= 1000000ULL) {
+        const uint64_t report_now_ns = steady_ns();
+        const uint64_t duration_ns = report_now_ns - last_report_ns;
+        if (duration_ns >= 1000000000ULL) {
             const unsigned frames_delta = processed - last_processed;
             const unsigned errors_delta = errors - last_errors;
             std::fprintf(stderr,
                          "modeld: fps=%.2f frames=%u missed=%u sync=%u errors=%u(+%u) last_ms=%.2f          \r",
-                         frames_delta * 1000000.0 / duration,
+                         frames_delta * 1000000000.0 / duration_ns,
                          processed,
                          missed,
                          frame_sync_failures,
@@ -266,18 +373,18 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
                          errors_delta,
                          ok ? (t1 - t0) / 1000000.0 : 0.0);
             std::fflush(stderr);
-            last = now;
+            last_report_ns = report_now_ns;
             last_processed = processed;
             last_errors = errors;
         }
     }
 
-    timeval end {};
-    gettimeofday(&end, nullptr);
-    const uint64_t total_us = timeval_us(end) - timeval_us(start);
-    const double fps = total_us > 0 ? processed * 1000000.0 / total_us : 0.0;
+    const uint64_t total_ns = steady_ns() - start_ns;
+    const double fps = total_ns > 0 ? processed * 1000000000.0 / total_ns : 0.0;
     std::fprintf(stderr, "\nmodeld done frames=%u missed=%u sync=%u errors=%u fps=%.2f\n",
                  processed, missed, frame_sync_failures, errors, fps);
+    print_latency_summary(validation_latency_ms, 5);
+    print_cadence_summary(validation_cadence_ms, 5);
     return processed > 0 && errors == 0 ? 0 : 1;
 }
 
@@ -285,7 +392,8 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
 
 int main(int argc, char *argv[])
 {
-    install_stop_signal_handlers(&g_stop);
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
 
     try {
         AppConfig config = AppConfig::from_env(argc, argv);

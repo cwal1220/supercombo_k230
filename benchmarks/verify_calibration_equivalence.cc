@@ -1022,6 +1022,7 @@ void test_projection_and_yuv6()
     constexpr int kSourceH = 360;
     std::vector<uint8_t> source_nv12(kSourceW * kSourceH * 3 / 2);
     std::vector<float> compact(kYuv6Floats, 0.0f);
+    std::vector<uint8_t> compact_u8(kYuv6Floats, 0);
     std::vector<float> legacy(kYuv6Floats, 0.0f);
     std::vector<float> opencl(kYuv6Floats, 0.0f);
     fill_nv12(source_nv12, kSourceW, kSourceH);
@@ -1035,6 +1036,7 @@ void test_projection_and_yuv6()
         {{0.0f, deg_to_rad(-5.0f), deg_to_rad(3.9f)}},
     }};
     bool compact_legacy_exact = true;
+    bool uint8_direct_exact = true;
     DiffStats opencl_worst;
     for (ModelFrame frame : {ModelFrame::MedModel, ModelFrame::SmallBigModel}) {
         ModelInputTransform transform(source_config, frame);
@@ -1044,6 +1046,14 @@ void test_projection_and_yuv6()
             transform.projection_matrix(projection);
             transform.nv12_to_yuv6_warped_scalar(
                 source_nv12.data(), kSourceW, kSourceH, compact.data());
+            transform.nv12_to_yuv6_warped(
+                source_nv12.data(), kSourceW, kSourceH, compact_u8);
+            for (size_t i = 0; i < compact.size(); ++i) {
+                if (compact_u8[i] != static_cast<uint8_t>(compact[i])) {
+                    uint8_direct_exact = false;
+                    break;
+                }
+            }
             legacy_warp_fixed12(
                 source_nv12.data(), kSourceW, kSourceH, projection, legacy.data());
             const bool exact = std::memcmp(
@@ -1072,6 +1082,8 @@ void test_projection_and_yuv6()
                 "fixed12 warp mean abs diff vs openpilot OpenCL reference");
     expect_true(opencl_worst.inner_max < 8.0,
                 "fixed12 warp inner max diff vs openpilot OpenCL reference");
+    expect_true(uint8_direct_exact,
+                "direct uint8 warp is bit-exact with float warp values");
 
     std::vector<float> frame_a(kYuv6Floats, 0.0f);
     std::vector<float> frame_b(kYuv6Floats, 0.0f);
@@ -1114,9 +1126,10 @@ void test_projection_and_yuv6()
 
     std::printf("projection/yuv6: med_sbig_matrix_tol<=1e-4 identity_max=%.1f med_mean=%.3f sbig_mean=%.3f\n",
                 identity_diff.max, warp_diff.mean, sbig_warp_diff.mean);
-    std::printf("bit_exact: compact_vs_legacy=%d cases=%zu direct_history_vs_pack=%d\n",
+    std::printf("bit_exact: compact_vs_legacy=%d cases=%zu direct_u8=%d direct_history_vs_pack=%d\n",
                 compact_legacy_exact ? 1 : 0,
                 rpy_cases.size() * 2,
+                uint8_direct_exact ? 1 : 0,
                 direct_history_exact ? 1 : 0);
     std::printf("opencl_compat_640x360: cases=%zu worst_mean=%.3f worst_max=%.1f "
                 "worst_inner_mean=%.3f worst_inner_max=%.1f\n",

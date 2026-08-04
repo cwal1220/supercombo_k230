@@ -51,6 +51,12 @@ struct v4l2_drm_context {
     enum drm_rotation drm_rotation;
     int8_t hflip;
     int8_t vflip;
+    // Keep this ABI synchronized with the board's libv4l2-drm. The library's
+    // default initializer writes these sensor-target fields as well.
+    uint32_t sensor_width;
+    uint32_t sensor_height;
+    uint32_t sensor_fps;
+    bool sensor_target_valid;
 };
 
 

@@ -76,6 +76,7 @@ void AIBase::set_input_init()
         if (debug_mode_ > 1)
             cout << endl;
         input_shapes_.push_back(in_shape);
+        input_dtypes_.push_back(nncase::to_typecode(desc.datatype).unwrap());
         // DEFINE_TYPECODE(uint8,      u8,     0x06)
         // DEFINE_TYPECODE(float32,    f32,    0x0B)
         if (desc.datatype == dt_int8 || desc.datatype == dt_uint8)
@@ -110,6 +111,11 @@ runtime_tensor AIBase::get_input_tensor(size_t idx)
     return kmodel_interp_.input_tensor(idx).expect("cannot get input tensor");
 }
 
+runtime_tensor AIBase::get_output_tensor(size_t idx)
+{
+    return kmodel_interp_.output_tensor(idx).expect("cannot get output tensor");
+}
+
 void AIBase::set_output_init()
 {
     ScopedTiming st(model_name_ + " set_output_init", debug_mode_);
@@ -134,6 +140,7 @@ void AIBase::set_output_init()
         if (debug_mode_ > 1)
             cout << endl;
         output_shapes_.push_back(out_shape);
+        output_dtypes_.push_back(nncase::to_typecode(desc.datatype).unwrap());
         if (desc.datatype == dt_int8 || desc.datatype == dt_uint8)
         {
             output_total_size += dsize;

@@ -23,21 +23,18 @@
 
 ## Overview
 
-This is the final live app path for the K230 target. It uses the `supercombo`
-kmodel generated from the ONNX graph where `Elu_223` is kept native by inserting
-an identity depthwise 1x1 Conv before it.
+This is the live app path for the K230 target. The current artifact is a modern
+six-input `driving_supercombo` model with uint8 image inputs, float16 temporal
+context inputs and a float32 2576-value output.
 
 ### Model artifact
 
 - `models/supercombo.kmodel`
 
-The original model is available in the openpilot fork:
-
-- [supercombo.onnx](https://github.com/cwal1220/openpilot_c2/blob/master/selfdrive/modeld/models/supercombo.onnx)
-
-The rewritten ONNX is an intermediate generated artifact and is intentionally
-not tracked in this repository. See `tools/model/` for the rewrite/compile
-scripts and exact reproduction commands.
+The selected source is sunnypilot's `driving_supercombo.onnx` at commit
+`1a07e4722853c0606b0e1caa8f300a371e342948`. Its selection, exact hashes,
+six-input ABI, board measurements and safe rollout procedure are documented in
+[`docs/modern_model_migration.md`](docs/modern_model_migration.md).
 
 ## Board Setup
 
@@ -146,7 +143,10 @@ K230_SCP="sshpass -p '<password>' scp" \
 
 The upload script reads binaries from `build-k230-sdk/bin` by default. Set
 `K230_BUILD_DIR=build-native` for an on-board build or `K230_BIN_DIR` for a custom
-binary directory.
+binary directory. It verifies the modern model hash, stops the service, creates
+a single rollback snapshot under `/root/supercombo_k230/rollback`, and leaves
+the service stopped unless `K230_RESTART_AFTER_UPLOAD=1` is explicitly set.
+Use `scripts/rollback_board.sh` to restore that snapshot.
 
 Runtime tuning and calibration JSON files already present under `params/` are
 never overwritten by the upload script. Repository defaults are copied to
@@ -269,8 +269,8 @@ without paying the cost of Cap'n Proto/cereal in v1.
 
 The model path captures the AI stream as `NV12 640x360` through `/dev/video2`
 crop/resize, samples independent `512x256` medmodel and sbigmodel views from
-the same source frame, prepares both YUV6 recurrent inputs, runs nncase runtime
-directly, and publishes compact
+the same source frame, prepares four-frame YUV6 histories plus the modern
+feature/desire context queues, runs nncase runtime directly, and publishes compact
 `modelState`. The overlay display process uses
 `/dev/video1` for preview and `/dev/video2` remains dedicated to the AI stream.
 The model input preparation always uses calibrated homography sampling fused
@@ -280,13 +280,14 @@ of each nncase image tensor; after inference, that half is copied to the
 previous-frame half. The shared camera frame is copied once into a cacheable
 buffer because C908 `vluxei32.v` is not reliable on the `/dev/shm` ring mapping.
 No warped image, YUV6 staging tensor, or full `[previous,current]` pack buffer is
-created. The source intrinsics are scaled from the calibrated K230 camera
+created. The auxiliary inputs use float16 exactly as required by the model ABI.
+The source intrinsics are scaled from the calibrated K230 camera
 matrix, so the default `640x360` path uses `fx=541.91`, `fy=528.66`,
 `cx=315.38`, and `cy=179.11`.
 `SUPERCOMBO_INPUT_WARP_FX/FY/CX/CY` can override these values for a separately
-measured camera pipeline. The medmodel transform feeds the current and previous
-frames into `input_imgs`; the wider C2 sbigmodel transform independently feeds
-its current and previous frames into `big_input_imgs`.
+measured camera pipeline. The medmodel transform feeds `img`; the wider
+sbigmodel transform independently feeds `big_img`. Each image input combines
+the current frame with the frame selected by the model's four-frame cadence.
 
 ## Verification
 
@@ -315,8 +316,8 @@ its current and previous frames into `big_input_imgs`.
   1/32 pixel with 15-bit coefficients while K230 uses 12-bit coefficients.
 - Automatic calibration requires both CAN `vEgo` and camera-odometry
   `trans[0]` above 15 mph, matching openpilot's acceptance gate.
-- The final graph keeps both visual towers live. `input_imgs` uses the
-  910-pixel-focal medmodel virtual camera and `big_input_imgs` uses the
+- The final graph keeps both visual towers live. `img` uses the
+  910-pixel-focal medmodel virtual camera and `big_img` uses the
   455-pixel-focal sbigmodel virtual camera, matching the single-camera C2 path.
 
 Run the host-only verifier:

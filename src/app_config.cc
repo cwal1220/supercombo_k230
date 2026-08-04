@@ -94,6 +94,7 @@ AppConfig AppConfig::from_env_defaults()
     config.max_frames = env_unsigned("SUPERCOMBO_MAX_FRAMES", 0);
 
     config.replay_nv12_path = env_string("SUPERCOMBO_REPLAY_NV12");
+    config.raw_output_dump_path = env_string("SUPERCOMBO_RAW_OUTPUT_DUMP");
 
     config.manual_calibration = env_present("SUPERCOMBO_CALIB_ROLL_DEG") ||
         env_present("SUPERCOMBO_CALIB_PITCH_DEG") ||
@@ -104,6 +105,8 @@ AppConfig AppConfig::from_env_defaults()
     config.manual_yaw = deg_to_rad(env_float("SUPERCOMBO_CALIB_YAW_DEG", 0.0f));
     config.log_calibration = env_enabled("SUPERCOMBO_LOG_CALIB");
     config.profile = env_enabled("SUPERCOMBO_PROFILE");
+    config.lateral_action_t = env_float("SUPERCOMBO_LAT_ACTION_T", config.lateral_action_t);
+    config.longitudinal_action_t = env_float("SUPERCOMBO_LONG_ACTION_T", config.longitudinal_action_t);
 
     config.input_warp_fx = env_float("SUPERCOMBO_INPUT_WARP_FX", config.input_warp_fx);
     config.input_warp_fy = env_float("SUPERCOMBO_INPUT_WARP_FY", config.input_warp_fy);
