@@ -1,7 +1,7 @@
 {
   "artifact": "models/supercombo.kmodel",
-  "sha256": "908ec08594776d0060e26dbd7adca68831dc88433a175940a7fe89cce30c151d",
-  "size_bytes": 32036896,
+  "sha256": "49ed812db587d48c6dfdcc26d8e42d2e69a5d0717527bb3dd74dfe4f088bfed1",
+  "size_bytes": 32049832,
   "source": {
     "fork": "sunnypilot",
     "commit": "1a07e4722853c0606b0e1caa8f300a371e342948",
@@ -13,11 +13,12 @@
     "target": "k230",
     "nncase": "2.11.0",
     "calibration_samples": 288,
-    "calibration_method": "Kld",
-    "default_activation_quantization": "uint8",
+    "calibration_method": "NoClip",
+    "default_activation_quantization": "int16",
     "weight_quantization": "uint8",
-    "mixed_precision": "selected image-stem and late node36+ activation path uses int16",
-    "output_affine": "embedded 2576-channel scale and bias"
+    "mixed_precision": false,
+    "output_affine": false,
+    "calibration_npz_sha256": "aa13949b1a99128de65288747e6662420fd3eac209e2d55c99b0b30c0c18d8cb"
   },
   "inputs": [
     {"index": 0, "name": "img", "dtype": "uint8", "shape": [1, 12, 128, 256]},
@@ -36,6 +37,13 @@
     "plan_slice": [1576, 2566],
     "desire_state_slice": [2566, 2574],
     "stop_line_head": false,
-    "default_action_t_seconds": [0.2, 0.5]
+    "default_action_t_seconds": [0.2, 0.5],
+    "lane_plan_fusion": "confidence-gated inner-lane center for lateral y/yaw; disabled during lane changes"
+  },
+  "camera": {
+    "name": "k230_ov5647",
+    "reference_size": [1920, 1080],
+    "intrinsics": [1625.7416788144435, 1585.9830269782024, 946.13450988811394, 537.34063862123787],
+    "distortion": [0.124801017, -0.930510234, 0.000743543609, 0.000532516864, 1.30742029]
   }
 }

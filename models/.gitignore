@@ -1,4 +1,6 @@
 work/
+source/
 onnx/*.onnx
+ptq/driving_supercombo_full6_288.npz
 variants/*/onnx/*.onnx
 variants/*/work/

@@ -57,6 +57,8 @@ private:
     ImageHistory big_image_history_{};
     size_t image_history_head_ = 0;
     ModernModelContext model_context_;
+    bool lane_plan_fusion_enabled_ = true;
+    int current_desire_ = 0;
 };
 
 #endif

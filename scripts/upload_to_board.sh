@@ -8,7 +8,7 @@ BOARD="${1:-root@192.168.219.111}"
 DEST="${K230_BOARD_DIR:-/root/supercombo_k230}"
 BUILD_DIR="${K230_BUILD_DIR:-build-k230-sdk}"
 BIN_DIR="${K230_BIN_DIR:-${BUILD_DIR}/bin}"
-EXPECTED_MODEL_SHA="${K230_MODEL_SHA256:-908ec08594776d0060e26dbd7adca68831dc88433a175940a7fe89cce30c151d}"
+EXPECTED_MODEL_SHA="${K230_MODEL_SHA256:-49ed812db587d48c6dfdcc26d8e42d2e69a5d0717527bb3dd74dfe4f088bfed1}"
 RESTART_AFTER_UPLOAD="${K230_RESTART_AFTER_UPLOAD:-0}"
 read -r -a SSH_CMD <<< "${K230_SSH:-ssh}"
 read -r -a SCP_CMD <<< "${K230_SCP:-scp}"
@@ -58,7 +58,7 @@ if [ "${actual_model_sha}" != "${EXPECTED_MODEL_SHA}" ]; then
 fi
 
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
-  "test -x /etc/init.d/S35supercombo_k230 || { echo 'Missing image-provided /etc/init.d/S35supercombo_k230' >&2; exit 1; }; /etc/init.d/S35supercombo_k230 stop >/dev/null 2>&1 || true; rm -f /etc/init.d/S95supercombo_k230; rm -rf '$DEST/.upload' '$DEST/rollback'; mkdir -p '$DEST/.upload' '$DEST/rollback/model' '$DEST/model' '$DEST/params' '$DEST/params.defaults'; for name in supercombo.elf k230_camerad k230_modeld k230_overlay k230_recordd k230_pandad k230_k7_controlsd k230_manager.py k7_param_server.py k230_display_control.py requirements-param-server.txt; do test ! -e '$DEST/'\"\$name\" || cp -p '$DEST/'\"\$name\" '$DEST/rollback/'\"\$name\"; done; test ! -e '$DEST/model/supercombo.kmodel' || cp -p '$DEST/model/supercombo.kmodel' '$DEST/rollback/model/supercombo.kmodel'"
+  "test -x /etc/init.d/S35supercombo_k230 || { echo 'Missing image-provided /etc/init.d/S35supercombo_k230' >&2; exit 1; }; /etc/init.d/S35supercombo_k230 stop >/dev/null 2>&1 || true; rm -f /etc/init.d/S95supercombo_k230; rm -rf '$DEST/.upload' '$DEST/rollback'; mkdir -p '$DEST/.upload' '$DEST/rollback/model' '$DEST/model' '$DEST/params' '$DEST/params.defaults'; for name in k230_camerad k230_modeld k230_overlayd k230_recordd k230_pandad k230_controlsd k230_manager.py param_server.py k230_display_control.py requirements-param-server.txt; do test ! -e '$DEST/'\"\$name\" || cp -p '$DEST/'\"\$name\" '$DEST/rollback/'\"\$name\"; done; test ! -e '$DEST/model/supercombo.kmodel' || cp -p '$DEST/model/supercombo.kmodel' '$DEST/rollback/model/supercombo.kmodel'"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "${runtime_files[@]}" "$BOARD:$DEST/.upload/"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "for source in '$DEST/.upload/'*; do mv \"\$source\" '$DEST/'; done"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/.upload/assets/ui' '$DEST/assets/ui'"

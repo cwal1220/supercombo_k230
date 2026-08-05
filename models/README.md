@@ -1,21 +1,31 @@
 # K230 modern driving model
 
-`supercombo.kmodel` is the selected six-input `driving_supercombo` artifact for
-the K230 runtime on `feat/modern-openpilot-k230`.
-
-## Artifact
+`supercombo.kmodel` is the production six-input `driving_supercombo` artifact
+for the K230 runtime.
 
 ```text
-908ec08594776d0060e26dbd7adca68831dc88433a175940a7fe89cce30c151d  supercombo.kmodel
+49ed812db587d48c6dfdcc26d8e42d2e69a5d0717527bb3dd74dfe4f088bfed1  supercombo.kmodel
 ```
 
-It was built from sunnypilot's `driving_supercombo.onnx` at commit
-`1a07e4722853c0606b0e1caa8f300a371e342948`. The source ONNX SHA-256 is
-`659727c4d4839adc4992a254409a54259a8756a743f2d567bf5fdc6579f8009b`.
+## Provenance and compile profile
 
-The Kmodel uses nncase 2.11.0, 288 real driving calibration samples, KLD
-calibration, uint8 weights and a selected mixed uint8/int16 activation scheme.
-Its matching 2576-channel output affine is embedded in the graph.
+- Source: sunnypilot `driving_supercombo.onnx`, commit
+  `1a07e4722853c0606b0e1caa8f300a371e342948`
+- Source ONNX SHA-256:
+  `659727c4d4839adc4992a254409a54259a8756a743f2d567bf5fdc6579f8009b`
+- K230-lowered ONNX SHA-256:
+  `a5f92c39da3db830d9adbb36005aa35d1dc5ce8569fb4c90f8a2715af092e675`
+- Calibration NPZ SHA-256:
+  `aa13949b1a99128de65288747e6662420fd3eac209e2d55c99b0b30c0c18d8cb`
+- Compiler: nncase 2.11.0, K230 target
+- PTQ: 288 real logging samples, `NoClip`, INT16 activations, UINT8 weights
+- Output: native float32 output; no output affine
+
+The previous mixed-precision/affine artifact (`908ec085…`) is rejected because
+offline comparison with the source ONNX showed compressed plan range and
+degraded lane/edge heads. The selected full-INT16 artifact preserves the vision
+heads and is paired with the runtime's guarded lane-center lateral/yaw
+correction.
 
 ## ABI
 
@@ -30,23 +40,34 @@ Its matching 2576-channel output affine is embedded in the graph.
 0 outputs             float32 [1, 2576]
 ```
 
-This artifact is not compatible with the previous five-input GRU runtime. The
-runtime performs an exact ABI check before inference and implements the modern
-four-frame image cadence, hidden-feature queue and desire max pooling.
+The runtime validates this ABI before inference and implements the four-frame
+image cadence, hidden-feature queue, desire max pooling, and lane-change guard.
+The model has no stop-line head.
 
-The model has no stop-line output. The parser marks that field unavailable.
+## Rebuild
+
+The source ONNX and 115 MiB calibration set are intentionally not committed.
+Place them at the ignored default paths or pass explicit paths:
+
+```sh
+mkdir -p models/source
+cp /path/to/driving_supercombo.onnx models/source/driving_supercombo.onnx
+
+SOURCE_ONNX=/path/to/driving_supercombo.onnx \
+CALIBRATION_NPZ=/path/to/full6_real_logging_calib.npz \
+  scripts/build_supercombo_model.sh install
+```
+
+The script verifies every source, lowered graph, calibration set, and final
+KModel hash. Modes are `onnx`, `kmodel`, and `install`. `install` updates
+`models/supercombo.kmodel`, compile metadata, and `manifest.sha256`.
 
 ## Evidence
 
-- `modern_model_metadata.json` records provenance, compiler settings and ABI.
-- `verification/modern_model_board_validation.json` records host, replay,
-  live-camera and quality checks.
-- `../docs/modern_model_migration.md` records the rollout and rollback gates.
+- `modern_model_metadata.json`: provenance, ABI, K230 camera geometry, runtime contract
+- `verification/modern_model_compile_metadata.json`: exact compiler inputs/options
+- `verification/modern_model_board_validation.json`: board replay and quality results
+- `../docs/modern_model_migration.md`: rationale, deployment, and safety gates
 
-The final board measurements are 22.48 FPS for a 1,200-frame full-runtime
-replay and 20.003 FPS steady cadence for a 1,200-frame live-camera run, both
-with zero model errors.
-
-Legacy ONNX/PTQ files and historical verification JSONs remain for audit only.
-Do not run the old `Gemm/Split`, `Elu_223` or GRU rewrite path against this
-modern model.
+Legacy five-input ONNX/PTQ files and no-big-input variants are audit artifacts
+only. They are not compatible with this runtime.

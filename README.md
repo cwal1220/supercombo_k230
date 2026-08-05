@@ -30,11 +30,29 @@ context inputs and a float32 2576-value output.
 ### Model artifact
 
 - `models/supercombo.kmodel`
+- SHA-256: `49ed812db587d48c6dfdcc26d8e42d2e69a5d0717527bb3dd74dfe4f088bfed1`
 
 The selected source is sunnypilot's `driving_supercombo.onnx` at commit
 `1a07e4722853c0606b0e1caa8f300a371e342948`. Its selection, exact hashes,
 six-input ABI, board measurements and safe rollout procedure are documented in
 [`docs/modern_model_migration.md`](docs/modern_model_migration.md).
+
+### Rebuild the model
+
+The source ONNX and 288-sample calibration NPZ are kept outside Git because of
+their size. The build script verifies their known hashes, performs the reviewed
+modern-model lowering, compiles full-INT16 activations with UINT8 weights, and
+verifies the final KModel hash before installation:
+
+```sh
+SOURCE_ONNX=/path/to/driving_supercombo.onnx \
+CALIBRATION_NPZ=/path/to/full6_real_logging_calib.npz \
+  scripts/build_supercombo_model.sh install
+```
+
+Use `onnx` or `kmodel` instead of `install` to stop before changing the tracked
+artifact. Full details and exact intermediate hashes are in
+[`models/README.md`](models/README.md).
 
 ## Board Setup
 
@@ -284,10 +302,17 @@ created. The auxiliary inputs use float16 exactly as required by the model ABI.
 The source intrinsics are scaled from the calibrated K230 camera
 matrix, so the default `640x360` path uses `fx=541.91`, `fy=528.66`,
 `cx=315.38`, and `cy=179.11`.
+The K230 OV5647 Brown-Conrady distortion coefficients are applied while
+sampling the model input and while projecting the overlay. Replay uses the
+same K230 camera calibration scaled to the replay frame dimensions.
 `SUPERCOMBO_INPUT_WARP_FX/FY/CX/CY` can override these values for a separately
 measured camera pipeline. The medmodel transform feeds `img`; the wider
 sbigmodel transform independently feeds `big_img`. Each image input combines
 the current frame with the frame selected by the model's four-frame cadence.
+The selected full-INT16 KModel preserves the vision heads but its lateral
+policy is quantization-sensitive. A confidence/uncertainty/width-gated fusion
+uses the two inner lane lines for plan y/yaw only and automatically disengages
+during lane changes. Set `SUPERCOMBO_LANE_PLAN_FUSION=0` only for A/B testing.
 
 ## Verification
 
@@ -345,10 +370,13 @@ cmake --build /tmp/supercombo_k230_verify \
     edges, leads, and pose.
 - `src/model_input_transform.*`
   - direct `NV12 -> calibrated warped YUV6` input transform. It fuses
-    homography sampling and openpilot-compatible YUV6 packing without creating
-    an intermediate RGB or warped image buffer. Its compact fixed-point LUT is
-    16 bytes/sample instead of 24, and the K230 build uses an exact C908 RVV
-    kernel with a scalar fallback.
+    homography and camera-distortion sampling with openpilot-compatible YUV6
+    packing without creating an intermediate RGB or warped image buffer. Its
+    compact fixed-point LUT is 16 bytes/sample instead of 24, and the K230
+    build uses an exact C908 RVV kernel with a scalar fallback.
+- `src/lane_plan_fusion.*`
+  - guarded lateral/yaw correction from high-confidence inner lane lines; it
+    preserves policy x/time/z/longitudinal outputs and skips lane changes.
 - `src/calibration_service.*`
   - wraps pose-based online calibration, manual override, projection policy, and
     the model-input calibration feedback loop.
@@ -433,9 +461,25 @@ cmake --build /tmp/supercombo_k230_verify \
   `SUPERCOMBO_INPUT_WARP_CX`, `SUPERCOMBO_INPUT_WARP_CY`
   - optional camera intrinsics for the resized source frame. Defaults are
     derived from the calibrated K230 `1920x1080` camera matrix.
+- `SUPERCOMBO_INPUT_DIST_K1`, `SUPERCOMBO_INPUT_DIST_K2`,
+  `SUPERCOMBO_INPUT_DIST_P1`, `SUPERCOMBO_INPUT_DIST_P2`,
+  `SUPERCOMBO_INPUT_DIST_K3`
+  - optional Brown-Conrady lens-distortion override. Defaults come from the
+    calibrated K230 OV5647 camera.
+- `SUPERCOMBO_LANE_PLAN_FUSION=0|1`
+  - confidence-gated correction for the quantization-sensitive policy lateral
+    path and yaw. It uses only the two high-confidence inner lane lines,
+    rejects implausible widths/uncertainty, and is disabled during a lane
+    change. It is enabled by default; set `0` for A/B diagnostics.
 - `SUPERCOMBO_WARP_SCALAR=1`
   - disables the C908 RVV input-warp kernel for diagnostics and uses the
     bit-exact scalar fallback.
+- `K230_MODELD_RT_PRIORITY=0..99`
+  - requests `SCHED_RR` for `k230_modeld`; the default is the lowest real-time
+    priority, `1`, which sustained 20 FPS without disturbing the 100 Hz control
+    loop in full-pipeline board validation. Set `0` to use the normal scheduler.
+    The manager startup log reports both the requested and actual scheduler so
+    missing privileges are visible.
 - `SUPERCOMBO_REPLAY_NV12=/path/to/replay.scnv12`
   - when launching `k230_modeld` directly, runs headless from an `SCNV12R1`
     NV12 replay file instead of opening the camera and display. Width, height,

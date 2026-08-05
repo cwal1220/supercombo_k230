@@ -110,22 +110,18 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
 {
     ReplayNv12Source source(config.replay_nv12_path);
     AppConfig replay_config = config;
-    if (!env_present("SUPERCOMBO_INPUT_WARP_FX"))
-        replay_config.input_warp_fx = default_input_warp_fx(source.width());
-    if (!env_present("SUPERCOMBO_INPUT_WARP_FY"))
-        replay_config.input_warp_fy = default_input_warp_fy(source.height());
-    if (!env_present("SUPERCOMBO_INPUT_WARP_CX"))
-        replay_config.input_warp_cx = default_input_warp_cx(source.width());
-    if (!env_present("SUPERCOMBO_INPUT_WARP_CY"))
-        replay_config.input_warp_cy = default_input_warp_cy(source.height());
+    replay_config.nv12_width = source.width();
+    replay_config.nv12_height = source.height();
+    configure_k230_camera(replay_config, source.width(), source.height());
     const unsigned target_frames = config.max_frames > 0
         ? std::min(config.max_frames, source.frame_count())
         : source.frame_count();
-    std::fprintf(stderr, "modeld replay input format=NV12 frames=%u file=%s target=%u\n",
+    std::fprintf(stderr,
+                 "modeld replay input format=NV12 frames=%u file=%s target=%u camera=k230_ov5647\n",
                  source.frame_count(), config.replay_nv12_path.c_str(), target_frames);
 
     SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode, replay_config);
-    CalibrationService calibration(config);
+    CalibrationService calibration(replay_config);
     LateralControlDraft lateral_control;
     float initial_rpy[3] = {};
     calibration.input_rpy(initial_rpy);

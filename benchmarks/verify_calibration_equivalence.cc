@@ -39,6 +39,15 @@ constexpr int kInputsWanted = 50;
 
 int g_failures = 0;
 
+void zero_distortion(AppConfig &config)
+{
+    config.input_dist_k1 = 0.0f;
+    config.input_dist_k2 = 0.0f;
+    config.input_dist_p1 = 0.0f;
+    config.input_dist_p2 = 0.0f;
+    config.input_dist_k3 = 0.0f;
+}
+
 void fail(const std::string &message)
 {
     std::fprintf(stderr, "FAIL: %s\n", message.c_str());
@@ -500,6 +509,11 @@ void test_app_config_env_feedback()
     unsetenv("SUPERCOMBO_INPUT_WARP_FY");
     unsetenv("SUPERCOMBO_INPUT_WARP_CX");
     unsetenv("SUPERCOMBO_INPUT_WARP_CY");
+    unsetenv("SUPERCOMBO_INPUT_DIST_K1");
+    unsetenv("SUPERCOMBO_INPUT_DIST_K2");
+    unsetenv("SUPERCOMBO_INPUT_DIST_P1");
+    unsetenv("SUPERCOMBO_INPUT_DIST_P2");
+    unsetenv("SUPERCOMBO_INPUT_DIST_K3");
 
     setenv("SUPERCOMBO_CALIB_PITCH_DEG", "1.25", 1);
     setenv("SUPERCOMBO_CALIB_YAW_DEG", "-0.75", 1);
@@ -521,6 +535,8 @@ void test_app_config_env_feedback()
                 "ISP output scales K230 camera cx");
     expect_near(fallback.input_warp_cy, kDefaultInputWarpCy, 1e-5,
                 "ISP output scales K230 camera cy");
+    expect_near(fallback.input_dist_k1, kK230CameraK1, 1e-7,
+                "K230 profile applies calibrated lens distortion");
     setenv("SUPERCOMBO_NV12_WIDTH", "512", 1);
     setenv("SUPERCOMBO_NV12_HEIGHT", "256", 1);
     AppConfig model_sized = AppConfig::from_env_defaults();
@@ -978,6 +994,7 @@ void test_projection_and_yuv6()
     pack_direct_openpilot_order(nv12.data(), direct.data());
 
     AppConfig identity_config;
+    zero_distortion(identity_config);
     identity_config.input_warp_fx = 910.0f;
     identity_config.input_warp_fy = 910.0f;
     identity_config.input_warp_cx = 256.0f;
@@ -988,6 +1005,7 @@ void test_projection_and_yuv6()
     expect_near(identity_diff.max, 0.0, 0.0, "zero-rpy warped YUV6 must match direct pack exactly");
 
     AppConfig pitch_config;
+    zero_distortion(pitch_config);
     pitch_config.input_warp_fx = kDefaultModelFx;
     pitch_config.input_warp_fy = kDefaultModelFy;
     pitch_config.input_warp_cx = kDefaultModelCx;
@@ -1027,6 +1045,7 @@ void test_projection_and_yuv6()
     std::vector<float> opencl(kYuv6Floats, 0.0f);
     fill_nv12(source_nv12, kSourceW, kSourceH);
     AppConfig source_config;
+    zero_distortion(source_config);
     const std::array<std::array<float, 3>, 6> rpy_cases = {{
         {{0.0f, 0.0f, 0.0f}},
         {{0.0f, deg_to_rad(-0.75f), deg_to_rad(1.1f)}},

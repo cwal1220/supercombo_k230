@@ -50,12 +50,49 @@ uint16_t model_float_to_half(float value)
         static_cast<uint16_t>(half_mantissa));
 }
 
+float model_half_to_float(uint16_t value)
+{
+    const uint32_t sign = static_cast<uint32_t>(value & 0x8000U) << 16;
+    uint32_t exponent = (value >> 10) & 0x1fU;
+    uint32_t mantissa = value & 0x03ffU;
+    uint32_t bits = 0;
+    if (exponent == 0) {
+        if (mantissa == 0) {
+            bits = sign;
+        } else {
+            int shift = 0;
+            while ((mantissa & 0x0400U) == 0) {
+                mantissa <<= 1;
+                ++shift;
+            }
+            mantissa &= 0x03ffU;
+            const uint32_t float_exponent = static_cast<uint32_t>(127 - 14 - shift);
+            bits = sign | (float_exponent << 23) | (mantissa << 13);
+        }
+    } else if (exponent == 0x1fU) {
+        bits = sign | 0x7f800000U | (mantissa << 13);
+    } else {
+        exponent += 127 - 15;
+        bits = sign | (exponent << 23) | (mantissa << 13);
+    }
+    float result = 0.0f;
+    std::memcpy(&result, &bits, sizeof(result));
+    return result;
+}
+
 void model_encode_float16(const float *src, size_t count, uint16_t *dst)
 {
     if ((!src || !dst) && count != 0)
         throw std::invalid_argument("null float16 conversion buffer");
     for (size_t i = 0; i < count; ++i)
         dst[i] = model_float_to_half(src[i]);
+}
+
+void model_decode_float16(const uint16_t *src, size_t count, float *dst)
+{
+    if ((!src || !dst) && count != 0)
+        throw std::invalid_argument("null float16 conversion buffer");
+    for (size_t i = 0; i < count; ++i) dst[i] = model_half_to_float(src[i]);
 }
 
 void ModernModelContext::reset()

@@ -108,6 +108,7 @@ class ProcSpec:
     name: str
     cmd: List[str]
     nice: int = 0
+    sched_rr_priority: int = 0
 
 
 @dataclass
@@ -132,13 +133,37 @@ def wait_for_file(path: str, timeout_ms: int) -> bool:
     return os.path.exists(path)
 
 
-def child_setup(nice_adjust: int):
+def child_setup(nice_adjust: int, sched_rr_priority: int = 0):
     os.setsid()
     if nice_adjust != 0:
         try:
             os.nice(nice_adjust)
         except OSError:
             pass
+    if sched_rr_priority > 0:
+        try:
+            os.sched_setscheduler(
+                0, os.SCHED_RR, os.sched_param(sched_rr_priority)
+            )
+        except (AttributeError, OSError):
+            pass
+
+
+def scheduler_label(pid: int) -> str:
+    try:
+        policy = os.sched_getscheduler(pid)
+        priority = os.sched_getparam(pid).sched_priority
+    except (AttributeError, OSError, ProcessLookupError):
+        return "unknown"
+
+    names = {
+        getattr(os, "SCHED_OTHER", -1): "other",
+        getattr(os, "SCHED_FIFO", -2): "fifo",
+        getattr(os, "SCHED_RR", -3): "rr",
+        getattr(os, "SCHED_BATCH", -4): "batch",
+        getattr(os, "SCHED_IDLE", -5): "idle",
+    }
+    return f"{names.get(policy, f'policy-{policy}')}:{priority}"
 
 
 class Manager:
@@ -166,9 +191,20 @@ class Manager:
         self.start_order = list(START_ORDER)
         self.process_order = list(PROCESS_ORDER)
         enable_control = env_enabled("K230_ENABLE_CONTROL")
+        try:
+            modeld_rt_priority = int(os.environ.get("K230_MODELD_RT_PRIORITY", "1"))
+        except ValueError as exc:
+            raise ValueError("K230_MODELD_RT_PRIORITY must be an integer") from exc
+        if modeld_rt_priority < 0 or modeld_rt_priority > 99:
+            raise ValueError("K230_MODELD_RT_PRIORITY must be between 0 and 99")
         specs = [
             ProcSpec("k230_camerad", ["./k230_camerad"], 0),
-            ProcSpec("k230_modeld", ["./k230_modeld", self.kmodel, self.debug], -15),
+            # Keep preprocessing and KPU submission ahead of the display and
+            # short control/Panda bursts. Full-pipeline board validation shows
+            # -5 can slip below 20 Hz, while -15 sustains the model cadence
+            # without causing 100 Hz control-loop deadline misses.
+            ProcSpec("k230_modeld", ["./k230_modeld", self.kmodel, self.debug],
+                     -15, modeld_rt_priority),
             ProcSpec("k230_overlayd", ["./k230_overlayd"], 10),
             ProcSpec("k230_recordd", ["./k230_recordd"], 15),
         ]
@@ -198,11 +234,16 @@ class Manager:
             raise FileNotFoundError(f"{state.spec.cmd[0]} not found")
         state.proc = subprocess.Popen(
             state.spec.cmd,
-            preexec_fn=lambda nice=state.spec.nice: child_setup(nice),
+            preexec_fn=lambda nice=state.spec.nice, rr=state.spec.sched_rr_priority:
+                child_setup(nice, rr),
         )
         state.last_start_ns = now_ns()
         state.exit_code = 0
+        scheduler = scheduler_label(state.proc.pid)
+        requested_scheduler = (f"rr:{state.spec.sched_rr_priority}"
+                               if state.spec.sched_rr_priority > 0 else "default")
         print(f"manager: started {state.spec.name} pid={state.proc.pid} nice={state.spec.nice} "
+              f"scheduler={scheduler} requested_scheduler={requested_scheduler} "
               f"cmd={' '.join(state.spec.cmd)}",
               flush=True)
 

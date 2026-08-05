@@ -1,8 +1,8 @@
 # Modern driving model migration
 
-This branch replaces the legacy five-input `supercombo` model with the selected
-six-input `driving_supercombo` model. The binary artifact and the runtime ABI
-must be deployed together.
+This branch runs a six-input, 2576-output modern `driving_supercombo` model on
+K230. The model, runtime ABI, camera geometry, and parser must be deployed as a
+single unit.
 
 ## Selected artifact
 
@@ -10,99 +10,97 @@ must be deployed together.
   `1a07e4722853c0606b0e1caa8f300a371e342948`
 - Source SHA-256:
   `659727c4d4839adc4992a254409a54259a8756a743f2d567bf5fdc6579f8009b`
-- Kmodel SHA-256:
-  `908ec08594776d0060e26dbd7adca68831dc88433a175940a7fe89cce30c151d`
-- Compiler: nncase 2.11.0, 288 real calibration samples, mixed uint8/int16
-  activations, uint8 weights, KLD calibration, embedded output affine
+- KModel SHA-256:
+  `49ed812db587d48c6dfdcc26d8e42d2e69a5d0717527bb3dd74dfe4f088bfed1`
+- Compiler: nncase 2.11.0, 288 real logging samples, `NoClip`, INT16
+  activations, UINT8 weights, no output affine
 
-The model was selected after comparing current comma, sunnypilot, FrogPilot,
-dragonpilot and openpilotkr artifacts. The newest comma model changes the output
-ABI to 2580 values, is substantially larger, and has no K230 timing or PTQ
-evidence. The selected model retains the already validated 2576-output ABI and
-has a reproducible K230 conversion.
+The selected source keeps the validated 2576-output ABI. Newer 2580-output
+models require a different parser and were not mixed into this runtime.
 
-The useful ideas carried over from the original `cwal1220/supercombo_k230`
-conversion are KPU-friendly graph boundaries, real driving PTQ samples and
-selective precision. Its literal `Gemm/Split`, `Elu_223` and GRU rewrites do not
-exist in this attention-based model and were not copied blindly.
+The legacy `supercombo_k230` graph tricks were reviewed rather than copied
+literally: its Gemm/Split, `Elu_223`, and GRU rewrites do not exist in this
+attention model. The reusable principles are real driving PTQ samples,
+KPU-friendly lowering, exact ABI checks, and selective validation on the board.
+
+## Why the previous KModel was rejected
+
+The earlier mixed uint8/int16 model with a 2576-channel affine had good timing,
+but offline comparison with the source ONNX showed compressed plan range and
+degraded lane/edge heads. The full INT16 artifact (`49ed812d…`) is therefore
+the selected vision base.
+
+Full INT16 preserves lane and road-edge geometry substantially better. Its
+policy lateral position remains quantization-sensitive, so production applies
+a guarded correction from the two inner lane lines. The correction requires
+high lane probability, low uncertainty, and plausible 2–5 m widths; it is
+disabled during lane changes. Longitudinal, vertical, time, and x outputs are
+not replaced.
+
+## Camera geometry
+
+Live capture and `SCNV12R1` replay both use the calibrated K230 OV5647 geometry:
+reference size 1920×1080, `fx=1625.742`, `fy=1585.983`, `cx=946.135`, and
+`cy=537.341`. Intrinsics are scaled to the actual frame size, and the calibrated
+Brown-Conrady distortion is applied consistently to model-input sampling and
+overlay projection.
 
 ## Runtime ABI
 
 | Input | Type and shape | Runtime source |
 | --- | --- | --- |
-| `img` | `uint8[1,12,128,256]` | current medmodel frame plus the frame from four model ticks earlier |
-| `big_img` | `uint8[1,12,128,256]` | current sbigmodel frame plus the frame from four model ticks earlier |
+| `img` | `uint8[1,12,128,256]` | medmodel current frame plus four-tick history |
+| `big_img` | `uint8[1,12,128,256]` | sbigmodel current frame plus four-tick history |
 | `features_buffer` | `float16[1,24,512]` | 96-frame hidden queue sampled every four frames |
-| `desire_pulse` | `float16[1,25,8]` | 100-frame desire queue, max pooled in groups of four |
+| `desire_pulse` | `float16[1,25,8]` | 100-frame desire queue max-pooled by four |
 | `traffic_convention` | `float16[1,2]` | right-hand traffic default |
 | `action_t` | `float16[1,2]` | lateral 0.2 s, longitudinal 0.5 s |
 
-The output is `float32[1,2576]`. The runtime rejects any other tensor count,
-shape or type at startup. It also rejects non-finite output, malformed plan
-geometry and invalid lateral targets before publishing a valid model state.
-The selected model has no stop-line head, so stop-line state is explicitly
-invalid instead of being read from a legacy offset.
+The output is `float32[1,2576]`. Non-finite output, malformed plan geometry,
+and invalid lateral targets are rejected before publishing model state.
 
-## Performance evidence
+## Validation
 
-The final binary was tested on the target board with the production camera
-device and with a 1,200-frame local-drive replay.
+Host checks cover the modern model context, output parser, lane-plan fusion,
+K230 calibration/projection, and scalar/RVV preprocessing equivalence. On the
+board, a 45-second live K230-camera full-pipeline run sustained 20.022 FPS for
+901 model frames, 29.987 camera FPS, and the 100 Hz control loop with no model
+or camera errors. The model process used the lowest real-time round-robin
+priority (`SCHED_RR:1`).
 
-| Test | Result |
-| --- | --- |
-| Standalone Kmodel | 33.729 ms NPU mean, 34.692 ms total, 28.825 FPS |
-| Full 1,200-frame replay | 22.48 FPS, p95 46.424 ms, p99 47.490 ms, max 48.484 ms, 0 errors |
-| Live camera, 1,200 model frames | steady cadence 20.003 FPS, p95 49.209 ms, p99 50.282 ms, 0 model/camera errors |
+Exact compiler and validation records are under `models/verification/`.
 
-The live test had 23 of 1,195 steady samples above 50 ms (1.925%), with a
-51.783 ms maximum. The absolute-phase scheduler prevented this small inference
-jitter from accumulating: mean publish interval was 49.993 ms. This passes the
-sustained 20 FPS gate, but it is not a claim that every single frame completes
-inside 50 ms.
+## Build and deployment
 
-Exact measurements and offline quality figures are in
-`models/verification/modern_model_board_validation.json`.
-
-## Deployment and rollback
-
-Build the complete runtime, not only `k230_modeld`, because the model parser,
-IPC validity gate and camera ABI header changed together. Then deploy with:
+Rebuild the model with the hash-checked pipeline:
 
 ```sh
-K230_BUILD_DIR=build-k230-modern \
+SOURCE_ONNX=/path/to/driving_supercombo.onnx \
+CALIBRATION_NPZ=/path/to/full6_real_logging_calib.npz \
+  scripts/build_supercombo_model.sh install
+```
+
+Then build and upload the complete runtime:
+
+```sh
+K230_BUILD_DIR=build-k230-sdk \
   scripts/upload_to_board.sh root@192.168.219.111
 ```
 
-The uploader verifies the model SHA-256, stops the service, snapshots the
-current runtime to `/root/supercombo_k230/rollback`, verifies the transferred
-model again and leaves the service stopped. To restore the snapshot:
-
-```sh
-scripts/rollback_board.sh root@192.168.219.111
-```
-
-Do not use `K230_RESTART_AFTER_UPLOAD=1` for a first deployment. Start it only
-after completing the parked-car gate below.
+The uploader verifies the selected model hash, stops the service, snapshots the
+installed runtime, verifies the transferred model, and leaves the service
+stopped unless restart is explicitly requested.
 
 ## Vehicle-validation gates
 
-Vehicle control remains disabled until all gates pass in order:
+1. Parked, Panda receive-only: verify camera/model/overlay, thermal behavior,
+   parser health, and K230-camera lane projection with TX disabled.
+2. Closed-course shadow mode: compare curvature and lane selection without
+   steering or longitudinal transmission.
+3. Closed-course lateral-only: low speed, safety driver, immediate disengage.
+4. Longitudinal control: enable only after lead distance and relative-speed
+   output have been reviewed on a current K230 road log.
 
-1. **Parked, Panda receive-only**: start camera/model/overlay with
-   `K230_ENABLE_CONTROL=0`, `K230_PANDA_TX=0`; verify 20 Hz for at least ten
-   minutes, zero parser errors, correct lane/edge overlay and no thermal
-   throttling.
-2. **Closed-course shadow mode**: drive with steering and longitudinal TX still
-   disabled; compare desired curvature, lead distance and lane selection
-   against the previous model over straight, curved and lane-change sections.
-3. **Closed-course lateral-only**: enable steering at low speed with a safety
-   driver and immediate disengagement access. Reject the build for oscillation,
-   path jumps, stale model state or repeated inference overruns.
-4. **Closed-course longitudinal**: enable only after lead probability and
-   distance have been reviewed. The fresh 120-frame comparison showed weaker
-   plan correlation than the earlier held-out sequence, so a moving-vehicle
-   shadow log is mandatory before this step.
-
-The offline and parked-camera gates are complete. A moving-vehicle closed-loop
-test has not been performed by this migration and must not be represented as
-passed.
+The host regression and live K230 full-pipeline runtime gates pass. K230-camera
+road-quality and moving-vehicle closed-loop tests have not been run and must not
+be represented as passed.

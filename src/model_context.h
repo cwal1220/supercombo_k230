@@ -6,7 +6,9 @@
 #include <cstdint>
 
 uint16_t model_float_to_half(float value);
+float model_half_to_float(uint16_t value);
 void model_encode_float16(const float *src, size_t count, uint16_t *dst);
+void model_decode_float16(const uint16_t *src, size_t count, float *dst);
 
 class ModernModelContext
 {

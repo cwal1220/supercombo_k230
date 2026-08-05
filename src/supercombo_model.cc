@@ -1,5 +1,7 @@
 #include "supercombo_model.h"
 
+#include "lane_plan_fusion.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -56,7 +58,8 @@ struct ProfileStats {
     }
 
     void add(uint64_t source_copy_ns, uint64_t preprocess_ns, uint64_t input_ns,
-             uint64_t run_ns, uint64_t history_ns, uint64_t output_ns, uint64_t total_ns)
+             uint64_t run_ns, uint64_t history_ns, uint64_t output_ns,
+             uint64_t total_ns)
     {
         ++count;
         source_copy_ms += ns_to_ms(source_copy_ns);
@@ -105,7 +108,8 @@ bool shape_is(const std::vector<int> &shape, std::initializer_list<int> expected
 SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const AppConfig &config)
     : AIBase(kmodel_file, "Supercombo", debug_mode),
       input_transform_(config, ModelFrame::MedModel),
-      big_input_transform_(config, ModelFrame::SmallBigModel)
+      big_input_transform_(config, ModelFrame::SmallBigModel),
+      lane_plan_fusion_enabled_(config.lane_plan_fusion)
 {
     if (!std::isfinite(config.lateral_action_t) ||
         !std::isfinite(config.longitudinal_action_t) ||
@@ -122,6 +126,8 @@ SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const 
     const float action[2] = {config.lateral_action_t, config.longitudinal_action_t};
     model_encode_float16(traffic, 2, traffic_input_.data());
     model_encode_float16(action, 2, action_input_.data());
+    std::fprintf(stderr, "lane-plan fusion=%s\n",
+                 lane_plan_fusion_enabled_ ? "enabled" : "disabled");
     reset_temporal_state();
 }
 
@@ -159,6 +165,7 @@ void SupercomboModel::reset_temporal_state()
 
 void SupercomboModel::set_desire(int desire)
 {
+    current_desire_ = desire;
     desire_pulse_.fill(0.0f);
     for (int i = 1; i < static_cast<int>(desire_pulse_.size()); ++i) {
         const float current = i == desire ? 1.0f : 0.0f;
@@ -228,8 +235,14 @@ bool SupercomboModel::run_frame_nv12(const uint8_t *nv12, int src_w, int src_h,
     raw_output.assign(output, output + kOutputFloats);
     mapped.unmap().expect("unmap output failed");
     if (!std::all_of(raw_output.begin(), raw_output.end(),
-                     [](float value) { return std::isfinite(value); }) ||
-        !model_context_.set_previous_hidden(raw_output.data() + kHiddenOffset,
+                     [](float value) { return std::isfinite(value); })) {
+        raw_output.clear();
+        reset_temporal_state();
+        return false;
+    }
+    if (lane_plan_fusion_enabled_ && current_desire_ != 3 && current_desire_ != 4)
+        fuse_lane_center_plan(raw_output);
+    if (!model_context_.set_previous_hidden(raw_output.data() + kHiddenOffset,
                                             ModernModelContext::kFeatureCount)) {
         raw_output.clear();
         reset_temporal_state();

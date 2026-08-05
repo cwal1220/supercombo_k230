@@ -16,6 +16,35 @@ std::string env_string(const char *name)
 
 } // namespace
 
+void configure_k230_camera(AppConfig &config, unsigned source_width,
+                           unsigned source_height, bool preserve_env_overrides)
+{
+    if (source_width == 0 || source_height == 0)
+        throw std::invalid_argument("K230 camera geometry requires non-zero dimensions");
+
+    const AppConfig previous = config;
+    config.input_warp_fx = default_input_warp_fx(source_width);
+    config.input_warp_fy = default_input_warp_fy(source_height);
+    config.input_warp_cx = default_input_warp_cx(source_width);
+    config.input_warp_cy = default_input_warp_cy(source_height);
+    config.input_dist_k1 = kK230CameraK1;
+    config.input_dist_k2 = kK230CameraK2;
+    config.input_dist_p1 = kK230CameraP1;
+    config.input_dist_p2 = kK230CameraP2;
+    config.input_dist_k3 = kK230CameraK3;
+
+    if (!preserve_env_overrides) return;
+    if (env_present("SUPERCOMBO_INPUT_WARP_FX")) config.input_warp_fx = previous.input_warp_fx;
+    if (env_present("SUPERCOMBO_INPUT_WARP_FY")) config.input_warp_fy = previous.input_warp_fy;
+    if (env_present("SUPERCOMBO_INPUT_WARP_CX")) config.input_warp_cx = previous.input_warp_cx;
+    if (env_present("SUPERCOMBO_INPUT_WARP_CY")) config.input_warp_cy = previous.input_warp_cy;
+    if (env_present("SUPERCOMBO_INPUT_DIST_K1")) config.input_dist_k1 = previous.input_dist_k1;
+    if (env_present("SUPERCOMBO_INPUT_DIST_K2")) config.input_dist_k2 = previous.input_dist_k2;
+    if (env_present("SUPERCOMBO_INPUT_DIST_P1")) config.input_dist_p1 = previous.input_dist_p1;
+    if (env_present("SUPERCOMBO_INPUT_DIST_P2")) config.input_dist_p2 = previous.input_dist_p2;
+    if (env_present("SUPERCOMBO_INPUT_DIST_K3")) config.input_dist_k3 = previous.input_dist_k3;
+}
+
 bool env_enabled(const char *name)
 {
     const char *value = std::getenv(name);
@@ -86,10 +115,7 @@ AppConfig AppConfig::from_env_defaults()
     config.nv12_crop_height = env_unsigned("SUPERCOMBO_NV12_CROP_HEIGHT", config.nv12_crop_height);
     config.model_fps = env_unsigned("SUPERCOMBO_MODEL_FPS", config.model_fps);
 
-    config.input_warp_fx = default_input_warp_fx(config.nv12_width);
-    config.input_warp_fy = default_input_warp_fy(config.nv12_height);
-    config.input_warp_cx = default_input_warp_cx(config.nv12_width);
-    config.input_warp_cy = default_input_warp_cy(config.nv12_height);
+    configure_k230_camera(config, config.nv12_width, config.nv12_height, false);
 
     config.max_frames = env_unsigned("SUPERCOMBO_MAX_FRAMES", 0);
 
@@ -105,6 +131,7 @@ AppConfig AppConfig::from_env_defaults()
     config.manual_yaw = deg_to_rad(env_float("SUPERCOMBO_CALIB_YAW_DEG", 0.0f));
     config.log_calibration = env_enabled("SUPERCOMBO_LOG_CALIB");
     config.profile = env_enabled("SUPERCOMBO_PROFILE");
+    config.lane_plan_fusion = env_enabled_default("SUPERCOMBO_LANE_PLAN_FUSION", true);
     config.lateral_action_t = env_float("SUPERCOMBO_LAT_ACTION_T", config.lateral_action_t);
     config.longitudinal_action_t = env_float("SUPERCOMBO_LONG_ACTION_T", config.longitudinal_action_t);
 
@@ -112,6 +139,11 @@ AppConfig AppConfig::from_env_defaults()
     config.input_warp_fy = env_float("SUPERCOMBO_INPUT_WARP_FY", config.input_warp_fy);
     config.input_warp_cx = env_float("SUPERCOMBO_INPUT_WARP_CX", config.input_warp_cx);
     config.input_warp_cy = env_float("SUPERCOMBO_INPUT_WARP_CY", config.input_warp_cy);
+    config.input_dist_k1 = env_float("SUPERCOMBO_INPUT_DIST_K1", config.input_dist_k1);
+    config.input_dist_k2 = env_float("SUPERCOMBO_INPUT_DIST_K2", config.input_dist_k2);
+    config.input_dist_p1 = env_float("SUPERCOMBO_INPUT_DIST_P1", config.input_dist_p1);
+    config.input_dist_p2 = env_float("SUPERCOMBO_INPUT_DIST_P2", config.input_dist_p2);
+    config.input_dist_k3 = env_float("SUPERCOMBO_INPUT_DIST_K3", config.input_dist_k3);
     config.input_warp_height = env_float("SUPERCOMBO_INPUT_WARP_HEIGHT", config.input_warp_height);
     config.input_warp_roll = deg_to_rad(env_float_prefer("SUPERCOMBO_INPUT_WARP_ROLL_DEG", "SUPERCOMBO_CALIB_ROLL_DEG", 0.0f));
     config.input_warp_pitch = deg_to_rad(env_float_prefer("SUPERCOMBO_INPUT_WARP_PITCH_DEG", "SUPERCOMBO_CALIB_PITCH_DEG", 0.0f));

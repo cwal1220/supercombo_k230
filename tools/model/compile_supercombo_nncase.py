@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import argparse
-import os
+import collections
+import hashlib
+import json
 import time
 from pathlib import Path
 
@@ -11,6 +13,7 @@ from onnx import TensorProto
 
 ONNX_TO_NUMPY = {
   TensorProto.FLOAT: np.float32,
+  TensorProto.FLOAT16: np.float16,
   TensorProto.UINT8: np.uint8,
   TensorProto.INT8: np.int8,
   TensorProto.UINT16: np.uint16,
@@ -19,6 +22,14 @@ ONNX_TO_NUMPY = {
   TensorProto.INT32: np.int32,
   TensorProto.INT64: np.int64,
 }
+
+
+def sha256_file(path: Path) -> str:
+  digest = hashlib.sha256()
+  with path.open("rb") as f:
+    for chunk in iter(lambda: f.read(1024 * 1024), b""):
+      digest.update(chunk)
+  return digest.hexdigest()
 
 
 def read_model(path: Path) -> bytes:
@@ -44,6 +55,39 @@ def input_specs(path: Path) -> list[tuple[str, tuple[int, ...], np.dtype]]:
       shape.append(int(dim.dim_value))
     specs.append((value.name, tuple(shape), np.dtype(dtype)))
   return specs
+
+
+def model_metadata(path: Path, specs: list[tuple[str, tuple[int, ...], np.dtype]]) -> dict:
+  model = onnx.load(path)
+  input_types = {
+    value.name: TensorProto.DataType.Name(value.type.tensor_type.elem_type)
+    for value in model.graph.input
+  }
+  outputs = []
+  for value in model.graph.output:
+    tensor_type = value.type.tensor_type
+    outputs.append({
+      "name": value.name,
+      "dtype": TensorProto.DataType.Name(tensor_type.elem_type),
+      "shape": [int(dim.dim_value) if dim.dim_value else dim.dim_param or "?"
+                for dim in tensor_type.shape.dim],
+    })
+  return {
+    "model": path.name,
+    "model_size": path.stat().st_size,
+    "model_sha256": sha256_file(path),
+    "inputs": [
+      {
+        "name": name,
+        "shape": list(shape),
+        "numpy_dtype": str(dtype),
+        "onnx_dtype": input_types[name],
+      }
+      for name, shape, dtype in specs
+    ],
+    "outputs": outputs,
+    "op_counts": dict(collections.Counter(node.op_type for node in model.graph.node).most_common()),
+  }
 
 
 def random_int(rng: np.random.Generator, shape: tuple[int, ...], dtype: np.dtype) -> np.ndarray:
@@ -77,15 +121,25 @@ def random_calibration(specs: list[tuple[str, tuple[int, ...], np.dtype]], sampl
 def npz_calibration(path: Path, specs: list[tuple[str, tuple[int, ...], np.dtype]], samples: int | None = None) -> list[list[np.ndarray]]:
   loaded = np.load(path)
   arrays = []
+  sample_count = None
   for name, shape, dtype in specs:
+    if name not in loaded:
+      raise RuntimeError(f"calibration NPZ is missing {name!r}; keys={list(loaded.keys())}")
     arr = loaded[name].astype(dtype)
+    if tuple(arr.shape) == shape:
+      arr = arr.reshape((1,) + shape)
+    elif tuple(arr.shape[1:]) != shape:
+      raise RuntimeError(
+        f"calibration {name!r} has shape {arr.shape}, expected (N,{','.join(map(str, shape))})")
     if samples is not None:
       arr = arr[:samples]
-    sample_list = []
-    for x in arr:
-      if tuple(x.shape) == shape[1:]:
-        x = x.reshape(shape)
-      sample_list.append(np.ascontiguousarray(x))
+    if arr.shape[0] == 0:
+      raise RuntimeError(f"calibration {name!r} has no samples")
+    if sample_count is None:
+      sample_count = arr.shape[0]
+    elif sample_count != arr.shape[0]:
+      raise RuntimeError(f"calibration sample count mismatch for {name!r}")
+    sample_list = [np.ascontiguousarray(x.reshape(shape)) for x in arr]
     arrays.append(sample_list)
   return arrays
 
@@ -108,8 +162,11 @@ def main() -> None:
   parser.add_argument("--use-mix-quant", action="store_true")
   parser.add_argument("--quant-scheme-strict", action="store_true")
   parser.add_argument("--use-mse-quant-w", action="store_true")
+  parser.add_argument("--finetune-weights-method", default="NoFineTuneWeights")
   parser.add_argument("--dump-quant-error", action="store_true")
   parser.add_argument("--export-quant-scheme", action="store_true")
+  parser.add_argument("--export-weight-range-by-channel", action="store_true")
+  parser.add_argument("--metadata-json", type=Path)
   args = parser.parse_args()
 
   args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +182,27 @@ def main() -> None:
   compile_options.preprocess = False
 
   specs = input_specs(args.model)
+  metadata = model_metadata(args.model, specs)
+  metadata.update({
+    "target": args.target,
+    "ptq": args.ptq,
+    "samples": args.samples if args.ptq else None,
+    "calibration_npz": args.calib_npz.name if args.calib_npz else None,
+    "calibration_npz_sha256": sha256_file(args.calib_npz) if args.calib_npz else None,
+    "calibrate_method": args.calibrate_method if args.ptq else None,
+    "quant_type": args.quant_type if args.ptq else None,
+    "w_quant_type": args.w_quant_type if args.ptq else None,
+    "use_mix_quant": args.use_mix_quant if args.ptq else None,
+    "use_mse_quant_w": args.use_mse_quant_w if args.ptq else None,
+    "finetune_weights_method": args.finetune_weights_method if args.ptq else None,
+    "dump_quant_error": args.dump_quant_error if args.ptq else None,
+    "export_quant_scheme": args.export_quant_scheme if args.ptq else None,
+    "export_weight_range_by_channel": (
+      args.export_weight_range_by_channel if args.ptq else None
+    ),
+    "quant_scheme": args.quant_scheme.name if args.quant_scheme else None,
+    "quant_scheme_strict_mode": args.quant_scheme_strict if args.ptq else None,
+  })
   compiler = nncase.Compiler(compile_options)
   compiler.import_onnx(read_model(args.model), nncase.ImportOptions())
 
@@ -137,8 +215,10 @@ def main() -> None:
     ptq_options.w_quant_type = args.w_quant_type
     ptq_options.use_mix_quant = args.use_mix_quant
     ptq_options.use_mse_quant_w = args.use_mse_quant_w
+    ptq_options.finetune_weights_method = args.finetune_weights_method
     ptq_options.dump_quant_error = args.dump_quant_error
     ptq_options.export_quant_scheme = args.export_quant_scheme
+    ptq_options.export_weight_range_by_channel = args.export_weight_range_by_channel
     if args.quant_scheme is not None:
       ptq_options.quant_scheme = str(args.quant_scheme)
     ptq_options.quant_scheme_strict_mode = args.quant_scheme_strict
@@ -150,8 +230,18 @@ def main() -> None:
   elapsed = time.monotonic() - start
 
   args.out.write_bytes(compiler.gencode_tobytes())
+  metadata.update({
+    "compile_elapsed_s": elapsed,
+    "kmodel": args.out.name,
+    "kmodel_size": args.out.stat().st_size,
+    "kmodel_sha256": sha256_file(args.out),
+  })
   print(f"compiled {args.out} in {elapsed:.2f}s")
   print(f"kmodel_size={args.out.stat().st_size / 1024 / 1024:.2f} MiB")
+  print(f"kmodel_sha256={metadata['kmodel_sha256']}")
+  if args.metadata_json:
+    args.metadata_json.parent.mkdir(parents=True, exist_ok=True)
+    args.metadata_json.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

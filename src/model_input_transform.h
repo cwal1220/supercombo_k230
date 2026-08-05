@@ -26,6 +26,8 @@ public:
     void nv12_to_yuv6_warped(const uint8_t *nv12, int src_w, int src_h, uint8_t *out);
     void nv12_to_yuv6_warped_scalar(const uint8_t *nv12, int src_w, int src_h, float *out);
     void nv12_to_yuv6_warped_rvv(const uint8_t *nv12, int src_w, int src_h, float *out);
+    void nv12_to_yuv6_warped_scalar(const uint8_t *nv12, int src_w, int src_h, uint8_t *out);
+    void nv12_to_yuv6_warped_rvv(const uint8_t *nv12, int src_w, int src_h, uint8_t *out);
     static bool rvv_available();
 
 private:
@@ -50,7 +52,8 @@ private:
     void build_sample_map(const float *projection, int src_w, int src_h,
                           int dst_w, int dst_h, int src_stride_pixels,
                           int bytes_per_pixel, int dst_scale,
-                          int dst_x_offset, int dst_y_offset, SampleMap &map) const;
+                          int dst_x_offset, int dst_y_offset,
+                          float camera_scale, SampleMap &map) const;
     static uint8_t sample(const uint8_t *base, const SampleMap &map,
                           size_t index, int channel);
     void warp_scalar(const uint8_t *nv12, int src_w, int src_h, float *out) const;
@@ -66,6 +69,11 @@ private:
     float fy_ = kDefaultInputWarpFy;
     float cx_ = kDefaultInputWarpCx;
     float cy_ = kDefaultInputWarpCy;
+    float dist_k1_ = 0.0f;
+    float dist_k2_ = 0.0f;
+    float dist_p1_ = 0.0f;
+    float dist_p2_ = 0.0f;
+    float dist_k3_ = 0.0f;
     float height_ = 1.22f;
     float roll_ = 0.0f;
     float pitch_ = 0.0f;

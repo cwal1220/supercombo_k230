@@ -26,12 +26,26 @@ void rotation_from_rpy(float roll, float pitch, float yaw, float *rot)
 
 } // namespace
 
-ProjectionState make_projection_state(float roll, float pitch, float yaw)
+ProjectionState make_projection_state(float roll, float pitch, float yaw,
+                                      const AppConfig *config)
 {
     ProjectionState state {};
     state.roll = roll;
     state.pitch = pitch;
     state.yaw = yaw;
+    if (config != nullptr) {
+        state.camera_fx = config->input_warp_fx;
+        state.camera_fy = config->input_warp_fy;
+        state.camera_cx = config->input_warp_cx;
+        state.camera_cy = config->input_warp_cy;
+        state.camera_width = static_cast<float>(config->nv12_width);
+        state.camera_height = static_cast<float>(config->nv12_height);
+        state.dist_k1 = config->input_dist_k1;
+        state.dist_k2 = config->input_dist_k2;
+        state.dist_p1 = config->input_dist_p1;
+        state.dist_p2 = config->input_dist_p2;
+        state.dist_k3 = config->input_dist_k3;
+    }
 
     float rot[9] = {};
     rotation_from_rpy(roll, pitch, yaw, rot);
@@ -55,6 +69,17 @@ ProjectionState make_projection_state(float roll, float pitch, float yaw)
     return state;
 }
 
+ProjectionState make_projection_state(float roll, float pitch, float yaw)
+{
+    return make_projection_state(roll, pitch, yaw, nullptr);
+}
+
+ProjectionState make_projection_state(float roll, float pitch, float yaw,
+                                      const AppConfig &config)
+{
+    return make_projection_state(roll, pitch, yaw, &config);
+}
+
 bool project_point(const ProjectionState &projection, float x_forward, float y_left, float z_up,
                    int width, int height, int *px, int *py)
 {
@@ -68,15 +93,24 @@ bool project_point(const ProjectionState &projection, float x_forward, float y_l
 
     const float landscape_w = 800.0f;
     const float landscape_h = 480.0f;
-    const float fx = default_input_warp_fx(static_cast<unsigned>(landscape_w));
-    const float fy = default_input_warp_fy(static_cast<unsigned>(landscape_h));
-    const float calibrated_cx = default_input_warp_cx(static_cast<unsigned>(landscape_w));
-    const float calibrated_cy = default_input_warp_cy(static_cast<unsigned>(landscape_h));
+    const float fx = projection.camera_fx * landscape_w / projection.camera_width;
+    const float fy = projection.camera_fy * landscape_h / projection.camera_height;
+    const float calibrated_cx = projection.camera_cx * landscape_w / projection.camera_width;
+    const float calibrated_cy = projection.camera_cy * landscape_h / projection.camera_height;
     const float cx = landscape_w - 1.0f - calibrated_cx;
     const float cy = landscape_h - 1.0f - calibrated_cy;
 
-    const float u_land = fx * vx / vz + cx;
-    const float v_land = fy * vy / vz + cy;
+    const float nx = vx / vz;
+    const float ny = vy / vz;
+    const float r2 = nx * nx + ny * ny;
+    const float radial = 1.0f + projection.dist_k1 * r2 +
+        projection.dist_k2 * r2 * r2 + projection.dist_k3 * r2 * r2 * r2;
+    const float distorted_x = nx * radial - 2.0f * projection.dist_p1 * nx * ny -
+        projection.dist_p2 * (r2 + 2.0f * nx * nx);
+    const float distorted_y = ny * radial - projection.dist_p1 * (r2 + 2.0f * ny * ny) -
+        2.0f * projection.dist_p2 * nx * ny;
+    const float u_land = fx * distorted_x + cx;
+    const float v_land = fy * distorted_y + cy;
 
     if (width > height) {
         *px = static_cast<int>(std::round(u_land));

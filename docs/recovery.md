@@ -14,7 +14,7 @@ Required runtime artifact:
 
 Required SHA-256:
 
-`908ec08594776d0060e26dbd7adca68831dc88433a175940a7fe89cce30c151d`
+`49ed812db587d48c6dfdcc26d8e42d2e69a5d0717527bb3dd74dfe4f088bfed1`
 
 The exact provenance, ABI, board measurements and staged activation gates are
 in `docs/modern_model_migration.md`.

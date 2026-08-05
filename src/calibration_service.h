@@ -35,6 +35,7 @@ private:
     float persisted_rpy_[3] = {};
     std::string params_dir_;
     std::string calibration_path_;
+    AppConfig projection_config_;
 
     OnlineCalibrator calibrator_;
     OnlineCalibrator::Snapshot last_snapshot_{};

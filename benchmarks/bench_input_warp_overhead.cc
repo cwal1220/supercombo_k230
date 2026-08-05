@@ -160,6 +160,10 @@ int main(int argc, char **argv)
     std::vector<float> med_rvv(kYuv6Floats, 0.0f);
     std::vector<float> sbig_scalar(kYuv6Floats, 0.0f);
     std::vector<float> sbig_rvv(kYuv6Floats, 0.0f);
+    std::vector<uint8_t> med_scalar_u8(kYuv6Floats, 0);
+    std::vector<uint8_t> med_rvv_u8(kYuv6Floats, 0);
+    std::vector<uint8_t> sbig_scalar_u8(kYuv6Floats, 0);
+    std::vector<uint8_t> sbig_rvv_u8(kYuv6Floats, 0);
     fill_nv12(source_nv12, kSourceW, kSourceH);
 
     AppConfig source_config;
@@ -175,11 +179,21 @@ int main(int argc, char **argv)
         source_nv12.data(), kSourceW, kSourceH, sbig_scalar.data());
     sbig.nv12_to_yuv6_warped_rvv(
         source_nv12.data(), kSourceW, kSourceH, sbig_rvv.data());
+    med.nv12_to_yuv6_warped_scalar(
+        source_nv12.data(), kSourceW, kSourceH, med_scalar_u8.data());
+    med.nv12_to_yuv6_warped_rvv(
+        source_nv12.data(), kSourceW, kSourceH, med_rvv_u8.data());
+    sbig.nv12_to_yuv6_warped_scalar(
+        source_nv12.data(), kSourceW, kSourceH, sbig_scalar_u8.data());
+    sbig.nv12_to_yuv6_warped_rvv(
+        source_nv12.data(), kSourceW, kSourceH, sbig_rvv_u8.data());
 
     const bool med_exact = std::memcmp(
         med_scalar.data(), med_rvv.data(), med_scalar.size() * sizeof(float)) == 0;
     const bool sbig_exact = std::memcmp(
         sbig_scalar.data(), sbig_rvv.data(), sbig_scalar.size() * sizeof(float)) == 0;
+    const bool med_u8_exact = med_scalar_u8 == med_rvv_u8;
+    const bool sbig_u8_exact = sbig_scalar_u8 == sbig_rvv_u8;
     const double med_scalar_ms = bench_ms(runs, [&] {
         med.nv12_to_yuv6_warped_scalar(
             source_nv12.data(), kSourceW, kSourceH, med_scalar.data());
@@ -196,6 +210,22 @@ int main(int argc, char **argv)
         sbig.nv12_to_yuv6_warped_rvv(
             source_nv12.data(), kSourceW, kSourceH, sbig_rvv.data());
     });
+    const double med_scalar_u8_ms = bench_ms(runs, [&] {
+        med.nv12_to_yuv6_warped_scalar(
+            source_nv12.data(), kSourceW, kSourceH, med_scalar_u8.data());
+    });
+    const double med_rvv_u8_ms = bench_ms(runs, [&] {
+        med.nv12_to_yuv6_warped_rvv(
+            source_nv12.data(), kSourceW, kSourceH, med_rvv_u8.data());
+    });
+    const double sbig_scalar_u8_ms = bench_ms(runs, [&] {
+        sbig.nv12_to_yuv6_warped_scalar(
+            source_nv12.data(), kSourceW, kSourceH, sbig_scalar_u8.data());
+    });
+    const double sbig_rvv_u8_ms = bench_ms(runs, [&] {
+        sbig.nv12_to_yuv6_warped_rvv(
+            source_nv12.data(), kSourceW, kSourceH, sbig_rvv_u8.data());
+    });
 
     std::printf("rvv_available=%d med_bit_exact=%d sbig_bit_exact=%d\n",
                 ModelInputTransform::rvv_available() ? 1 : 0,
@@ -204,5 +234,10 @@ int main(int argc, char **argv)
                 med_scalar_ms, med_rvv_ms, med_scalar_ms / med_rvv_ms);
     std::printf("sbig_scalar_ms=%.3f sbig_rvv_ms=%.3f speedup=%.2fx\n",
                 sbig_scalar_ms, sbig_rvv_ms, sbig_scalar_ms / sbig_rvv_ms);
-    return med_exact && sbig_exact ? 0 : 1;
+    std::printf("u8_exact=%d/%d med_scalar_ms=%.3f med_rvv_ms=%.3f speedup=%.2fx "
+                "sbig_scalar_ms=%.3f sbig_rvv_ms=%.3f speedup=%.2fx\n",
+                med_u8_exact ? 1 : 0, sbig_u8_exact ? 1 : 0,
+                med_scalar_u8_ms, med_rvv_u8_ms, med_scalar_u8_ms / med_rvv_u8_ms,
+                sbig_scalar_u8_ms, sbig_rvv_u8_ms, sbig_scalar_u8_ms / sbig_rvv_u8_ms);
+    return med_exact && sbig_exact && med_u8_exact && sbig_u8_exact ? 0 : 1;
 }

@@ -287,7 +287,8 @@ public:
             std::fprintf(stderr, "k230_overlayd: piezo buzzer worker unavailable\n");
         default_projection_ = make_projection_state(config.manual_roll,
                                                     config.manual_pitch,
-                                                    config.manual_yaw);
+                                                    config.manual_yaw,
+                                                    config);
     }
 
     ~K230OverlayDisplay()

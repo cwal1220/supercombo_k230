@@ -1,0 +1,120 @@
+{
+  "model": "driving_supercombo.k230.onnx",
+  "model_size": 121107768,
+  "model_sha256": "a5f92c39da3db830d9adbb36005aa35d1dc5ce8569fb4c90f8a2715af092e675",
+  "inputs": [
+    {
+      "name": "img",
+      "shape": [
+        1,
+        12,
+        128,
+        256
+      ],
+      "numpy_dtype": "uint8",
+      "onnx_dtype": "UINT8"
+    },
+    {
+      "name": "big_img",
+      "shape": [
+        1,
+        12,
+        128,
+        256
+      ],
+      "numpy_dtype": "uint8",
+      "onnx_dtype": "UINT8"
+    },
+    {
+      "name": "features_buffer",
+      "shape": [
+        1,
+        24,
+        512
+      ],
+      "numpy_dtype": "float16",
+      "onnx_dtype": "FLOAT16"
+    },
+    {
+      "name": "desire_pulse",
+      "shape": [
+        1,
+        25,
+        8
+      ],
+      "numpy_dtype": "float16",
+      "onnx_dtype": "FLOAT16"
+    },
+    {
+      "name": "traffic_convention",
+      "shape": [
+        1,
+        2
+      ],
+      "numpy_dtype": "float16",
+      "onnx_dtype": "FLOAT16"
+    },
+    {
+      "name": "action_t",
+      "shape": [
+        1,
+        2
+      ],
+      "numpy_dtype": "float16",
+      "onnx_dtype": "FLOAT16"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "outputs",
+      "shape": [
+        1,
+        2576
+      ],
+      "onnx_dtype": "FLOAT"
+    }
+  ],
+  "op_counts": {
+    "Gemm": 90,
+    "Mul": 72,
+    "Relu": 64,
+    "Conv": 62,
+    "Add": 53,
+    "Reshape": 49,
+    "Gather": 26,
+    "Sigmoid": 24,
+    "MatMul": 20,
+    "Where": 8,
+    "Softmax": 8,
+    "Concat": 6,
+    "Cast": 4,
+    "Sqrt": 4,
+    "Div": 4,
+    "Identity": 3,
+    "DequantizeLinear": 2,
+    "Clip": 2,
+    "Unsqueeze": 2,
+    "Sub": 2,
+    "GatherND": 1
+  },
+  "target": "k230",
+  "ptq": true,
+  "samples": 288,
+  "calibration_npz": "calibration.npz",
+  "calibration_npz_sha256": "aa13949b1a99128de65288747e6662420fd3eac209e2d55c99b0b30c0c18d8cb",
+  "calibrate_method": "NoClip",
+  "quant_type": "int16",
+  "w_quant_type": "uint8",
+  "use_mix_quant": false,
+  "use_mse_quant_w": false,
+  "finetune_weights_method": "NoFineTuneWeights",
+  "export_quant_scheme": false,
+  "export_weight_range_by_channel": false,
+  "dump_quant_error": false,
+  "quant_scheme": null,
+  "quant_scheme_strict_mode": false,
+  "compile_elapsed_s": 2828.684050291,
+  "kmodel": "driving_supercombo.k230.int16a_uint8w_noclip.kmodel",
+  "kmodel_size": 32049832,
+  "kmodel_sha256": "49ed812db587d48c6dfdcc26d8e42d2e69a5d0717527bb3dd74dfe4f088bfed1"
+}

@@ -119,7 +119,8 @@ CalibrationService::CalibrationService(const AppConfig &config)
       manual_override_(config.manual_calibration),
       log_enabled_(config.log_calibration),
       params_dir_(k230_params_dir()),
-      calibration_path_(k230_param_path("calibration.json"))
+      calibration_path_(k230_param_path("calibration.json")),
+      projection_config_(config)
 {
     fixed_rpy_[0] = config.manual_roll;
     fixed_rpy_[1] = config.manual_pitch;
@@ -153,7 +154,8 @@ CalibrationService::CalibrationService(const AppConfig &config)
         if (auto_enabled_) {
             calibrator_.output_rpy(online_rpy_);
             last_snapshot_ = calibrator_.snapshot();
-            projection_ = make_projection_state(online_rpy_[0], online_rpy_[1], online_rpy_[2]);
+            projection_ = make_projection_state(online_rpy_[0], online_rpy_[1], online_rpy_[2],
+                                                projection_config_);
         } else {
             copy_rpy(fixed_rpy_, stored.rpy);
             last_snapshot_ = calibrator_.snapshot();
@@ -167,7 +169,8 @@ CalibrationService::CalibrationService(const AppConfig &config)
     const char *mode = manual_override_ ? "manual" :
         (can_apply_online() ? (restored_ ? "auto-pose-restored" : "auto-pose-live") :
          (restored_ ? "stored" : "fixed"));
-    std::fprintf(stderr, "calibration mode=%s overlay_auto=%d manual_override=%d\n",
+    std::fprintf(stderr,
+                 "calibration mode=%s overlay_auto=%d manual_override=%d camera=k230_ov5647\n",
                  mode, can_apply_online() ? 1 : 0, manual_override_ ? 1 : 0);
     const ProjectionState current = projection_;
     std::fprintf(stderr,
@@ -178,7 +181,8 @@ CalibrationService::CalibrationService(const AppConfig &config)
 
 void CalibrationService::set_fixed_projection()
 {
-    projection_ = make_projection_state(fixed_rpy_[0], fixed_rpy_[1], fixed_rpy_[2]);
+    projection_ = make_projection_state(fixed_rpy_[0], fixed_rpy_[1], fixed_rpy_[2],
+                                        projection_config_);
 }
 
 void CalibrationService::input_rpy(float rpy[3]) const
@@ -207,7 +211,8 @@ void CalibrationService::update(const ParsedModelOutput &output, float v_ego)
     calibrator_.output_rpy(online_rpy_);
     projection_ = make_projection_state(online_rpy_[0],
                                         online_rpy_[1],
-                                        online_rpy_[2]);
+                                        online_rpy_[2],
+                                        projection_config_);
 
     maybe_persist(result);
     maybe_log(result);

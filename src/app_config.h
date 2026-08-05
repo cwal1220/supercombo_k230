@@ -17,6 +17,11 @@ constexpr float kK230CameraFx = 1625.7416788144435f;
 constexpr float kK230CameraFy = 1585.9830269782024f;
 constexpr float kK230CameraCx = 946.13450988811394f;
 constexpr float kK230CameraCy = 537.34063862123787f;
+constexpr float kK230CameraK1 = 0.124801017f;
+constexpr float kK230CameraK2 = -0.930510234f;
+constexpr float kK230CameraP1 = 0.000743543609f;
+constexpr float kK230CameraP2 = 0.000532516864f;
+constexpr float kK230CameraK3 = 1.30742029f;
 constexpr float default_input_warp_fx(unsigned source_width)
 {
     return kK230CameraFx * static_cast<float>(source_width) /
@@ -65,6 +70,7 @@ struct AppConfig {
     float manual_yaw = 0.0f;
     bool log_calibration = false;
     bool profile = false;
+    bool lane_plan_fusion = true;
 
     // Modern openpilot policy latency inputs, in seconds.
     float lateral_action_t = 0.2f;
@@ -74,6 +80,11 @@ struct AppConfig {
     float input_warp_fy = kDefaultInputWarpFy;
     float input_warp_cx = kDefaultInputWarpCx;
     float input_warp_cy = kDefaultInputWarpCy;
+    float input_dist_k1 = kK230CameraK1;
+    float input_dist_k2 = kK230CameraK2;
+    float input_dist_p1 = kK230CameraP1;
+    float input_dist_p2 = kK230CameraP2;
+    float input_dist_k3 = kK230CameraK3;
     float input_warp_height = 1.22f;
     float input_warp_roll = 0.0f;
     float input_warp_pitch = 0.0f;
@@ -85,6 +96,9 @@ struct AppConfig {
 
     bool replay_enabled() const { return !replay_nv12_path.empty(); }
 };
+
+void configure_k230_camera(AppConfig &config, unsigned source_width,
+                           unsigned source_height, bool preserve_env_overrides = true);
 
 bool env_enabled(const char *name);
 bool env_enabled_default(const char *name, bool default_value);

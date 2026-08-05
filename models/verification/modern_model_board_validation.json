@@ -2,90 +2,52 @@
   "date": "2026-08-05",
   "board": "Kendryte K230 / 01Studio",
   "branch": "feat/modern-openpilot-k230",
-  "model_sha256": "908ec08594776d0060e26dbd7adca68831dc88433a175940a7fe89cce30c151d",
+  "model_sha256": "49ed812db587d48c6dfdcc26d8e42d2e69a5d0717527bb3dd74dfe4f088bfed1",
+  "camera": {
+    "name": "k230_ov5647",
+    "capture_size": [640, 360],
+    "reference_size": [1920, 1080],
+    "intrinsics": [1625.7416788144435, 1585.9830269782024, 946.13450988811394, 537.34063862123787],
+    "distortion": [0.124801017, -0.930510234, 0.000743543609, 0.000532516864, 1.30742029]
+  },
   "result": {
-    "offline_runtime_gate": "pass",
-    "parked_camera_gate": "pass",
+    "host_regression_gate": "pass",
+    "live_full_pipeline_runtime_gate": "pass",
+    "k230_camera_road_quality_gate": "not_run",
     "moving_vehicle_closed_loop_gate": "not_run",
-    "control_enable_recommendation": "keep disabled until the staged road-test gates in docs/modern_model_migration.md pass"
+    "control_enable_recommendation": "validate a current K230-camera road log in shadow mode before closed-loop use"
   },
-  "standalone_kmodel": {
-    "frames": 120,
-    "warmup_frames": 3,
-    "npu_run_mean_ms": 33.729,
-    "total_mean_ms": 34.692,
-    "throughput_fps": 28.825
-  },
-  "full_runtime_replay": {
-    "frames": 1200,
-    "errors": 0,
-    "throughput_fps": 22.48,
-    "steady_samples": 1195,
-    "latency_ms": {
-      "mean": 44.102,
-      "p50": 43.803,
-      "p95": 46.424,
-      "p99": 47.490,
-      "max": 48.484
-    },
-    "over_50_ms": 0
-  },
-  "live_camera_runtime": {
-    "model_frames": 1200,
-    "camera_frames": 2000,
+  "live_full_pipeline": {
+    "measurement_seconds": 45,
+    "model_frames": 901,
+    "model_fps": 20.0222,
+    "camera_fps": 29.987,
+    "control_hz": 100.0,
     "model_errors": 0,
     "camera_errors": 0,
-    "camera_fps": 29.99,
-    "steady_model_cadence_fps": 20.003,
-    "steady_latency_samples": 1195,
-    "latency_ms": {
-      "mean": 46.276,
-      "p50": 46.027,
-      "p95": 49.209,
-      "p99": 50.282,
-      "max": 51.783
-    },
-    "over_50_ms": 23,
-    "over_50_ms_fraction": 0.01925,
-    "cadence_samples": 1194,
-    "cadence_interval_ms": {
-      "mean": 49.993,
-      "p95": 54.661,
-      "p99": 56.335,
-      "max": 57.882
-    }
+    "model_scheduler": "SCHED_RR:1",
+    "model_nice": -15
   },
-  "quality_evidence": {
-    "held_out_96_frame_sequence": {
-      "overall_cosine": 0.923582,
-      "plan_cosine": 0.906119,
-      "lane_line_cosine": 0.956611,
-      "road_edge_cosine": 0.934028,
-      "hidden_state_cosine": 0.840204
-    },
-    "fresh_local_120_frame_sequence": {
-      "overall_cosine": 0.960342,
-      "lane_line_cosine": 0.987518,
-      "road_edge_cosine": 0.989939,
-      "plan_cosine": 0.596157,
-      "note": "This comparison uses a separately captured reference path and is retained as a warning; it is not treated as a closed-loop plan-quality pass."
-    },
-    "runtime_output_sanity": {
-      "frames": 120,
-      "all_finite": true,
-      "parser_valid_frames": 120,
-      "plan_last_x_m_range": [48.56, 66.61],
-      "plan_abs_y_m_p95": 0.553,
-      "plan_abs_y_m_max": 2.024,
-      "minimum_x_increment_m": 0.055
-    }
+  "preprocessing": {
+    "kernel": "combined NV12 UV RVV bilinear warp",
+    "scalar_rvv_bit_exact": true,
+    "medmodel_scalar_ms": 10.028,
+    "medmodel_rvv_ms": 7.199,
+    "sbigmodel_scalar_ms": 10.600,
+    "sbigmodel_rvv_ms": 7.743
   },
   "host_regression": {
     "model_context": "pass",
+    "lane_plan_fusion": "pass",
+    "camera_geometry_and_distortion": "pass",
     "modern_output_parser": "pass",
     "direct_uint8_warp_bit_exact": true,
     "opencl_warp_worst_mean_abs_pixel_error": 0.314,
-    "opencl_warp_worst_max_abs_pixel_error": 7,
-    "control_and_can_checks": "pass"
+    "opencl_warp_worst_max_abs_pixel_error": 7
+  },
+  "deployment": {
+    "installed_board_model_sha256": "49ed812db587d48c6dfdcc26d8e42d2e69a5d0717527bb3dd74dfe4f088bfed1",
+    "service_state_after_validation": "running",
+    "rollback_directory": "/root/supercombo_k230/rollback_perf_20260805"
   }
 }

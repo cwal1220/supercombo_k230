@@ -37,5 +37,7 @@ Available utilities:
 - `bench_ai2d_resize`: K230 AI2D crop/resize timing experiment.
 - `sequence_runner`: run a prebuilt tensor sequence through a kmodel and dump
   raw outputs.
+- `check_lane_plan_fusion`: verify the confidence, lane-width, lateral-position,
+  and yaw guards for the lane-centered policy correction.
 - `probe_drm_planes`: inspect DRM planes and optional ARGB plane commit.
 - `check_model_output_parser`: sanity-check one `SCODMP1` raw-output dump.
