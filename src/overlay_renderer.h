@@ -36,6 +36,7 @@ struct OverlayHudState {
     DepartureAlertType departure_alert_type = DepartureAlertType::none;
     uint32_t departure_alert_event_id = 0;
     bool green_light_alert_armed = false;
+    char engage_alert_message[64] = {};
     bool tpms_valid = false;
     int tpms_unit = 0;
     float tpms_pressure_fl = 0.0f;

@@ -30,10 +30,15 @@ volatile sig_atomic_t g_reload_params = 0;
 constexpr uint32_t kExpectedPandaSafetyModel = 24;
 constexpr uint32_t kExpectedPandaSafetyParam = 0;
 constexpr uint64_t kPandaStateTimeoutNs = 1100000000ULL;
+constexpr uint64_t kPandaHealthHoldNs = 100000000ULL;
 constexpr uint64_t kAlertModelTimeoutNs = 500000000ULL;
 constexpr float kLeadProbabilityThreshold = 0.5f;
 constexpr float kRadarToCameraDistanceM = 1.52f;
 constexpr uint64_t kMaxCanRxAgeNs = 100000000ULL;
+/* 잘못된 모델 프레임 하나 때문에 LKAS active가 깜박이지 않게 한다. 모델
+ * 생산자가 정상 타임아웃 안에 있을 때만 마지막 유효 경로를 유지하며, 모델이
+ * 멈추거나 계속 잘못되면 즉시 제어를 해제한다. */
+constexpr uint64_t kPathInvalidHoldNs = 150000000ULL;
 constexpr int kParamPollIntervalMs = 100;
 
 void stop_signal_handler(int) {
@@ -371,12 +376,25 @@ int main() {
     unsigned ticks = 0;
     unsigned misses = 0;
     K7LateralControlResult last_result;
+    uint32_t engage_event_id = 0;
+    uint32_t disengage_event_id = 0;
+    uint32_t engage_reject_event_id = 0;
+    char engage_reject_block[32] = {};
+    bool have_previous_engaged = false;
+    bool previous_engaged = false;
+    bool have_previous_active = false;
+    bool previous_active = false;
+    LateralPath last_usable_path;
+    uint64_t last_usable_path_model_timestamp_ns = 0;
+    bool have_last_panda_ready = false;
+    bool last_panda_controls_allowed = false;
+    uint64_t last_panda_ready_ns = 0;
 
     while (!g_stop) {
       next_tick += std::chrono::milliseconds(10);
       const auto work_start = Clock::now();
       const double now_s = std::chrono::duration<double>(work_start - start).count();
-      const uint64_t now_ns = k230_now_ns();
+      const uint64_t can_now_ns = k230_now_ns();
 
       const bool reload_requested = g_reload_params != 0;
       if (reload_requested) g_reload_params = 0;
@@ -428,7 +446,7 @@ int main() {
 
       K230CanBatch can_batch;
       while (can_sub.pop(&can_batch)) {
-        if (!k230_can_batch_is_fresh(can_batch, now_ns, kMaxCanRxAgeNs)) {
+        if (!k230_can_batch_is_fresh(can_batch, can_now_ns, kMaxCanRxAgeNs)) {
           ++stale_can_batches;
           continue;
         }
@@ -454,25 +472,119 @@ int main() {
       }
       lateral_target = lateral_planner.latest();
 
+      /* IPC를 읽는 동안 새 모델/Panda 상태가 발행될 수 있으므로 freshness
+       * 판정에는 공유 상태를 읽은 직후의 시간을 사용한다. */
+      const uint64_t now_ns = k230_now_ns();
+
       const bool panda_state_fresh =
           panda_state.timestamp_ns != 0 && now_ns >= panda_state.timestamp_ns &&
           now_ns - panda_state.timestamp_ns <= kPandaStateTimeoutNs;
+      const bool panda_transport_ready =
+          panda_state_fresh && panda_state.connected != 0 &&
+          panda_state.comms_healthy != 0 && panda_state.tx_enabled != 0;
+      const bool panda_safety_ready =
+          panda_state.heartbeat_lost == 0 &&
+          panda_state.safety_mode == kExpectedPandaSafetyModel &&
+          panda_state.safety_param == kExpectedPandaSafetyParam;
+      const bool panda_ready_raw = panda_transport_ready && panda_safety_ready;
+      const bool panda_controls_allowed_raw =
+          panda_ready_raw && panda_state.controls_allowed != 0;
+      const bool panda_controls_off_explicit =
+          panda_ready_raw && panda_state.controls_allowed == 0;
+      if (panda_ready_raw) {
+        have_last_panda_ready = true;
+        last_panda_controls_allowed = panda_controls_allowed_raw;
+        last_panda_ready_ns = now_ns;
+      }
+      const bool panda_health_hold =
+          !panda_ready_raw && !panda_controls_off_explicit &&
+          have_last_panda_ready && now_ns >= last_panda_ready_ns &&
+          now_ns - last_panda_ready_ns <= kPandaHealthHoldNs;
       const bool panda_ready =
-          config.force_engaged ||
-          (panda_state_fresh && panda_state.connected != 0 &&
-           panda_state.comms_healthy != 0 && panda_state.tx_enabled != 0 &&
-           panda_state.heartbeat_lost == 0 &&
-           panda_state.safety_mode == kExpectedPandaSafetyModel &&
-           panda_state.safety_param == kExpectedPandaSafetyParam);
+          config.force_engaged || panda_ready_raw || panda_health_hold;
       const bool panda_controls_allowed =
-          config.force_engaged || (panda_ready && panda_state.controls_allowed != 0);
-      const LateralPath path = k7_path_from_model_state(
+          config.force_engaged || panda_controls_allowed_raw ||
+          (panda_health_hold && last_panda_controls_allowed);
+      const uint64_t model_timeout_ns =
+          static_cast<unsigned long long>(config.driving_params.model_timeout_ms) *
+          1000000ULL;
+      const LateralPath raw_path = k7_path_from_model_state(
           model, now_ns,
-          static_cast<unsigned long long>(config.driving_params.model_timeout_ms) * 1000000ULL);
+          model_timeout_ns);
+      LateralPath path = raw_path;
+      bool path_hold_applied = false;
+      if (raw_path.usable_for_steering) {
+        last_usable_path = raw_path;
+        last_usable_path_model_timestamp_ns = model.model_timestamp_ns;
+      } else if (raw_path.invalid_reason == "path_invalid" &&
+                 last_usable_path.usable_for_steering &&
+                 model.model_timestamp_ns != 0 &&
+                 now_ns >= model.model_timestamp_ns &&
+                 now_ns - model.model_timestamp_ns <= model_timeout_ns &&
+                 last_usable_path_model_timestamp_ns != 0 &&
+                 now_ns >= last_usable_path_model_timestamp_ns &&
+                 now_ns - last_usable_path_model_timestamp_ns <=
+                     kPathInvalidHoldNs) {
+        path = last_usable_path;
+        path.invalid_reason.clear();
+        path_hold_applied = true;
+      }
       const int frame = control_frame++;
       last_result = controller.update(path, lateral_target, vehicle, now_s,
                                       frame, panda_ready,
                                       panda_controls_allowed);
+      if (last_result.engage_rejected) {
+        if (++engage_reject_event_id == 0) engage_reject_event_id = 1;
+        std::snprintf(engage_reject_block, sizeof(engage_reject_block), "%s",
+                      last_result.active_block.c_str());
+        std::fprintf(stderr,
+                     "k230_k7_controlsd: engage rejected block=%s event=%u\n",
+                     engage_reject_block, engage_reject_event_id);
+      } else if (have_previous_engaged &&
+                 last_result.engaged != previous_engaged) {
+        if (last_result.engaged) {
+          if (++engage_event_id == 0) engage_event_id = 1;
+        } else {
+          if (++disengage_event_id == 0) disengage_event_id = 1;
+        }
+        std::fprintf(stderr,
+                     "k230_k7_controlsd: engaged transition %u->%u "
+                     "active=%u block=%s button=%d gear=%d "
+                     "panda=%u/%u\n",
+                     previous_engaged ? 1U : 0U, last_result.engaged ? 1U : 0U,
+                     last_result.active ? 1U : 0U,
+                     last_result.active_block.c_str(), vehicle.clu_button,
+                     vehicle.gear, panda_ready ? 1U : 0U,
+                     panda_controls_allowed ? 1U : 0U);
+      }
+      if (have_previous_active && last_result.active != previous_active) {
+        std::fprintf(stderr,
+                     "k230_k7_controlsd: active transition %u->%u "
+                     "engaged=%u block=%s raw=%s rawPoints=%zu pathPoints=%zu "
+                     "hold=%u modelAgeMs=%llu panda=%u/%u "
+                     "state=%u/%u/%u/%u safety=%u:%u hb=%u fresh=%u\n",
+                     previous_active ? 1U : 0U, last_result.active ? 1U : 0U,
+                     last_result.engaged ? 1U : 0U,
+                     last_result.active_block.c_str(),
+                     raw_path.invalid_reason.empty() ? "none" :
+                         raw_path.invalid_reason.c_str(),
+                     raw_path.points.size(), path.points.size(),
+                     path_hold_applied ? 1U : 0U,
+                     model.model_timestamp_ns != 0 && now_ns >= model.model_timestamp_ns
+                         ? static_cast<unsigned long long>(
+                               (now_ns - model.model_timestamp_ns) / 1000000ULL)
+                         : 0ULL,
+                     panda_ready ? 1U : 0U,
+                     panda_controls_allowed ? 1U : 0U,
+                     panda_state.connected, panda_state.comms_healthy,
+                     panda_state.tx_enabled, panda_state.controls_allowed,
+                     panda_state.safety_mode, panda_state.safety_param,
+                     panda_state.heartbeat_lost, panda_state_fresh ? 1U : 0U);
+      }
+      previous_engaged = last_result.engaged;
+      have_previous_engaged = true;
+      previous_active = last_result.active;
+      have_previous_active = true;
 
       const bool radar_lead_fresh =
           vehicle.scc11_time_s >= 0.0 && now_s >= vehicle.scc11_time_s &&
@@ -625,6 +737,11 @@ int main() {
       control_state.tpms_pressure_rl = vehicle.tpms_pressure_rl;
       control_state.tpms_pressure_rr = vehicle.tpms_pressure_rr;
       control_state.tpms_warning = vehicle.tpms_warning ? 1U : 0U;
+      control_state.engage_event_id = engage_event_id;
+      control_state.disengage_event_id = disengage_event_id;
+      control_state.engage_reject_event_id = engage_reject_event_id;
+      std::memcpy(control_state.engage_reject_block, engage_reject_block,
+                  sizeof(control_state.engage_reject_block));
       if (!control_state_pub.publish(&control_state, sizeof(control_state))) {
         ++publish_errors;
       }

@@ -277,6 +277,10 @@ struct K230ControlState {
     float tpms_pressure_rr = 0.0f;
     uint32_t tpms_warning = 0;
     uint32_t hud_flags = 0;
+    uint32_t engage_event_id = 0;
+    uint32_t disengage_event_id = 0;
+    uint32_t engage_reject_event_id = 0;
+    char engage_reject_block[32] = {};
 };
 
 class K230LatestChannel {

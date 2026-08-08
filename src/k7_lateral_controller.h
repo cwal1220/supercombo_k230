@@ -22,6 +22,7 @@ struct K7LateralControllerConfig {
 struct K7LateralControlResult {
   bool engaged = false;
   bool active = false;
+  bool engage_rejected = false;
   bool should_send = false;
   bool path_usable = false;
   bool seeds_ready = false;
@@ -142,4 +143,9 @@ private:
   float steer_timer_apply_torque_ = 1.0f;
   bool lkas11_counter_valid_ = false;
   int lkas11_counter_ = 0;
+  // Panda health는 100 Hz 컨트롤러보다 낮은 주기로 발행된다.
+  // 비동기 허가가 도착할 때까지 SET 요청을 잠시 보류하고, 이후에도 Panda나
+  // 다른 gate가 차단 중이면 요청을 거부한다.
+  bool panda_engage_pending_ = false;
+  double panda_engage_pending_s_ = -1000.0;
 };

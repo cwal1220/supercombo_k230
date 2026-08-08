@@ -51,7 +51,6 @@ apt-get install -y \
   curl \
   g++ \
   git \
-  libasound2-dev \
   libdrm-dev \
   libusb-1.0-0-dev \
   libopencv-dev \
@@ -63,7 +62,6 @@ apt-get install -y \
 ### Package purpose
 
 - `g++`, `make`, `cmake`: board-native C/C++ build
-- `libasound2-dev`: ALSA headers/library used by departure alert chimes
 - `libdrm-dev`: DRM headers used by the overlay/display path
 - `libusb-1.0-0-dev`: optional panda USB/CAN bridge build
 - `libopencv-dev`: OpenCV headers/libraries used by the overlay renderer
@@ -87,7 +85,6 @@ target runtime libraries:
 - `libdisplay.so`
 - `libv4l2-drm.so`
 - `libdrm.so.2`
-- `libasound.so`
 
 ## Build And Deploy
 
@@ -367,7 +364,13 @@ cmake --build /tmp/supercombo_k230_verify \
     generated Acados lateral MPC solver to produce curvature targets.
 - `src/lateral_control.*`, `src/k7_lateral_controller.*`
   - expose model-side lateral diagnostics and apply the planner's lag-adjusted
-    curvature through the validated K7 torque/CAN path.
+    curvature through the validated K7 torque/CAN path. `k230_k7_controlsd`
+    tolerates a single malformed plan frame by holding the last usable path for
+    at most 150 ms; the normal 250 ms model freshness timeout remains a hard
+    safety gate, so a stale or invalid model still removes control. A transient
+    Panda health-snapshot gap is similarly limited to 100 ms; a fresh,
+    transport-ready `controls_allowed=0` is never held. Other health faults
+    are released after that short hold if they persist.
 - `src/supercombo_runtime.*`
   - owns the monolithic live/replay compatibility pipeline and thread
     coordination. Production uses the split runtime above.
@@ -501,10 +504,24 @@ cmake --build /tmp/supercombo_k230_verify \
   - overrides `params/display.json`. The web editor controls the active-high
     GPIO25 backlight and its 20 kHz PWM5 brightness without stopping the video
     pipeline.
-- `K230_ALERT_SOUND=0`
-  - disables the lead-departure and traffic-signal ALSA chime while preserving
-    LCD alerts. `K230_ALERT_PCM` overrides the playback device; its default is
-    `default`.
+- `K230_PIEZO_BUZZER=0`
+  - disables the passive-piezo PWM alerts while preserving LCD alerts. The
+    default is enabled; if the board cannot access the PWM/IOMUX interfaces,
+    the worker reports the failure and LCD alerts remain active.
+- `K230_PIEZO_PIN=46|47`
+  - selects the board piezo pin. The default is pin 46 (`PWM2`, ALT2); pin 47
+    selects `PWM3`.
+
+The board piezo path reads IOMUX through `/dev/mem` and applies the pin mux with
+the board-provided `devmem` utility (normally `/sbin/devmem`). If that utility
+or the PWM sysfs interface is unavailable, the pipeline continues with LCD
+alerts only.
+
+The piezo module also provides distinct `engage`, `disengage`, and `unable`
+(engage refused) tones. Engagement uses a fixed-duty ascending sequence and
+disengagement a descending sequence so passive-piezo playback remains clean.
+A refused engage request shows its gate reason on the HUD and plays the
+`unable` tone once.
 
 The tracked JSON files in `params/` are the source of truth for K7 steering,
 driving, vision-cruise, recording, and display configuration. Changes are

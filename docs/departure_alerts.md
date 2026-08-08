@@ -13,15 +13,47 @@
 
 한 번 정차할 때 하나의 이벤트만 발생한다. 기어가 `D`가 아니거나 가속 페달을
 누르거나 차량이 다시 움직이면 다음 정차 주기를 준비한다. 알림은 engage 여부와
-무관하며 LCD에 3초 동안 표시되고, `k230_overlay`가 보드 ALSA 장치로 짧은 차임을
-한 번 재생한다.
+무관하며 LCD에 3초 동안 표시되고, `k230_overlay`가 보드의 passive piezo에
+짧은 PWM 시퀀스를 한 번 재생한다. 선행 차량 출발과 신호 변경은
+`signal_changed` 시퀀스를 공유한다.
+
+피에조 알람은 다음 상태 전이에 적용된다.
+
+- `signal_changed`: 선행 차량 출발 또는 신호 변경
+- `engage`: 제어 engage 성공
+- `disengage`: 제어 disengage 또는 fault에 의한 해제
+- `activated`/`deactivated`: engage 상태는 유지되지만 조향 active gate가 바뀐 경우
+- `unavailable`: 제어/Panda 상태가 stale이 되거나 Panda/조향 fault가 검출됨
+- `unable`: engage 조건을 만족하지 못한 상태에서 engage 명령을 거부할 때
+
+`engage`는 안정적인 상승 다중음, `disengage`는 하강 다중음으로 재생한다.
+둘 다 보드 Python 알람과 같은 고정 50% PWM 시퀀스를 공유하므로, PWM duty를
+짧게 반복 변경할 때 생기는 클릭/찌그러짐이 없다. `activated`/`deactivated`는
+engage 상태를 유지한 active gate 전이에만 사용한다.
+
+실제 차량/제어 조건으로 engage가 거부되면 LCD 하단에
+`UNABLE TO ENGAGE: <사유>`를 3초간 표시하고, openpilot의 refuse 알림에
+대응하는 `unable` 피에조 시퀀스를 재생한다. Panda의 `not ready`/`controls off`는
+SET edge와 health 응답 사이의 정상적인 비동기 구간이므로 최대 1초 동안 대기한다.
+그 사이 Panda 허가가 들어오면 `engage`만 한 번 알리고, 잠깐 뒤의 active 전이에는
+중복 `activated` 차임을 붙이지 않는다. 허가가 끝내 오지 않거나 Panda 회복 뒤
+다른 정적 조건이 남아 있으면 그때 `UNABLE`로 거부한다. 이미 engage된 상태에서
+active gate가 나중에 풀리는 전이만 `activated`로 알린다.
+
+주행 중 Panda health 스냅샷이 한 번 비거나 지연되는 경우에는 직전 정상
+스냅샷을 최대 100 ms만 유지해 LKAS active 아이콘이 한 프레임 깜박이지 않게
+한다. transport와 safety가 유효한 상태의 `controls_allowed=0`은 이 유예를
+사용하지 않고 즉시 제어를 차단한다. heartbeat/연결/safety 스냅샷 오류는
+최대 100 ms 뒤에도 계속되면 제어를 차단한다.
 
 환경 변수:
 
-- `K230_ALERT_SOUND=0`: 소리 비활성화
-- `K230_ALERT_PCM=<device>`: ALSA PCM 장치 지정. 기본값은 `default`
+- `K230_PIEZO_BUZZER=0`: PWM 피에조 알람 비활성화
+- `K230_PIEZO_PIN=46|47`: PWM 피에조 핀 선택. 기본값은 `46`
 
-오디오 장치를 열 수 없어도 주행 파이프라인은 계속 실행되고 LCD 알림은 유지된다.
+IOMUX 설정에는 보드의 `devmem` 명령(`/sbin/devmem`)과 `/dev/mem` 접근이
+필요하다. PWM/IOMUX를 사용할 수 없어도 주행 파이프라인은 계속 실행되고 LCD
+알림은 유지된다.
 
 ## openpilot_c2 대응
 
@@ -58,4 +90,4 @@ lead x에서 카메라-레이더 기준 거리 1.52 m를 빼고, 모델 lead 속
   표시와 차임 모두 반응하지 않았다.
 
 따라서 K7 YG HEV에서는 이 두 CAN 경로를 계기판 차임으로 사용하지 않는다.
-정차 출발 알림은 보드 ALSA 차임과 LCD 표시만 사용한다.
+정차 출발 알림은 보드 PWM 피에조와 LCD 표시만 사용한다.

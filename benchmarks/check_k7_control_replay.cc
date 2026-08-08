@@ -597,12 +597,46 @@ void verify_panda_gate_and_handoff() {
   require(panda_blocked.engaged && !panda_blocked.active &&
               panda_blocked.active_block == "panda_controls_off",
           "Panda controls gate");
+  require(!panda_blocked.engage_rejected,
+          "Panda controls handshake must not reject a valid SET request");
   require(panda_blocked.should_send && !panda_blocked.frames.empty(),
           "Panda mismatch must keep zero replacement stream");
   const HyundaiLkas11Values zero_lkas =
       decode_lkas11(panda_blocked.frames.front().data);
   require(zero_lkas.steer_torque == 0 && !zero_lkas.steer_req,
           "Panda controls off must generate zero LKAS");
+
+  K7LateralController panda_timeout_controller(config);
+  K7VehicleCanState timeout_vehicle = vehicle;
+  timeout_vehicle.clu_button = 2;
+  panda_timeout_controller.update(replay_path(), replay_target(), timeout_vehicle,
+                                  10.0, 0, true, true);
+  timeout_vehicle.clu_button = 0;
+  const auto panda_waiting = panda_timeout_controller.update(
+      replay_path(), replay_target(), timeout_vehicle, 10.01, 1, true, false);
+  require(panda_waiting.engaged && !panda_waiting.engage_rejected,
+          "Panda handshake grace must keep a valid request latched");
+  const auto panda_timeout = panda_timeout_controller.update(
+      replay_path(), replay_target(), timeout_vehicle, 11.02, 102, true, false);
+  require(!panda_timeout.engaged && panda_timeout.engage_rejected &&
+              panda_timeout.active_block == "panda_controls_off",
+          "persistent Panda mismatch must eventually reject engage");
+
+  K7LateralController deferred_static_controller(config);
+  K7VehicleCanState deferred_vehicle = vehicle;
+  deferred_vehicle.clu_button = 2;
+  deferred_static_controller.update(replay_path(), replay_target(), deferred_vehicle,
+                                    12.0, 0, true, true);
+  deferred_vehicle.clu_button = 0;
+  deferred_static_controller.update(replay_path(), replay_target(), deferred_vehicle,
+                                    12.01, 1, true, false);
+  LateralTarget deferred_invalid_target = replay_target();
+  deferred_invalid_target.mpc_solution_valid = false;
+  const auto deferred_static = deferred_static_controller.update(
+      replay_path(), deferred_invalid_target, deferred_vehicle, 12.02, 2, true, true);
+  require(!deferred_static.engaged && deferred_static.engage_rejected &&
+              deferred_static.active_block == "lateral_plan_invalid",
+          "Panda recovery must re-evaluate static engage gates");
 
   const auto active =
       controller.update(replay_path(), replay_target(), vehicle, 1.02, 2, true, true);
@@ -640,6 +674,20 @@ void verify_panda_gate_and_handoff() {
   require(reengaged.active && !reengaged.frames.empty(), "re-engage after handoff");
   require(decode_lkas11(reengaged.frames.front().data).msg_count == 10,
           "re-engage must seed LKAS counter from stock camera");
+
+  K7LateralController rejected_controller(config);
+  K7VehicleCanState rejected_vehicle = ready_vehicle();
+  rejected_vehicle.clu_button = 2;
+  rejected_controller.update(replay_path(), replay_target(), rejected_vehicle,
+                              1.0, 0, true, true);
+  rejected_vehicle.clu_button = 0;
+  LateralTarget invalid_target = replay_target();
+  invalid_target.mpc_solution_valid = false;
+  const auto rejected = rejected_controller.update(
+      replay_path(), invalid_target, rejected_vehicle, 1.01, 1, true, true);
+  require(!rejected.engaged && rejected.engage_rejected &&
+              rejected.active_block == "lateral_plan_invalid",
+          "static engage gate must reject without latching engaged state");
 }
 
 void verify_model_path_adapter() {

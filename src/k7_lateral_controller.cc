@@ -13,6 +13,7 @@ constexpr float kSmoothSteerRecoverStep = 0.005f;
 constexpr float kDesiredCurvatureLimit = 0.1f;
 constexpr float kMaxCurvature = 0.3f;
 constexpr float kGravity = 9.8f;
+constexpr double kPandaEngageGraceS = 1.0;
 
 float clamp_float(float value, float lo, float hi) {
   if (!std::isfinite(value)) return lo;
@@ -28,6 +29,15 @@ bool is_hard_disengage_block(const std::string &block) {
          block == "esp_disabled" ||
          block == "park_brake" ||
          block == "brake_error";
+}
+
+// Panda의 controls_allowed는 비동기적으로 보고된다(브리지가 100 Hz
+// 컨트롤러보다 낮은 주기로 health를 폴링한다). 따라서 대응하는 Panda 허가보다
+// SET 해제가 한두 틱 먼저 도착할 수 있다. 이 handshake가 완료될 때까지 앱의
+// engage를 유지하며, 이는 가용성 gate이지 요청 실패가 아니다. 차량/컨트롤러의
+// 정적 gate는 여전히 SET을 거부한다.
+bool is_transient_engage_block(const std::string &block) {
+  return block == "panda_not_ready" || block == "panda_controls_off";
 }
 
 float cluster_speed_kph(const K7VehicleCanState &vehicle_state) {
@@ -89,6 +99,9 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
                                                    int frame,
                                                    bool panda_ready,
                                                    bool panda_controls_allowed) {
+  const bool engage_requested =
+      !config_.force_engaged && !engaged_ &&
+      vehicle_state.clu_button == 0 && last_button_ == kButtonSetDecel;
   update_button_state(vehicle_state.clu_button, now_s);
   const bool logical_engaged = config_.force_engaged || engaged_;
 
@@ -113,10 +126,49 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
                                             panda_ready, panda_controls_allowed,
                                             result.speed_kph);
   if (logical_engaged && is_hard_disengage_block(result.active_block)) {
+    panda_engage_pending_ = false;
     engaged_ = false;
     reset_control_state();
     last_disengage_s_ = now_s;
     result.engaged = config_.force_engaged;
+  }
+
+  if (engage_requested) {
+    if (is_transient_engage_block(result.active_block)) {
+      panda_engage_pending_ = true;
+      panda_engage_pending_s_ = now_s;
+    } else {
+      panda_engage_pending_ = false;
+    }
+  }
+
+  if (engage_requested && !result.active_block.empty() &&
+      !is_transient_engage_block(result.active_block)) {
+    // 차량/컨트롤러의 정적 gate는 실제 engage 요청 실패로 처리한다.
+    engaged_ = false;
+    reset_control_state();
+    last_disengage_s_ = now_s;
+    result.engaged = config_.force_engaged;
+    result.engage_rejected = true;
+  }
+
+  if (panda_engage_pending_) {
+    const bool panda_waiting = is_transient_engage_block(result.active_block);
+    const bool grace_elapsed = now_s - panda_engage_pending_s_ >= kPandaEngageGraceS;
+    if (result.active_block.empty()) {
+      // Panda 허가가 도착했고 다른 engage gate도 모두 해소되었다.
+      panda_engage_pending_ = false;
+    } else if (!panda_waiting || grace_elapsed) {
+      /* 정적 실패를 저장했다가 gate가 해소되면 조용히 engage하지 않는다. Panda에는
+       * 짧은 비동기 health handshake 유예만 허용하며, 완료되지 않으면 실제 차단
+       * 사유를 한 번 보고한다. */
+      panda_engage_pending_ = false;
+      engaged_ = false;
+      reset_control_state();
+      last_disengage_s_ = now_s;
+      result.engaged = config_.force_engaged;
+      result.engage_rejected = true;
+    }
   }
   result.active = result.active_block.empty();
   result.cut_steer_temp = update_cut_steer_state(result.active, vehicle_state);
@@ -192,6 +244,7 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
 void K7LateralController::update_button_state(int button, double now_s) {
   if (button == last_button_) return;
   if (button == kButtonCancel) {
+    panda_engage_pending_ = false;
     engaged_ = false;
     reset_control_state();
     last_disengage_s_ = now_s;

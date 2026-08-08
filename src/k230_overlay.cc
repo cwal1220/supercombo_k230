@@ -1,8 +1,8 @@
 #include "app_config.h"
-#include "alert_sound_player.h"
 #include "display.h"
 #include "k230_ipc.h"
 #include "overlay_renderer.h"
+#include "piezo_buzzer.h"
 #include "projection.h"
 #include "thead.h"
 #include "v4l2-drm.h"
@@ -56,6 +56,43 @@ constexpr uint64_t kOverlayIntervalNs = 45000000ULL;
 const char *display_ready_path()
 {
     return kDisplayReadyPath;
+}
+
+struct EngageBlockLabel {
+    const char *reason;
+    const char *label;
+};
+
+constexpr EngageBlockLabel kEngageBlockLabels[] = {
+    {"controller_disabled", "CONTROL OFF"},
+    {"door_open", "DOOR OPEN"},
+    {"esp_disabled", "ESP OFF"},
+    {"esp_stale", "ESP STALE"},
+    {"gear_not_drive", "GEAR NOT D"},
+    {"lanechange_manual", "MANUAL STEER"},
+    {"lateral_plan_invalid", "PLAN INVALID"},
+    {"mdps_fault", "MDPS FAULT"},
+    {"no_smart_mdps_low_speed", "LOW SPEED"},
+    {"panda_controls_off", "PANDA CTRL OFF"},
+    {"panda_not_ready", "PANDA NOT READY"},
+    {"park_brake", "PARK BRAKE"},
+    {"path_invalid", "PATH INVALID"},
+    {"seatbelt_unlatched", "SEATBELT"},
+    {"seeds_missing", "CAN SEEDS"},
+    {"speed_invalid", "SPEED INVALID"},
+    {"steering_angle_limit", "ANGLE LIMIT"},
+    {"vehicle_state_stale", "CAR STALE"},
+    {"yaw_rate_invalid", "YAW INVALID"},
+    {"brake_error", "BRAKE ERROR"},
+};
+
+const char *engage_block_text(const char *block)
+{
+    if (!block || block[0] == '\0') return "NOT READY";
+    for (const EngageBlockLabel &entry : kEngageBlockLabels) {
+        if (std::strcmp(block, entry.reason) == 0) return entry.label;
+    }
+    return block;
 }
 
 struct StageStats {
@@ -260,6 +297,9 @@ public:
     explicit K230OverlayDisplay(const AppConfig &config)
         : profile_(config.profile)
     {
+        piezo_buzzer_ = piezo_buzzer_create();
+        if (!piezo_buzzer_)
+            std::fprintf(stderr, "k230_overlay: piezo buzzer worker unavailable\n");
         default_projection_ = make_projection_state(config.manual_roll,
                                                     config.manual_pitch,
                                                     config.manual_yaw);
@@ -267,6 +307,8 @@ public:
 
     ~K230OverlayDisplay()
     {
+        piezo_buzzer_destroy(piezo_buzzer_);
+        piezo_buzzer_ = nullptr;
         cleanup();
     }
 
@@ -448,6 +490,12 @@ private:
         }
     }
 
+    uint32_t next_piezo_event_id()
+    {
+        if (++next_piezo_event_id_ == 0) next_piezo_event_id_ = 1;
+        return next_piezo_event_id_;
+    }
+
     void clean(display_buffer *buffer)
     {
         thead_csi_dcache_clean_invalid_range(buffer->map, buffer->size);
@@ -570,16 +618,146 @@ private:
             control_fresh ? latest_control_state_.tpms_pressure_rr : 0.0f;
         hud_.tpms_warning =
             control_fresh && latest_control_state_.tpms_warning != 0;
-        if (!control_fresh) {
-            last_alert_sound_event_id_ = 0;
-        } else if (hud_.departure_alert_type != DepartureAlertType::none &&
-                   hud_.departure_alert_event_id != 0 &&
-                   hud_.departure_alert_event_id !=
-                       last_alert_sound_event_id_) {
-            last_alert_sound_event_id_ = hud_.departure_alert_event_id;
-            alert_sound_player_.play(hud_.departure_alert_type,
-                                     hud_.departure_alert_event_id);
+
+        /* 이벤트 카운터는 공유 제어 상태에 있다. overlay가 독립적으로 재시작될
+         * 수 있으므로 첫 번째 정상 스냅샷은 새 사용자 이벤트가 아니라 기준값으로
+         * 처리한다. controlsd 재시작으로 카운터가 0부터 다시 시작한 경우에도
+         * 전체 기준값을 다시 설정한다. */
+        bool event_id_baseline_this_frame = false;
+        if (control_fresh) {
+            const auto counter_reset = [](uint32_t current, uint32_t previous) {
+                return previous != 0 && current < previous;
+            };
+            const bool counters_reset =
+                event_ids_initialized_ &&
+                (counter_reset(latest_control_state_.engage_event_id,
+                               last_engage_event_id_) ||
+                 counter_reset(latest_control_state_.disengage_event_id,
+                               last_disengage_event_id_) ||
+                 counter_reset(latest_control_state_.engage_reject_event_id,
+                               last_engage_reject_event_id_) ||
+                 counter_reset(hud_.departure_alert_event_id,
+                               last_departure_alert_event_id_));
+            if (!event_ids_initialized_ || counters_reset) {
+                last_engage_event_id_ = latest_control_state_.engage_event_id;
+                last_disengage_event_id_ =
+                    latest_control_state_.disengage_event_id;
+                last_engage_reject_event_id_ =
+                    latest_control_state_.engage_reject_event_id;
+                last_departure_alert_event_id_ =
+                    hud_.departure_alert_event_id;
+                event_ids_initialized_ = true;
+                event_id_baseline_this_frame = true;
+            }
         }
+        const bool process_event_counters =
+            control_fresh && !event_id_baseline_this_frame;
+        bool engagement_alert_triggered = false;
+        if (process_event_counters &&
+            latest_control_state_.engage_reject_event_id != 0 &&
+            latest_control_state_.engage_reject_event_id !=
+                last_engage_reject_event_id_) {
+            last_engage_reject_event_id_ =
+                latest_control_state_.engage_reject_event_id;
+            std::snprintf(hud_.engage_alert_message,
+                          sizeof(hud_.engage_alert_message),
+                          "UNABLE TO ENGAGE: %s",
+                          engage_block_text(
+                              latest_control_state_.engage_reject_block));
+            engage_alert_until_ns_ = now + 3000000000ULL;
+            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_UNABLE,
+                              last_engage_reject_event_id_);
+            std::fprintf(stderr,
+                         "k230_overlay: piezo alert=unable event=%u block=%s\n",
+                         last_engage_reject_event_id_,
+                         latest_control_state_.engage_reject_block);
+            engage_activation_suppress_until_ns_ = 0;
+            engagement_alert_triggered = true;
+        } else if (process_event_counters &&
+                   latest_control_state_.engage_event_id != 0 &&
+                   latest_control_state_.engage_event_id != last_engage_event_id_) {
+            last_engage_event_id_ = latest_control_state_.engage_event_id;
+            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_ENGAGE,
+                              last_engage_event_id_);
+            std::fprintf(stderr, "k230_overlay: piezo alert=engage event=%u\n",
+                         last_engage_event_id_);
+            engage_activation_suppress_until_ns_ = now + 1000000000ULL;
+            engagement_alert_triggered = true;
+        } else if (process_event_counters &&
+                   latest_control_state_.disengage_event_id != 0 &&
+                   latest_control_state_.disengage_event_id !=
+                       last_disengage_event_id_) {
+            last_disengage_event_id_ =
+                latest_control_state_.disengage_event_id;
+            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_DISENGAGE,
+                              last_disengage_event_id_);
+            std::fprintf(stderr,
+                         "k230_overlay: piezo alert=disengage event=%u\n",
+                         last_disengage_event_id_);
+            engage_activation_suppress_until_ns_ = 0;
+            engagement_alert_triggered = true;
+        }
+        if (now >= engage_alert_until_ns_) {
+            hud_.engage_alert_message[0] = '\0';
+        }
+
+        bool departure_alert_triggered = false;
+        if (process_event_counters &&
+            !engagement_alert_triggered &&
+            hud_.departure_alert_type != DepartureAlertType::none &&
+            hud_.departure_alert_event_id != 0 &&
+            hud_.departure_alert_event_id != last_departure_alert_event_id_) {
+            last_departure_alert_event_id_ = hud_.departure_alert_event_id;
+            /* 두 가지 출발 감지는 모두 도로 상황의 변화로 처리한다. */
+            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_SIGNAL_CHANGED,
+                              hud_.departure_alert_event_id);
+            std::fprintf(stderr,
+                         "k230_overlay: piezo alert=signal_changed event=%u\n",
+                         hud_.departure_alert_event_id);
+            departure_alert_triggered = true;
+        }
+
+        const bool panda_unavailable =
+            latest_panda_state_.timestamp_ns != 0 &&
+            (!panda_fresh || !hud_.panda_connected || !hud_.panda_healthy ||
+             latest_panda_state_.faults != 0);
+        const bool unavailable =
+            !control_fresh || panda_unavailable ||
+            latest_control_state_.steering_fault != 0;
+        if (!alert_state_initialized_) {
+            previous_controller_active_ = hud_.controller_active;
+            previous_unavailable_ = unavailable;
+            alert_state_initialized_ = true;
+        } else if (unavailable && !previous_unavailable_) {
+            if (!engagement_alert_triggered && !departure_alert_triggered) {
+                const uint32_t event_id = next_piezo_event_id();
+                piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_UNAVAILABLE,
+                                  event_id);
+                std::fprintf(stderr,
+                             "k230_overlay: piezo alert=unavailable event=%u\n",
+                             event_id);
+            }
+        } else if (!unavailable && !departure_alert_triggered &&
+                   !engagement_alert_triggered &&
+                   now >= engage_activation_suppress_until_ns_) {
+            if (hud_.controller_active && !previous_controller_active_) {
+                const uint32_t event_id = next_piezo_event_id();
+                piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_ACTIVATED,
+                                  event_id);
+                std::fprintf(stderr,
+                             "k230_overlay: piezo alert=activated event=%u\n",
+                             event_id);
+            } else if (!hud_.controller_active && previous_controller_active_) {
+                const uint32_t event_id = next_piezo_event_id();
+                piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_DEACTIVATED,
+                                  event_id);
+                std::fprintf(stderr,
+                             "k230_overlay: piezo alert=deactivated event=%u\n",
+                             event_id);
+            }
+        }
+        previous_controller_active_ = !unavailable && hud_.controller_active;
+        previous_unavailable_ = unavailable;
         hud_.steering_angle_deg = control_fresh ? latest_control_state_.steering_angle_deg : 0.0f;
         hud_.normalized_output = control_fresh ? latest_control_state_.normalized_output : 0.0f;
         hud_.desired_torque = control_fresh ? latest_control_state_.desired_torque : 0;
@@ -677,8 +855,21 @@ private:
     StageStats overlay_stats_;
     StageStats present_stats_;
     SystemMonitor system_monitor_;
-    AlertSoundPlayer alert_sound_player_;
-    uint32_t last_alert_sound_event_id_ = 0;
+    PiezoBuzzer *piezo_buzzer_ = nullptr;
+    uint32_t last_departure_alert_event_id_ = 0;
+    uint32_t last_engage_event_id_ = 0;
+    uint32_t last_disengage_event_id_ = 0;
+    uint32_t last_engage_reject_event_id_ = 0;
+    bool event_ids_initialized_ = false;
+    uint32_t next_piezo_event_id_ = 0;
+    bool alert_state_initialized_ = false;
+    bool previous_controller_active_ = false;
+    bool previous_unavailable_ = false;
+    uint64_t engage_alert_until_ns_ = 0;
+    // Panda 허가가 지연되면 engage 직후 active가 올라올 수 있다.
+    // engage 음이 이미 전이를 알렸으므로 active gate 음을 덧붙이지 않는다.
+    // 이후 active에 다시 진입하는 전이에는 activated 음을 재생한다.
+    uint64_t engage_activation_suppress_until_ns_ = 0;
     OverlayHudState hud_;
 };
 

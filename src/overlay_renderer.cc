@@ -731,7 +731,10 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     std::string alert;
     uint32_t alert_color = orange;
     bool showing_departure_alert = false;
-    if (hud.steering_fault) {
+    if (hud.engage_alert_message[0] != '\0') {
+        alert = hud.engage_alert_message;
+        alert_color = orange;
+    } else if (hud.steering_fault) {
         alert = "STEERING FAULT";
         alert_color = red;
     } else if (hud.panda_faults != 0) {

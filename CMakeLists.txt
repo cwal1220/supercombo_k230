@@ -91,9 +91,8 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     "${K230_SYSROOT_LIB_DIR}/libdisplay.so"
     "${K230_SYSROOT_LIB_DIR}/libdrm.so.2"
   )
-  set(K230_ASOUND_LIB "${K230_SYSROOT_LIB_DIR}/libasound.so")
 
-  foreach(required_lib IN LISTS NNCASE_STATIC_LIBS K230_SHARED_LIBS K230_ASOUND_LIB)
+  foreach(required_lib IN LISTS NNCASE_STATIC_LIBS K230_SHARED_LIBS)
     if(NOT EXISTS "${required_lib}")
       message(FATAL_ERROR
         "Missing required library: ${required_lib}\n"
@@ -183,7 +182,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
 
   add_executable(k230_overlay
     src/k230_overlay.cc
-    src/alert_sound_player.cc
+    src/piezo_buzzer.c
     src/k230_ipc.cc
     src/overlay_renderer.cc
     ${COMMON_SOURCES}
@@ -191,7 +190,6 @@ if(SUPERCOMBO_BUILD_RUNTIME)
   configure_k230_target(k230_overlay
     mmz
     ${K230_SHARED_LIBS}
-    ${K230_ASOUND_LIB}
     ${OpenCV_LIBS}
   )
 
