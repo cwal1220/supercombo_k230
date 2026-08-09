@@ -488,7 +488,7 @@ static void report_unavailable(PiezoBuzzer *buzzer, PiezoAlert alert,
   pthread_mutex_unlock(&buzzer->mutex);
   if (report) {
     fprintf(stderr,
-            "k230_overlay: piezo buzzer unavailable, continuing with LCD "
+            "k230_overlayd: piezo buzzer unavailable, continuing with LCD "
             "alerts (alert=%s event=%u)\n",
             alert >= 0 && alert < PIEZO_ALERT_COUNT ? kAlertNames[alert] :
                                                        "unknown",

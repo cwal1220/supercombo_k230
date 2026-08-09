@@ -51,9 +51,9 @@ add_library(k7_control_core STATIC
   src/hyundai_can.cc
   src/hyundai_steering.cc
   src/json_utils.cc
-  src/k7_adaptive_cruise.cc
-  src/k7_lateral_controller.cc
-  src/k7_path.cc
+  src/adaptive_cruise.cc
+  src/lateral_controller.cc
+  src/path.cc
   src/steering_params.cc
   src/vehicle_can.cc
 )
@@ -144,21 +144,6 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     src/supercombo_model.cc
   )
 
-  add_executable(supercombo_elf
-    src/main.cc
-    src/overlay_renderer.cc
-    src/supercombo_runtime.cc
-    ${COMMON_SOURCES}
-    ${MODEL_SOURCES}
-  )
-  set_target_properties(supercombo_elf PROPERTIES OUTPUT_NAME "supercombo.elf")
-  configure_k230_target(supercombo_elf
-    ${NNCASE_STATIC_LIBS}
-    mmz
-    ${K230_SHARED_LIBS}
-    ${OpenCV_LIBS}
-  )
-
   add_executable(k230_camerad
     src/k230_camerad.cc
     src/input_source.cc
@@ -181,14 +166,14 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     ${K230_SHARED_LIBS}
   )
 
-  add_executable(k230_overlay
-    src/k230_overlay.cc
+  add_executable(k230_overlayd
+    src/k230_overlayd.cc
     src/piezo_buzzer.c
     src/k230_ipc.cc
     src/overlay_renderer.cc
     ${COMMON_SOURCES}
   )
-  configure_k230_target(k230_overlay
+  configure_k230_target(k230_overlayd
     mmz
     ${K230_SHARED_LIBS}
     ${OpenCV_LIBS}
@@ -198,7 +183,6 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     src/k230_recordd.cc
     src/common_utils.cc
     src/json_utils.cc
-    src/k230_can_queue.cc
     src/k230_ipc.cc
     src/lateral_control.cc
     src/model_output.cc
@@ -229,7 +213,6 @@ if(SUPERCOMBO_BUILD_RUNTIME)
       src/k230_pandad.cc
       src/panda_client.cc
       src/panda_can_codec.cc
-      src/k230_can_queue.cc
       src/common_utils.cc
       src/k230_ipc.cc
       src/model_output.cc
@@ -238,23 +221,22 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     )
     configure_k230_target(k230_pandad ${LIBUSB_LIBRARIES})
 
-    add_executable(k230_k7_controlsd
-      src/k230_k7_controlsd.cc
-      src/k230_can_queue.cc
+    add_executable(k230_controlsd
+      src/k230_controlsd.cc
       src/common_utils.cc
       src/openpilot_lateral_planner.cc
     )
-    target_include_directories(k230_k7_controlsd SYSTEM PRIVATE
+    target_include_directories(k230_controlsd SYSTEM PRIVATE
       "${ACADOS_INCLUDE_DIR}"
       "${ACADOS_INCLUDE_DIR}/blasfeo/include"
       "${ACADOS_INCLUDE_DIR}/hpipm/include"
       "${ACADOS_SOLVER_DIR}"
     )
-    set_target_properties(k230_k7_controlsd PROPERTIES
+    set_target_properties(k230_controlsd PROPERTIES
       BUILD_RPATH "\$ORIGIN/lib"
       INSTALL_RPATH "\$ORIGIN/lib"
     )
-    configure_k230_target(k230_k7_controlsd
+    configure_k230_target(k230_controlsd
       k7_control_core
       ${ACADOS_RUNTIME_LIBS}
     )
@@ -282,14 +264,14 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
 
   add_executable(check_k230_can_queue
     benchmarks/check_k230_can_queue.cc
-    src/k230_can_queue.cc
+    src/common_utils.cc
   )
   target_include_directories(check_k230_can_queue PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_compile_options(check_k230_can_queue PRIVATE ${PROJECT_WARNINGS})
 
   add_executable(check_k7_control_replay
     benchmarks/check_k7_control_replay.cc
-    src/can_replay.cc
+    benchmarks/can_replay.cc
   )
   target_link_libraries(check_k7_control_replay PRIVATE k7_control_core)
   target_include_directories(check_k7_control_replay PRIVATE ${PROJECT_LOCAL_INCLUDES})
@@ -341,7 +323,7 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
 endif()
 
 if(SUPERCOMBO_BUILD_RUNTIME)
-  install(TARGETS supercombo_elf k230_camerad k230_modeld k230_overlay k230_recordd
+  install(TARGETS k230_camerad k230_modeld k230_overlayd k230_recordd
     RUNTIME DESTINATION .
   )
   install(FILES
@@ -350,10 +332,10 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     DESTINATION assets/ui
   )
   if(SUPERCOMBO_BUILD_PANDA)
-    install(TARGETS k230_pandad k230_k7_controlsd RUNTIME DESTINATION .)
+    install(TARGETS k230_pandad k230_controlsd RUNTIME DESTINATION .)
     install(FILES ${ACADOS_RUNTIME_LIBS} DESTINATION lib)
   endif()
-  install(PROGRAMS scripts/k230_manager.py scripts/k7_param_server.py
+  install(PROGRAMS scripts/k230_manager.py scripts/param_server.py
     scripts/k230_display_control.py DESTINATION .)
   install(FILES scripts/requirements-param-server.txt DESTINATION .)
   install(DIRECTORY models DESTINATION . OPTIONAL FILES_MATCHING PATTERN "*.kmodel")

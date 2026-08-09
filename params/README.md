@@ -1,7 +1,7 @@
 # K7 YG HEV 파라미터 안내
 
 이 디렉터리에는 KIA K7 YG HEV용 조향 제어, 주행 제한, 비전 크루즈, 기록, 디스플레이 및
-카메라 캘리브레이션 값이 들어 있다. `k230_k7_controlsd`는 세 런타임 JSON
+카메라 캘리브레이션 값이 들어 있다. `k230_controlsd`는 세 런타임 JSON
 변경을 100ms 이내에 감지하고 다음 제어 주기에 즉시 반영한다. 제어 상태와
 PID 상태는 유지되며 engage 여부에 따른 적용 지연은 없다.
 
@@ -44,7 +44,7 @@ PID 상태는 유지되며 engage 여부에 따른 적용 지연은 없다.
 결과는 inversed polarity의 duty cycle로 변환하며, 설정은 웹의 `디스플레이`
 메뉴에서 즉시 적용되고 재부팅 후에도 복원된다.
 
-## k7_yg_driving.json
+## yg_driving.json
 
 ### 상태와 CAN
 
@@ -72,7 +72,7 @@ PID 상태는 유지되며 engage 여부에 따른 적용 지연은 없다.
 
 최종 목표 곡률의 절대 상한은 K7 고정값 `0.3 1/m`로 적용되며 설정 항목으로 노출하지 않는다.
 
-## k7_yg_adaptive_cruise.json
+## yg_adaptive_cruise.json
 
 이 기능은 비전 모델의 선행차 거리와 상대속도를 이용해 순정 고정형 크루즈의
 `SET-`와 `RES+` 버튼만 대신 누른다. 스로틀이나 브레이크를 직접 제어하지 않으므로
@@ -93,7 +93,7 @@ PID 상태는 유지되며 engage 여부에 따른 적용 지연은 없다.
 | `command_interval_s` | 1.0 | s / 0.5~5.0 | 연속 버튼 펄스를 시작할 수 있는 최소 간격이다. |
 | `button_pulse_frames` | 5 | 100Hz frame / 1~10 | 한 번의 버튼 조작을 차량에 전달하는 연속 CLU11 프레임 수다. K7 검증 전에는 기본값을 유지한다. |
 
-## k7_yg_steering.json
+## yg_steering.json
 
 ### 기본 토크 제한
 

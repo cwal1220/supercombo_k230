@@ -1,4 +1,4 @@
-#include "k7_lateral_controller.h"
+#include "lateral_controller.h"
 
 #include "common_utils.h"
 

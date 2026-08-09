@@ -103,8 +103,7 @@ cmake --build build -j2
 
 The expected output is:
 
-- `/root/supercombo_k230/supercombo.elf`
-- `/root/supercombo_k230/k230_overlay`
+- `/root/supercombo_k230/k230_overlayd`
 - `/root/supercombo_k230/k230_camerad`
 - `/root/supercombo_k230/k230_modeld`
 
@@ -124,7 +123,7 @@ cd /root/supercombo_k230
 
 Expected split-runtime behavior:
 
-- `k230_overlay` starts first, opens `/dev/video1` through the verified
+- `k230_overlayd` starts first, opens `/dev/video1` through the verified
   `v4l2_drm` preview path, owns the display, waits for displayed preview
   frames, then writes `/tmp/k230_display_ready`.
 - The manager waits for `/tmp/k230_display_ready`, then starts `k230_camerad`.
@@ -132,7 +131,7 @@ Expected split-runtime behavior:
   for frames in `/dev/shm/k230_road_ai`.
 - `k230_modeld` consumes the latest shared NV12 frame and publishes compact
   `modelState`.
-- `k230_overlay` subscribes to compact `modelState`, then draws only
+- `k230_overlayd` subscribes to compact `modelState`, then draws only
   plan/lane/road-edge/lead on an ARGB8888 overlay plane. It does not use Qt,
   touch, buttons, or a status HUD.
 - Display overlay may render below 30 fps; the model loop is the priority.
@@ -148,7 +147,7 @@ Expected behavior:
 Optional profiling:
 
 ```sh
-SUPERCOMBO_PROFILE=1 ./supercombo.elf models/supercombo.kmodel 0
+SUPERCOMBO_PROFILE=1 ./k230_modeld models/supercombo.kmodel 0
 ```
 
 Headless replay from collected driving logs:
@@ -162,17 +161,9 @@ python3 tools/k230/export_replay_nv12.py \
 scp tools/k230/out/replay_nv12/replay_120.scnv12 \
   root@192.168.219.115:/root/supercombo_k230/
 
-# Board side:
+# Board side, using the split model process directly:
 cd /root/supercombo_k230
 SUPERCOMBO_REPLAY_NV12=/root/supercombo_k230/replay_120.scnv12 \
-  ./supercombo.elf models/supercombo.kmodel 0
-```
-
-The split model process can also be tested headlessly:
-
-```sh
-SUPERCOMBO_REPLAY_NV12=/root/supercombo_k230/replay_120.scnv12 \
-SUPERCOMBO_MAX_FRAMES=20 \
   ./k230_modeld models/supercombo.kmodel 0
 ```
 
@@ -183,7 +174,7 @@ model execution and online calibration from stored segments.
 The app asks the K230 V4L2 path for fixed `NV12 512x256` on the AI stream,
 using the full sensor crop `1920x1080+0+0`, then performs the final
 `NV12 -> YUV6 float` layout conversion on CPU. In the split runtime,
-`k230_overlay` owns the `/dev/video1` preview path, publishes
+`k230_overlayd` owns the `/dev/video1` preview path, publishes
 `/tmp/k230_display_ready` after 30 displayed preview frames, and the manager
 starts `k230_camerad` after that barrier. The manager times out after 7000 ms
 and then starts the camera/model pipeline anyway.
@@ -192,7 +183,7 @@ Overlay projection can be adjusted without rebuilding:
 
 ```sh
 SUPERCOMBO_CALIB_PITCH_DEG=1.0 SUPERCOMBO_CALIB_YAW_DEG=-0.5 \
-  ./supercombo.elf models/supercombo.kmodel 0
+  ./k230_manager.py models/supercombo.kmodel 0
 ```
 
 The pose-based online calibrator is enabled by default and only affects overlay

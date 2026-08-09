@@ -1,4 +1,4 @@
-#include "k7_path.h"
+#include "path.h"
 
 #include "k230_ipc.h"
 

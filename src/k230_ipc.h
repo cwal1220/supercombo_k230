@@ -172,12 +172,18 @@ struct K230ProcessState {
     uint64_t last_start_ns = 0;
 };
 
+static_assert(sizeof(K230ProcessState) == 40,
+              "K230ProcessState layout is shared with the Python manager");
+
 struct K230ManagerState {
     uint64_t timestamp_ns = 0;
     uint32_t process_count = 0;
     uint32_t reserved = 0;
     K230ProcessState processes[kK230MaxProcesses] = {};
 };
+
+static_assert(sizeof(K230ManagerState) == 296,
+              "K230ManagerState layout is shared with the Python manager");
 
 struct K230CanFrame {
     uint32_t address = 0;

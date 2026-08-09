@@ -72,7 +72,7 @@ RX도 같은 구조이므로 CLU 버튼 edge, LKAS11 seed, MDPS12 seed 또는 �
 ### 3. Panda 상태가 controller 입력에 포함되지 않음
 
 현재 `K230PandaState.controls_allowed`는 overlay에만 표시된다.
-`k230_k7_controlsd`는 Panda 상태를 구독하지 않으므로 다음 상태가 가능하다.
+`k230_controlsd`는 Panda 상태를 구독하지 않으므로 다음 상태가 가능하다.
 
 1. 애플리케이션은 engaged/active이다.
 2. Panda는 `controls_allowed=false`이다.
@@ -115,7 +115,7 @@ batch는 현재 버리도록 되어 있으나, 연속 오류와 물리적 discon
 
 대상:
 
-- `src/k7_lateral_controller.cc`
+- `src/lateral_controller.cc`
 - `benchmarks/check_k7_control_replay.cc`
 
 작업:
@@ -136,9 +136,9 @@ batch는 현재 버리도록 되어 있으나, 연속 오류와 물리적 discon
 대상:
 
 - `src/k230_ipc.h`
-- `src/k230_can_queue.cc`
+- `src/common_utils.cc`
 - `src/k230_pandad.cc`
-- `src/k230_k7_controlsd.cc`
+- `src/k230_controlsd.cc`
 - `CMakeLists.txt`
 - 신규 host queue test
 
@@ -172,13 +172,13 @@ batch는 현재 버리도록 되어 있으나, 연속 오류와 물리적 discon
 
 - `src/k230_ipc.h`
 - `src/k230_pandad.cc`
-- `src/k230_k7_controlsd.cc`
-- `src/k7_lateral_controller.*`
+- `src/k230_controlsd.cc`
+- `src/lateral_controller.*`
 - controller host test
 
 작업:
 
-- `k230_k7_controlsd`가 `K230PandaState`를 구독한다.
+- `k230_controlsd`가 `K230PandaState`를 구독한다.
 - Panda 연결, 통신 상태, TX enable, safety model/param, state freshness를
   `panda_ready`로 계산한다.
 - `controls_allowed=false`일 때 torque와 `ActToi`는 즉시 0으로 만들되, engaged
@@ -199,9 +199,9 @@ batch는 현재 버리도록 되어 있으나, 연속 오류와 물리적 discon
 
 대상:
 
-- `params/k7_yg_driving.json`
+- `params/yg_driving.json`
 - `params/README.md`
-- `src/k7_lateral_controller.cc`
+- `src/lateral_controller.cc`
 - controller host test
 
 작업:
@@ -392,7 +392,7 @@ MODEL_OUTPUT_EQUIVALENCE_OK output=6012 recurrent=512 pose_offset=6000
 - 60 km/h MDPS spoof, CAN codec, model output parser 회귀
 
 K230 Linux SDK의 RISC-V toolchain으로 `k230_pandad`,
-`k230_k7_controlsd`, `k230_overlay`의 컴파일 및 링크도 완료했다. CAN 변경부에는
+`k230_controlsd`, `k230_overlayd`의 컴파일 및 링크도 완료했다. CAN 변경부에는
 새 컴파일 경고가 없었고, overlay가 함께 빌드하면서 기존 `k230_ipc.cc`에 대한
 RISC-V GCC의 `maybe-uninitialized` 경고가 다시 출력됐다.
 

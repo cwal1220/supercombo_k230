@@ -5,7 +5,7 @@
 
 #include "driving_params.h"
 #include "hyundai_can.h"
-#include "k7_path.h"
+#include "path.h"
 #include "lateral_control.h"
 #include "steering_params.h"
 #include "vehicle_can.h"

@@ -22,14 +22,14 @@ else:
     from k230_display_control import DisplayBacklight
 
 
-CONTROLSD_NAME = "k230_k7_controlsd"
+CONTROLSD_NAME = "k230_controlsd"
 RECORDD_NAME = "k230_recordd"
 GROUP_ENV = {
-    "steering": ("K230_K7_STEERING_PARAMS", "k7_yg_steering.json"),
-    "driving": ("K230_K7_DRIVING_PARAMS", "k7_yg_driving.json"),
+    "steering": ("K230_K7_STEERING_PARAMS", "yg_steering.json"),
+    "driving": ("K230_K7_DRIVING_PARAMS", "yg_driving.json"),
     "adaptive_cruise": (
         "K230_K7_ADAPTIVE_CRUISE_PARAMS",
-        "k7_yg_adaptive_cruise.json",
+        "yg_adaptive_cruise.json",
     ),
     "recording": ("K230_RECORDING_PARAMS", "recording.json"),
     "display": ("K230_DISPLAY_PARAMS", "display.json"),

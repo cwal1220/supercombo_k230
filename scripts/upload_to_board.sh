@@ -17,13 +17,12 @@ SSH_OPTIONS=(
 )
 
 runtime_files=(
-  "${BIN_DIR}/supercombo.elf"
   "${BIN_DIR}/k230_camerad"
   "${BIN_DIR}/k230_modeld"
-  "${BIN_DIR}/k230_overlay"
+  "${BIN_DIR}/k230_overlayd"
   "${BIN_DIR}/k230_recordd"
   scripts/k230_manager.py
-  scripts/k7_param_server.py
+  scripts/param_server.py
   scripts/k230_display_control.py
   scripts/requirements-param-server.txt
 )
@@ -34,7 +33,7 @@ ui_assets=(
 )
 
 if [ -x "${BIN_DIR}/k230_pandad" ]; then
-  runtime_files+=("${BIN_DIR}/k230_pandad" "${BIN_DIR}/k230_k7_controlsd")
+  runtime_files+=("${BIN_DIR}/k230_pandad" "${BIN_DIR}/k230_controlsd")
 fi
 
 for runtime_file in "${runtime_files[@]}"; do
@@ -58,7 +57,7 @@ done
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "${ui_assets[@]}" "$BOARD:$DEST/.upload/assets/ui/"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
   "rm -f '$DEST/assets/ui/'*.png; for source in '$DEST/.upload/assets/ui/'*; do mv \"\$source\" '$DEST/assets/ui/'; done"
-if [ -x "${BIN_DIR}/k230_k7_controlsd" ]; then
+if [ -x "${BIN_DIR}/k230_controlsd" ]; then
   "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/lib' '$DEST/.upload/lib'"
   "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \
     deps/acados/lateral_solver/libacados_ocp_solver_lat.so \
@@ -73,13 +72,15 @@ fi
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mv '$DEST/.upload/supercombo.kmodel' '$DEST/model/supercombo.kmodel'"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \
   params/calibration.json \
-  params/k7_yg_adaptive_cruise.json \
-  params/k7_yg_steering.json \
-  params/k7_yg_driving.json \
+  params/yg_adaptive_cruise.json \
+  params/yg_steering.json \
+  params/yg_driving.json \
   params/recording.json \
   params/display.json \
   "$BOARD:$DEST/params.defaults/"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
-  "for name in calibration.json k7_yg_adaptive_cruise.json k7_yg_steering.json k7_yg_driving.json recording.json display.json; do test -e '$DEST/params/'\"\$name\" || cp '$DEST/params.defaults/'\"\$name\" '$DEST/params/'\"\$name\"; done"
+  "if test ! -e '$DEST/params/yg_adaptive_cruise.json' && test -e '$DEST/params/k7_yg_adaptive_cruise.json'; then cp '$DEST/params/k7_yg_adaptive_cruise.json' '$DEST/params/yg_adaptive_cruise.json'; fi; if test ! -e '$DEST/params/yg_steering.json' && test -e '$DEST/params/k7_yg_steering.json'; then cp '$DEST/params/k7_yg_steering.json' '$DEST/params/yg_steering.json'; fi; if test ! -e '$DEST/params/yg_driving.json' && test -e '$DEST/params/k7_yg_driving.json'; then cp '$DEST/params/k7_yg_driving.json' '$DEST/params/yg_driving.json'; fi"
+"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
+  "for name in calibration.json yg_adaptive_cruise.json yg_steering.json yg_driving.json recording.json display.json; do test -e '$DEST/params/'\"\$name\" || cp '$DEST/params.defaults/'\"\$name\" '$DEST/params/'\"\$name\"; done"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "rm -rf '$DEST/.upload'; sync"
 echo "Uploaded runtime files to $BOARD:$DEST"

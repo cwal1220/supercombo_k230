@@ -70,7 +70,7 @@ float rad_to_deg(float rad)
 
 std::string AppConfig::usage(const char *program_name)
 {
-    return std::string("Usage: ") + (program_name ? program_name : "supercombo.elf") +
+    return std::string("Usage: ") + (program_name ? program_name : "k230_modeld") +
         " <supercombo.kmodel> [debug_mode]";
 }
 
@@ -120,7 +120,7 @@ AppConfig AppConfig::from_env_defaults()
 AppConfig AppConfig::from_env(int argc, char *argv[])
 {
     if (argc < 2 || argc > 3)
-        throw std::invalid_argument(usage(argc > 0 ? argv[0] : "supercombo.elf"));
+        throw std::invalid_argument(usage(argc > 0 ? argv[0] : "k230_modeld"));
 
     AppConfig config = from_env_defaults();
     config.kmodel_path = argv[1];

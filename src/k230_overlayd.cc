@@ -284,7 +284,7 @@ public:
     {
         piezo_buzzer_ = piezo_buzzer_create();
         if (!piezo_buzzer_)
-            std::fprintf(stderr, "k230_overlay: piezo buzzer worker unavailable\n");
+            std::fprintf(stderr, "k230_overlayd: piezo buzzer worker unavailable\n");
         default_projection_ = make_projection_state(config.manual_roll,
                                                     config.manual_pitch,
                                                     config.manual_yaw);
@@ -348,13 +348,13 @@ public:
         display_->osd_disp_buffer = overlay_buffer_;
 
         std::fprintf(stderr,
-                     "k230_overlay: display=%ux%u logical=%ux%u preview=/dev/video%d %ux%u buffers=%u rotation=%d overlay=native-direct\n",
+                     "k230_overlayd: display=%ux%u logical=%ux%u preview=/dev/video%d %ux%u buffers=%u rotation=%d overlay=native-direct\n",
                      display_->width, display_->height,
                      kLogicalDisplayWidth, kLogicalDisplayHeight, kPreviewVideoDevice,
                      context.width, context.height, context.buffer_num,
                      static_cast<int>(context.drm_rotation));
         std::fprintf(stderr,
-                     "k230_overlay: waiting %u displayed preview frames before ready\n",
+                     "k230_overlayd: waiting %u displayed preview frames before ready\n",
                      kDisplayReadyPreviewFrames);
 
         gettimeofday(&fps_tv_, nullptr);
@@ -653,7 +653,7 @@ private:
             piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_UNABLE,
                               last_engage_reject_event_id_);
             std::fprintf(stderr,
-                         "k230_overlay: piezo alert=unable event=%u block=%s\n",
+                         "k230_overlayd: piezo alert=unable event=%u block=%s\n",
                          last_engage_reject_event_id_,
                          latest_control_state_.engage_reject_block);
             engage_activation_suppress_until_ns_ = 0;
@@ -664,7 +664,7 @@ private:
             last_engage_event_id_ = latest_control_state_.engage_event_id;
             piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_ENGAGE,
                               last_engage_event_id_);
-            std::fprintf(stderr, "k230_overlay: piezo alert=engage event=%u\n",
+            std::fprintf(stderr, "k230_overlayd: piezo alert=engage event=%u\n",
                          last_engage_event_id_);
             engage_activation_suppress_until_ns_ = now + 1000000000ULL;
             engagement_alert_triggered = true;
@@ -677,7 +677,7 @@ private:
             piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_DISENGAGE,
                               last_disengage_event_id_);
             std::fprintf(stderr,
-                         "k230_overlay: piezo alert=disengage event=%u\n",
+                         "k230_overlayd: piezo alert=disengage event=%u\n",
                          last_disengage_event_id_);
             engage_activation_suppress_until_ns_ = 0;
             engagement_alert_triggered = true;
@@ -697,7 +697,7 @@ private:
             piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_SIGNAL_CHANGED,
                               hud_.departure_alert_event_id);
             std::fprintf(stderr,
-                         "k230_overlay: piezo alert=signal_changed event=%u\n",
+                         "k230_overlayd: piezo alert=signal_changed event=%u\n",
                          hud_.departure_alert_event_id);
             departure_alert_triggered = true;
         }
@@ -719,7 +719,7 @@ private:
                 piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_UNAVAILABLE,
                                   event_id);
                 std::fprintf(stderr,
-                             "k230_overlay: piezo alert=unavailable event=%u\n",
+                             "k230_overlayd: piezo alert=unavailable event=%u\n",
                              event_id);
             }
         } else if (!unavailable && !departure_alert_triggered &&
@@ -730,14 +730,14 @@ private:
                 piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_ACTIVATED,
                                   event_id);
                 std::fprintf(stderr,
-                             "k230_overlay: piezo alert=activated event=%u\n",
+                             "k230_overlayd: piezo alert=activated event=%u\n",
                              event_id);
             } else if (!hud_.controller_active && previous_controller_active_) {
                 const uint32_t event_id = next_piezo_event_id();
                 piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_DEACTIVATED,
                                   event_id);
                 std::fprintf(stderr,
-                             "k230_overlay: piezo alert=deactivated event=%u\n",
+                             "k230_overlayd: piezo alert=deactivated event=%u\n",
                              event_id);
             }
         }
@@ -788,13 +788,13 @@ private:
     {
         FILE *file = std::fopen(kDisplayReadyPath, "w");
         if (!file) {
-            std::perror("k230_overlay display ready fopen");
+            std::perror("k230_overlayd display ready fopen");
             return;
         }
         std::fprintf(file, "%llu\n", static_cast<unsigned long long>(k230_now_ns()));
         std::fclose(file);
         ready_file_written_ = true;
-        std::fprintf(stderr, "k230_overlay: display ready %s preview_frames=%u\n",
+        std::fprintf(stderr, "k230_overlayd: display ready %s preview_frames=%u\n",
                      kDisplayReadyPath, startup_preview_frames_);
     }
 
@@ -869,7 +869,7 @@ int main()
         K230OverlayDisplay app(config);
         return app.run();
     } catch (const std::exception &e) {
-        std::fprintf(stderr, "k230_overlay error: %s\n", e.what());
+        std::fprintf(stderr, "k230_overlayd error: %s\n", e.what());
         return 1;
     }
 }

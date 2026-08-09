@@ -1,8 +1,8 @@
 #include "can_replay.h"
 #include "hyundai_can.h"
 #include "k230_ipc.h"
-#include "k7_lateral_controller.h"
-#include "k7_path.h"
+#include "lateral_controller.h"
+#include "path.h"
 #include "vehicle_can.h"
 
 #include <algorithm>
@@ -745,10 +745,10 @@ int main(int argc, char **argv) {
     K7LateralControllerConfig config;
     config.force_engaged = true;
     std::string error;
-    require(load_k7_steering_params_json("params/k7_yg_steering.json",
+    require(load_k7_steering_params_json("params/yg_steering.json",
                                          &config.steering_params, &error),
             "load steering params");
-    require(load_k7_driving_params_json("params/k7_yg_driving.json",
+    require(load_k7_driving_params_json("params/yg_driving.json",
                                         &config.driving_params, &error),
             "load driving params");
     require(std::fabs(config.driving_params.mdps_speed_spoof_kph - 60.0f) < 1e-6f,

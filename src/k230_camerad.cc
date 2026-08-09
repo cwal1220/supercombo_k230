@@ -1,7 +1,7 @@
 #include "app_config.h"
 #include "input_source.h"
 #include "k230_ipc.h"
-#include "setting.h"
+#include "mmz.h"
 
 #include <linux/videodev2.h>
 #include <signal.h>

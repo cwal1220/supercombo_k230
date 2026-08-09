@@ -4,7 +4,7 @@
 
 - `k230_pandad` owns Panda USB through `libusb` and publishes CAN batches to
   the ordered `/dev/shm/k230_can` shared-memory ring queue.
-- `k230_k7_controlsd` runs the standalone K7 controller at 100 Hz and publishes
+- `k230_controlsd` runs the standalone K7 controller at 100 Hz and publishes
   generated CAN batches to the ordered `/dev/shm/k230_sendcan` ring queue.
 - `k230_pandad` is the final TX gate. `K230_PANDA_TX=0` is the default and
   prevents every generated frame from reaching USB.
@@ -32,9 +32,9 @@ matches the K7 branch in the reference openpilot controller.
 
 Runtime parameters are stored in:
 
-- `params/k7_yg_steering.json`: torque PID, steering limits, vehicle geometry,
+- `params/yg_steering.json`: torque PID, steering limits, vehicle geometry,
   angle offset, and low-speed steering settings.
-- `params/k7_yg_driving.json`: model/CAN freshness, inactive release duration,
+- `params/yg_driving.json`: model/CAN freshness, inactive release duration,
   MDPS speed spoof, and lateral motion limits.
 - `params/calibration.json`: generated camera calibration state. This file is
   preserved across application and board restarts.

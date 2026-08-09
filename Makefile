@@ -32,22 +32,6 @@ CORE_OBJS := build/app_config.o \
 	build/online_calibrator.o \
 	build/ai_base.o
 
-MONOLITH_OBJS := build/main.o \
-	build/app_config.o \
-	build/common_utils.o \
-	build/model_output.o \
-	build/projection.o \
-	build/overlay_renderer.o \
-	build/calibration_service.o \
-	build/input_source.o \
-	build/json_utils.o \
-	build/lateral_control.o \
-	build/supercombo_runtime.o \
-	build/model_input_transform.o \
-	build/supercombo_model.o \
-	build/online_calibrator.o \
-	build/ai_base.o
-
 CAMERAD_OBJS := build/k230_camerad.o \
 	build/app_config.o \
 	build/common_utils.o \
@@ -71,7 +55,7 @@ MODELD_OBJS := build/k230_modeld.o \
 	build/online_calibrator.o \
 	build/ai_base.o
 
-OVERLAY_OBJS := build/k230_overlay.o \
+OVERLAY_OBJS := build/k230_overlayd.o \
 	build/app_config.o \
 	build/common_utils.o \
 	build/model_output.o \
@@ -87,17 +71,15 @@ PANDAD_OBJS := build/k230_pandad.o \
 	build/projection.o \
 	build/lateral_control.o
 
-.PHONY: all clean supercombo.elf k230_camerad k230_modeld k230_overlay k230_pandad
+.PHONY: all clean k230_camerad k230_modeld k230_overlayd k230_pandad
 
-all: $(BINDIR)/supercombo.elf $(BINDIR)/k230_camerad $(BINDIR)/k230_modeld $(BINDIR)/k230_overlay
-
-supercombo.elf: $(BINDIR)/supercombo.elf
+all: $(BINDIR)/k230_camerad $(BINDIR)/k230_modeld $(BINDIR)/k230_overlayd
 
 k230_camerad: $(BINDIR)/k230_camerad
 
 k230_modeld: $(BINDIR)/k230_modeld
 
-k230_overlay: $(BINDIR)/k230_overlay
+k230_overlayd: $(BINDIR)/k230_overlayd
 
 k230_pandad: $(BINDIR)/k230_pandad
 
@@ -131,16 +113,13 @@ build/check_model_output_parser: build/check_model_output_parser.o build/model_o
 build/libmmz.a: build/mmz.o
 	$(AR) rcs $@ $<
 
-$(BINDIR)/supercombo.elf: $(MONOLITH_OBJS) build/libmmz.a | $(BINDIR)
-	$(CXX) $(CXXFLAGS) $(MONOLITH_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group $(STATIC_LIBS) $(SHARED_LIBS) $(OPENCV_LIBS) $(LDLIBS) -Wl,--end-group
-
 $(BINDIR)/k230_camerad: $(CAMERAD_OBJS) build/libmmz.a | $(BINDIR)
 	$(CXX) $(CXXFLAGS) $(CAMERAD_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group build/libmmz.a $(SHARED_LIBS) $(LDLIBS) -Wl,--end-group
 
 $(BINDIR)/k230_modeld: $(MODELD_OBJS) build/libmmz.a | $(BINDIR)
 	$(CXX) $(CXXFLAGS) $(MODELD_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group $(STATIC_LIBS) $(SHARED_LIBS) $(LDLIBS) -Wl,--end-group
 
-$(BINDIR)/k230_overlay: $(OVERLAY_OBJS) build/libmmz.a | $(BINDIR)
+$(BINDIR)/k230_overlayd: $(OVERLAY_OBJS) build/libmmz.a | $(BINDIR)
 	$(CXX) $(CXXFLAGS) $(OVERLAY_OBJS) -o $@ $(LIBDIRS) -Wl,--start-group build/libmmz.a $(SHARED_LIBS) $(OPENCV_LIBS) $(LDLIBS) -Wl,--end-group
 
 $(BINDIR)/k230_pandad: $(PANDAD_OBJS) | $(BINDIR)

@@ -190,14 +190,14 @@ The split runtime gives the model pipeline priority and keeps display work to a
 minimal passive overlay subscriber:
 
 - `k230_manager.py`
-  - supervises `k230_overlay`, `k230_camerad`, `k230_modeld`, and
+  - supervises `k230_overlayd`, `k230_camerad`, `k230_modeld`, and
     `k230_recordd`, plus
-    `k230_pandad`, `k230_k7_controlsd`, and the parameter server when enabled
+    `k230_pandad`, `k230_controlsd`, and the parameter server when enabled
   - publishes `managerState` to `/dev/shm/k230_manager_state`
-  - starts `k230_overlay`, waits for display readiness, then starts camera,
+  - starts `k230_overlayd`, waits for display readiness, then starts camera,
     model, Panda, control, and parameter-server processes
   - runs `k230_modeld` at a higher priority than display overlay by default
-- `k230_overlay`
+- `k230_overlayd`
   - is overlay-only despite the historical name
   - owns the LCD directly through `libdisplay`/DRM and does not use Qt or touch
   - opens `/dev/video1` through the verified `v4l2_drm` preview path
@@ -242,7 +242,7 @@ minimal passive overlay subscriber:
     CAN receive batches, and can relay ordered `sendcan` batches
   - standalone default is shadow mode (`K230_PANDA_TX=0`); the manager's
     full-pipeline default enables TX
-- `k230_k7_controlsd` (optional K7 controller)
+- `k230_controlsd` (optional K7 controller)
   - enabled with `K230_ENABLE_CONTROL=1`
   - runs the openpilot-compatible lane planner and Acados lateral MPC in a
     worker, with the KIA K7 YG HEV torque controller and
@@ -258,7 +258,7 @@ minimal passive overlay subscriber:
   - publishes compact `controlState` diagnostics for the display HUD
   - does not transmit by itself; actual TX still requires `K230_PANDA_TX=1`
 
-Large AI frames are never sent through the small-message IPC. `k230_overlay`
+Large AI frames are never sent through the small-message IPC. `k230_overlayd`
 does not consume the shared AI frame ring for display; preview stays on the
 K230 `v4l2_drm` display path, while `k230_modeld` consumes the shared `640x360`
 AI ring and publishes its selected frame metadata to `k230_recordd`. This keeps
@@ -334,8 +334,6 @@ cmake --build /tmp/supercombo_k230_verify \
 
 ## Source Layout
 
-- `src/main.cc`
-  - app bootstrap only: config load, signal handling, live/replay dispatch.
 - `src/app_config.*`
   - parses the small runtime option set once at startup.
 - `src/input_source.*`
@@ -358,27 +356,24 @@ cmake --build /tmp/supercombo_k230_verify \
     `view_from_calib` matrix and compensates for the rotated `800x480` display.
 - `src/overlay_renderer.*`
   - draws plan/lane/road-edge/lead overlay with OpenCV into the CPU ARGB8888
-    buffer used by the split DRM overlay process and monolithic rollback app.
+    buffer used by the split DRM overlay process.
 - `src/openpilot_lateral_planner.*`
   - applies openpilot lane probability/width logic, lane-change state, and the
     generated Acados lateral MPC solver to produce curvature targets.
-- `src/lateral_control.*`, `src/k7_lateral_controller.*`
+- `src/lateral_control.*`, `src/lateral_controller.*`
   - expose model-side lateral diagnostics and apply the planner's lag-adjusted
-    curvature through the validated K7 torque/CAN path. `k230_k7_controlsd`
+    curvature through the validated K7 torque/CAN path. `k230_controlsd`
     tolerates a single malformed plan frame by holding the last usable path for
     at most 150 ms; the normal 250 ms model freshness timeout remains a hard
     safety gate, so a stale or invalid model still removes control. A transient
     Panda health-snapshot gap is similarly limited to 100 ms; a fresh,
     transport-ready `controls_allowed=0` is never held. Other health faults
     are released after that short hold if they persist.
-- `src/supercombo_runtime.*`
-  - owns the monolithic live/replay compatibility pipeline and thread
-    coordination. Production uses the split runtime above.
 - `src/k230_ipc.*`
   - owns the `/dev/shm` latest-message channels and shared NV12 frame ring used
     by the split runtime.
-- `src/k230_overlay.cc`, `src/k230_camerad.cc`, `src/k230_modeld.cc`
-  - openpilot-style process split. `k230_overlay` is the direct DRM overlay process;
+- `src/k230_overlayd.cc`, `src/k230_camerad.cc`, `src/k230_modeld.cc`
+  - openpilot-style process split. `k230_overlayd` is the direct DRM overlay process;
     `k230_camerad` and `k230_modeld` keep the camera/model path independent.
 - `src/k230_recordd.cc`, `src/mvx_v4l2_encoder.*`, `src/recording_writer.*`
   - low-priority data recorder, direct MVX V4L2 M2M encoder, timestamp index,
@@ -389,7 +384,7 @@ cmake --build /tmp/supercombo_k230_verify \
 - `src/panda_client.*`, `src/k230_pandad.cc`
   - optional panda USB bridge. It handles USB, health, heartbeat, receive CAN,
     and the final TX gate, but does not generate vehicle control messages.
-- `src/k230_k7_controlsd.cc`, `src/k7_lateral_controller.*`
+- `src/k230_controlsd.cc`, `src/lateral_controller.*`
   - standalone K7 YG HEV lateral controller using the validated Hyundai CAN
     bus split, torque limits, counters, checksums, 60 kph MDPS helper, and a
     20 Hz planner worker separated from the 100 Hz control loop.
@@ -401,7 +396,7 @@ cmake --build /tmp/supercombo_k230_verify \
 - `SUPERCOMBO_MODEL_FPS=N`
   - selects the model loop target from 1 to 30 FPS. The default is 20 FPS.
 - `SUPERCOMBO_PROFILE=1`
-  - prints model pipeline averages. `k230_overlay` also uses this for overlay
+  - prints model pipeline averages. `k230_overlayd` also uses this for overlay
     draw/present timing.
 - `SUPERCOMBO_CALIB_ROLL_DEG`, `SUPERCOMBO_CALIB_PITCH_DEG`,
   `SUPERCOMBO_CALIB_YAW_DEG`
@@ -441,18 +436,17 @@ cmake --build /tmp/supercombo_k230_verify \
   - disables the C908 RVV input-warp kernel for diagnostics and uses the
     bit-exact scalar fallback.
 - `SUPERCOMBO_REPLAY_NV12=/path/to/replay.scnv12`
-  - runs headless from an `SCNV12R1` NV12 replay file instead of opening the
-    camera and display. Width, height, and frame count are read from the replay
-    header. This is for validating inference and online calibration from
-    collected logs.
-  - also works with `k230_modeld` directly for split-runtime parser/model tests.
+  - when launching `k230_modeld` directly, runs headless from an `SCNV12R1`
+    NV12 replay file instead of opening the camera and display. Width, height,
+    and frame count are read from the replay header. This is for validating
+    inference and online calibration from collected logs.
 - `SUPERCOMBO_MAX_FRAMES=N`
   - stops after `N` inferred frames. This is mainly useful with replay mode.
 - `K230_ENABLE_PANDA=1`
   - manager also starts `k230_pandad`. The binary must have been built with
     `-DSUPERCOMBO_BUILD_PANDA=ON`.
 - `K230_ENABLE_CONTROL=1`
-  - manager starts `k230_pandad` and `k230_k7_controlsd`. This is the manager
+  - manager starts `k230_pandad` and `k230_controlsd`. This is the manager
     default.
   - no openpilot checkout or Python native extension is required.
 - `K230_PANDA_SAFETY=nooutput|silent|hyundai|hyundaiCommunity|allOutput`
@@ -486,12 +480,12 @@ cmake --build /tmp/supercombo_k230_verify \
     commands brakes; the driver remains responsible for braking when the stock
     cruise cannot maintain a safe following distance.
 - `K230_K7_STEERING_PARAMS=/path/to/steering_params.json`
-  - overrides the default `params/k7_yg_steering.json` file.
+  - overrides the default `params/yg_steering.json` file.
 - `K230_K7_DRIVING_PARAMS=/path/to/driving_params.json`
-  - overrides `params/k7_yg_driving.json`, which contains model/CAN freshness,
+  - overrides `params/yg_driving.json`, which contains model/CAN freshness,
     inactive release, MDPS 60 kph spoof, and lateral motion limits.
 - `K230_K7_ADAPTIVE_CRUISE_PARAMS=/path/to/adaptive_cruise.json`
-  - overrides `params/k7_yg_adaptive_cruise.json`. The web editor exposes it
+  - overrides `params/yg_adaptive_cruise.json`. The web editor exposes it
     as a separate vision-cruise menu; valid changes are hot-reloaded on the
     next 100 Hz control tick without restarting the pipeline.
 - `K230_ENABLE_PARAM_SERVER=0|1`
@@ -525,7 +519,7 @@ A refused engage request shows its gate reason on the HUD and plays the
 
 The tracked JSON files in `params/` are the source of truth for K7 steering,
 driving, vision-cruise, recording, and display configuration. Changes are
-written atomically. Control changes are signaled to `k230_k7_controlsd` and
+written atomically. Control changes are signaled to `k230_controlsd` and
 also detected by its 100 ms fallback poll, while recording and display changes
 are applied directly by their owning processes.
 `params/calibration.json` is also tracked as the initial calibration seed. The
@@ -540,7 +534,7 @@ only be exposed on a trusted vehicle or development network. It can also be
 started directly:
 
 ```sh
-python3 scripts/k7_param_server.py --host 0.0.0.0 --port 8080
+python3 scripts/param_server.py --host 0.0.0.0 --port 8080
 ```
 
 ### Production defaults
@@ -580,9 +574,9 @@ cmake --build build/host-checks --target check_panda_can_codec -j2
 
 ### NV12 replay
 
-To run an existing `SCNV12R1` replay on the board:
+To run an existing `SCNV12R1` replay through the split model process on the board:
 
 ```sh
 SUPERCOMBO_REPLAY_NV12=/root/supercombo_k230/replay_120.scnv12 \
-  ./supercombo.elf model/supercombo.kmodel 0
+  ./k230_modeld model/supercombo.kmodel 0
 ```

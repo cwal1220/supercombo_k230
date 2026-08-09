@@ -1,4 +1,4 @@
-#include "k7_adaptive_cruise.h"
+#include "adaptive_cruise.h"
 
 #include <cmath>
 #include <cstdio>
@@ -264,7 +264,7 @@ void verify_repository_config_loads() {
   K7AdaptiveCruiseConfig config;
   std::string error;
   require(load_k7_adaptive_cruise_params_json(
-              "params/k7_yg_adaptive_cruise.json", &config, &error),
+              "params/yg_adaptive_cruise.json", &config, &error),
           error.c_str());
   require(config.enabled && near(config.following_time_s, 1.8f) &&
               near(config.standstill_gap_m, 5.0f) &&

@@ -8,12 +8,11 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 compile_commands.json
-supercombo.elf
 k230_camerad
 k230_modeld
-k230_overlay
+k230_overlayd
 k230_pandad
-k230_k7_controlsd
+k230_controlsd
 k230_recordd
 check_k7_control_replay
 check_model_output_parser

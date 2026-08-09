@@ -19,8 +19,8 @@ MAX_PROCESSES = 7
 MANAGER_STATE_SIZE = 8 + 4 + 4 + PROCESS.size * MAX_PROCESSES
 DISPLAY_READY_FILE = "/tmp/k230_display_ready"
 DISPLAY_READY_TIMEOUT_MS = 7000
-START_ORDER = ("k230_overlay", "k230_camerad", "k230_recordd", "k230_modeld")
-PROCESS_ORDER = ("k230_camerad", "k230_modeld", "k230_overlay", "k230_recordd")
+START_ORDER = ("k230_overlayd", "k230_camerad", "k230_recordd", "k230_modeld")
+PROCESS_ORDER = ("k230_camerad", "k230_modeld", "k230_overlayd", "k230_recordd")
 DEFAULT_KMODEL_CANDIDATES = (
     "model/supercombo.kmodel",
     "models/supercombo.kmodel",
@@ -169,7 +169,7 @@ class Manager:
         specs = [
             ProcSpec("k230_camerad", ["./k230_camerad"], 0),
             ProcSpec("k230_modeld", ["./k230_modeld", self.kmodel, self.debug], -15),
-            ProcSpec("k230_overlay", ["./k230_overlay"], 10),
+            ProcSpec("k230_overlayd", ["./k230_overlayd"], 10),
             ProcSpec("k230_recordd", ["./k230_recordd"], 15),
         ]
         if env_enabled("K230_ENABLE_PANDA") or enable_control:
@@ -177,18 +177,18 @@ class Manager:
             self.start_order.append("k230_pandad")
             self.process_order.append("k230_pandad")
         if enable_control:
-            specs.append(ProcSpec("k230_controlsd", ["./k230_k7_controlsd"], -8))
+            specs.append(ProcSpec("k230_controlsd", ["./k230_controlsd"], -8))
             self.start_order.append("k230_controlsd")
             self.process_order.append("k230_controlsd")
         if env_enabled("K230_ENABLE_PARAM_SERVER", enable_control):
             server_script = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "k7_param_server.py"
+                os.path.dirname(os.path.abspath(__file__)), "param_server.py"
             )
             specs.append(
-                ProcSpec("k7_param_server", [sys.executable, server_script], 10)
+                ProcSpec("param_server", [sys.executable, server_script], 10)
             )
-            self.start_order.append("k7_param_server")
-            self.process_order.append("k7_param_server")
+            self.start_order.append("param_server")
+            self.process_order.append("param_server")
         for spec in specs:
             self.procs[spec.name] = ProcState(spec=spec)
         self.display_ready_file = DISPLAY_READY_FILE

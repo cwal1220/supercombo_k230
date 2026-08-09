@@ -1,8 +1,8 @@
 #include "k230_ipc.h"
 #include "departure_alert.h"
-#include "k7_adaptive_cruise.h"
-#include "k7_lateral_controller.h"
-#include "k7_path.h"
+#include "adaptive_cruise.h"
+#include "lateral_controller.h"
+#include "path.h"
 #include "openpilot_lateral_planner.h"
 #include "param_paths.h"
 #include "steering_params.h"
@@ -123,7 +123,7 @@ bool open_when_ready(K230LatestChannel *channel, const char *topic,
                      size_t size, bool create) {
   while (!g_stop) {
     if (channel->open(topic, size, create)) return true;
-    std::fprintf(stderr, "k230_k7_controlsd: waiting for %s\n", topic);
+    std::fprintf(stderr, "k230_controlsd: waiting for %s\n", topic);
     std::this_thread::sleep_for(std::chrono::seconds(1));
   }
   return false;
@@ -132,7 +132,7 @@ bool open_when_ready(K230LatestChannel *channel, const char *topic,
 bool open_when_ready(K230CanQueue *queue, const char *topic, bool create) {
   while (!g_stop) {
     if (queue->open(topic, kK230CanQueueSlots, create)) return true;
-    std::fprintf(stderr, "k230_k7_controlsd: waiting for %s\n", topic);
+    std::fprintf(stderr, "k230_controlsd: waiting for %s\n", topic);
     std::this_thread::sleep_for(std::chrono::seconds(1));
   }
   return false;
@@ -312,20 +312,20 @@ int main() {
     const char *adaptive_cruise_override =
         std::getenv("K230_K7_ADAPTIVE_CRUISE_PARAMS");
     const std::string steering_path = steering_override && steering_override[0] != '\0'
-        ? steering_override : k230_param_path("k7_yg_steering.json");
+        ? steering_override : k230_param_path("yg_steering.json");
     const std::string driving_path = driving_override && driving_override[0] != '\0'
-        ? driving_override : k230_param_path("k7_yg_driving.json");
+        ? driving_override : k230_param_path("yg_driving.json");
     const std::string adaptive_cruise_path =
         adaptive_cruise_override && adaptive_cruise_override[0] != '\0'
             ? adaptive_cruise_override
-            : k230_param_path("k7_yg_adaptive_cruise.json");
+            : k230_param_path("yg_adaptive_cruise.json");
     std::string error;
     if (!load_runtime_params(steering_path, driving_path, adaptive_cruise_path,
                              &config, &adaptive_cruise_config, &error)) {
       throw std::runtime_error(error);
     }
     std::fprintf(stderr,
-                 "k230_k7_controlsd: params steering=%s driving=%s adaptive=%s "
+                 "k230_controlsd: params steering=%s driving=%s adaptive=%s "
                  "mdpsSpoof=%.1fkph adaptiveCruise=%u gap=%.1fm/%.1fs "
                  "decel=%.1fkph/s\n",
                  steering_path.c_str(), driving_path.c_str(),
@@ -417,7 +417,7 @@ int main() {
             adaptive_cruise_controller.update_config(adaptive_cruise_config);
             ++param_generation;
             std::fprintf(stderr,
-                         "k230_k7_controlsd: params reloaded generation=%u "
+                         "k230_controlsd: params reloaded generation=%u "
                          "mdpsSpoof=%.1fkph adaptiveCruise=%u gap=%.1fm/%.1fs "
                          "decel=%.1fkph/s\n",
                          param_generation,
@@ -430,7 +430,7 @@ int main() {
                          adaptive_cruise_config.deceleration_rate_kph_per_s);
           } else {
             std::fprintf(stderr,
-                         "k230_k7_controlsd: params reload rejected: %s\n",
+                         "k230_controlsd: params reload rejected: %s\n",
                          error.c_str());
           }
           steering_stamp = current_steering_stamp;
@@ -533,7 +533,7 @@ int main() {
         std::snprintf(engage_reject_block, sizeof(engage_reject_block), "%s",
                       last_result.active_block.c_str());
         std::fprintf(stderr,
-                     "k230_k7_controlsd: engage rejected block=%s event=%u\n",
+                     "k230_controlsd: engage rejected block=%s event=%u\n",
                      engage_reject_block, engage_reject_event_id);
       } else if (have_previous_engaged &&
                  last_result.engaged != previous_engaged) {
@@ -543,7 +543,7 @@ int main() {
           if (++disengage_event_id == 0) disengage_event_id = 1;
         }
         std::fprintf(stderr,
-                     "k230_k7_controlsd: engaged transition %u->%u "
+                     "k230_controlsd: engaged transition %u->%u "
                      "active=%u block=%s button=%d gear=%d "
                      "panda=%u/%u\n",
                      previous_engaged ? 1U : 0U, last_result.engaged ? 1U : 0U,
@@ -554,7 +554,7 @@ int main() {
       }
       if (have_previous_active && last_result.active != previous_active) {
         std::fprintf(stderr,
-                     "k230_k7_controlsd: active transition %u->%u "
+                     "k230_controlsd: active transition %u->%u "
                      "engaged=%u block=%s raw=%s rawPoints=%zu pathPoints=%zu "
                      "hold=%u modelAgeMs=%llu panda=%u/%u "
                      "state=%u/%u/%u/%u safety=%u:%u hb=%u fresh=%u\n",
@@ -664,7 +664,7 @@ int main() {
         last_logged_alert_event_id = departure_alert.event_id;
         std::fprintf(
             stderr,
-            "k230_k7_controlsd: departure alert=%s event=%u "
+            "k230_controlsd: departure alert=%s event=%u "
             "visionLead=%.1fm rel=%.1fm/s p=%.2f plan=%.1fm "
             "stopline=%.1fm p=%.2f\n",
             departure_alert_name(departure_alert.type),
@@ -761,7 +761,7 @@ int main() {
       if (work_end - log_start >= std::chrono::seconds(1)) {
         const double window_s = std::chrono::duration<double>(work_end - log_start).count();
         std::fprintf(stderr,
-                     "k230_k7_controlsd: hz=%.3f work_avg_us=%.1f work_max_us=%.1f "
+                     "k230_controlsd: hz=%.3f work_avg_us=%.1f work_max_us=%.1f "
                      "misses=%u can=%u generated=%u errors=%u txFull=%u rxStale=%u "
                      "queue=%llu/%llu params=%u "
                      "engaged=%u active=%u "
@@ -804,10 +804,10 @@ int main() {
 
       if (next_tick > Clock::now()) std::this_thread::sleep_until(next_tick);
     }
-    std::fprintf(stderr, "k230_k7_controlsd: stopping\n");
+    std::fprintf(stderr, "k230_controlsd: stopping\n");
     return 0;
   } catch (const std::exception &error) {
-    std::fprintf(stderr, "k230_k7_controlsd error: %s\n", error.what());
+    std::fprintf(stderr, "k230_controlsd error: %s\n", error.what());
     return 1;
   }
 }
