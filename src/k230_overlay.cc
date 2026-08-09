@@ -34,16 +34,6 @@ constexpr unsigned kLogicalDisplayHeight = 480;
 
 volatile sig_atomic_t g_stop = 0;
 
-void signal_handler(int)
-{
-    g_stop = 1;
-}
-
-uint64_t timeval_us(const timeval &tv)
-{
-    return static_cast<uint64_t>(tv.tv_sec) * 1000000ULL + tv.tv_usec;
-}
-
 constexpr const char *kDisplayReadyPath = "/tmp/k230_display_ready";
 constexpr int kPreviewVideoDevice = 1;
 constexpr unsigned kPreviewBufferCount = 8;
@@ -52,11 +42,6 @@ constexpr unsigned kOverlayBufferCount = 2;
 constexpr uint64_t kStateFreshNs = 2000000000ULL;
 // Leave margin below three 60 Hz display callbacks so redraws do not slip to 15 Hz.
 constexpr uint64_t kOverlayIntervalNs = 45000000ULL;
-
-const char *display_ready_path()
-{
-    return kDisplayReadyPath;
-}
 
 struct EngageBlockLabel {
     const char *reason;
@@ -485,7 +470,7 @@ private:
             display_ = nullptr;
         }
         if (ready_file_written_) {
-            unlink(display_ready_path());
+            unlink(kDisplayReadyPath);
             ready_file_written_ = false;
         }
     }
@@ -801,7 +786,7 @@ private:
 
     void publish_display_ready()
     {
-        FILE *file = std::fopen(display_ready_path(), "w");
+        FILE *file = std::fopen(kDisplayReadyPath, "w");
         if (!file) {
             std::perror("k230_overlay display ready fopen");
             return;
@@ -810,7 +795,7 @@ private:
         std::fclose(file);
         ready_file_written_ = true;
         std::fprintf(stderr, "k230_overlay: display ready %s preview_frames=%u\n",
-                     display_ready_path(), startup_preview_frames_);
+                     kDisplayReadyPath, startup_preview_frames_);
     }
 
     OverlayRenderer overlay_;
@@ -877,8 +862,7 @@ private:
 
 int main()
 {
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+    install_stop_signal_handlers(&g_stop);
 
     try {
         AppConfig config = AppConfig::from_env_defaults();

@@ -26,10 +26,6 @@ constexpr unsigned kRecordingBitrate = 5000000;
 constexpr uint64_t kConfigPollIntervalNs = 250000000ULL;
 constexpr uint64_t kMaximumFrameAgeNs = 100000000ULL;
 
-void signal_handler(int) {
-  g_stop = 1;
-}
-
 std::string env_string(const char *name, const char *fallback) {
   const char *value = std::getenv(name);
   return value && value[0] ? value : fallback;
@@ -68,8 +64,7 @@ void open_optional_channel(K230LatestChannel &channel, bool *opened,
 }  // namespace
 
 int main() {
-  signal(SIGINT, signal_handler);
-  signal(SIGTERM, signal_handler);
+  install_stop_signal_handlers(&g_stop);
 
   try {
     const std::string params_directory = env_string("K230_PARAMS_DIR", "params");

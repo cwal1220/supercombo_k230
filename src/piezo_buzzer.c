@@ -438,13 +438,6 @@ static int pwm_set_enabled(PiezoPwm *pwm, int enabled)
   return 0;
 }
 
-static void sleep_ms(unsigned duration_ms)
-{
-  struct timespec delay = {
-      (time_t)(duration_ms / 1000), (long)(duration_ms % 1000) * 1000000L};
-  while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {}
-}
-
 static int play_sequence(PiezoAlert alert)
 {
   if (alert < 0 || alert >= PIEZO_ALERT_COUNT) return -1;
@@ -477,7 +470,10 @@ static int play_sequence(PiezoAlert alert)
         break;
       }
     }
-    sleep_ms(tone.duration_ms);
+    struct timespec delay = {
+        (time_t)(tone.duration_ms / 1000),
+        (long)(tone.duration_ms % 1000) * 1000000L};
+    while (nanosleep(&delay, &delay) != 0 && errno == EINTR) {}
   }
   pwm_stop(&pwm);
   return result;

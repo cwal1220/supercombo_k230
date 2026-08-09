@@ -1,5 +1,6 @@
 #include "hyundai_can.h"
 
+#include "common_utils.h"
 #include "hyundai_steering.h"
 
 #include <algorithm>
@@ -9,11 +10,6 @@ namespace {
 
 uint32_t clamp_u32(int value, int lo, int hi) {
   return static_cast<uint32_t>(std::min(std::max(value, lo), hi));
-}
-
-float clamp_float(float value, float lo, float hi) {
-  if (!std::isfinite(value)) return lo;
-  return std::min(std::max(value, lo), hi);
 }
 
 void set_signal_le(std::array<uint8_t, 8> *data, int start_bit, int length, uint32_t raw) {
@@ -28,19 +24,6 @@ void set_signal_le(std::array<uint8_t, 8> *data, int start_bit, int length, uint
       (*data)[byte_index] &= static_cast<uint8_t>(~mask);
     }
   }
-}
-
-uint32_t get_signal_le(const uint8_t *data, int start_bit, int length) {
-  uint32_t raw = 0;
-  for (int i = 0; i < length; ++i) {
-    const int bit = start_bit + i;
-    const int byte_index = bit / 8;
-    const int bit_index = bit % 8;
-    if (data[byte_index] & (1U << bit_index)) {
-      raw |= 1U << i;
-    }
-  }
-  return raw;
 }
 
 void set_common_lkas_fields(std::array<uint8_t, 8> *data, const HyundaiLkas11Values &values) {

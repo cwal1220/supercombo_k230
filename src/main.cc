@@ -1,10 +1,9 @@
 #include "app_config.h"
+#include "common_utils.h"
 #include "mmz.h"
 #include "supercombo_runtime.h"
 
 #include <nncase/runtime/util.h>
-
-#include <signal.h>
 
 #include <exception>
 #include <iostream>
@@ -16,11 +15,6 @@ using std::endl;
 namespace {
 
 volatile sig_atomic_t g_signal_stop = 0;
-
-void on_signal(int)
-{
-    g_signal_stop = 1;
-}
 
 } // namespace
 
@@ -42,8 +36,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    signal(SIGINT, on_signal);
-    signal(SIGTERM, on_signal);
+    install_stop_signal_handlers(&g_signal_stop);
 
     SupercomboRuntime runtime(config);
     const int ret = config.replay_enabled()

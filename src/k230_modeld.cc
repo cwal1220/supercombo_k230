@@ -21,16 +21,6 @@ namespace {
 
 volatile sig_atomic_t g_stop = 0;
 
-void signal_handler(int)
-{
-    g_stop = 1;
-}
-
-uint64_t timeval_us(const timeval &tv)
-{
-    return static_cast<uint64_t>(tv.tv_sec) * 1000000ULL + tv.tv_usec;
-}
-
 uint64_t steady_ns()
 {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -277,8 +267,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
 
 int main(int argc, char *argv[])
 {
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+    install_stop_signal_handlers(&g_stop);
 
     try {
         AppConfig config = AppConfig::from_env(argc, argv);

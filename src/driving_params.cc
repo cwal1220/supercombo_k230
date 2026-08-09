@@ -1,23 +1,13 @@
 #include "driving_params.h"
 
+#include "common_utils.h"
 #include "json_utils.h"
 
-#include <algorithm>
-#include <cmath>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
 
 namespace {
-
-float clamp_float(float value, float lo, float hi) {
-  if (!std::isfinite(value)) return lo;
-  return std::min(std::max(value, lo), hi);
-}
-
-int clamp_int(float value, int lo, int hi) {
-  return std::min(std::max(static_cast<int>(std::lround(value)), lo), hi);
-}
 
 void parse_optional_float(const std::string &text, const std::string &key,
                           float lo, float hi, float *field) {

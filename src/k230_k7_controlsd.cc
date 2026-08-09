@@ -41,10 +41,6 @@ constexpr uint64_t kMaxCanRxAgeNs = 100000000ULL;
 constexpr uint64_t kPathInvalidHoldNs = 150000000ULL;
 constexpr int kParamPollIntervalMs = 100;
 
-void stop_signal_handler(int) {
-  g_stop = 1;
-}
-
 void reload_signal_handler(int) {
   g_reload_params = 1;
 }
@@ -285,8 +281,7 @@ private:
 }  // namespace
 
 int main() {
-  signal(SIGINT, stop_signal_handler);
-  signal(SIGTERM, stop_signal_handler);
+  install_stop_signal_handlers(&g_stop);
   signal(SIGHUP, reload_signal_handler);
 
   try {

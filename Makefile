@@ -19,6 +19,7 @@ LDLIBS := -pthread -latomic -ldl
 BINDIR := build/bin
 
 CORE_OBJS := build/app_config.o \
+	build/common_utils.o \
 	build/model_output.o \
 	build/projection.o \
 	build/calibration_service.o \
@@ -33,6 +34,7 @@ CORE_OBJS := build/app_config.o \
 
 MONOLITH_OBJS := build/main.o \
 	build/app_config.o \
+	build/common_utils.o \
 	build/model_output.o \
 	build/projection.o \
 	build/overlay_renderer.o \
@@ -48,6 +50,7 @@ MONOLITH_OBJS := build/main.o \
 
 CAMERAD_OBJS := build/k230_camerad.o \
 	build/app_config.o \
+	build/common_utils.o \
 	build/input_source.o \
 	build/model_output.o \
 	build/projection.o \
@@ -55,6 +58,7 @@ CAMERAD_OBJS := build/k230_camerad.o \
 
 MODELD_OBJS := build/k230_modeld.o \
 	build/app_config.o \
+	build/common_utils.o \
 	build/model_output.o \
 	build/projection.o \
 	build/calibration_service.o \
@@ -69,6 +73,7 @@ MODELD_OBJS := build/k230_modeld.o \
 
 OVERLAY_OBJS := build/k230_overlay.o \
 	build/app_config.o \
+	build/common_utils.o \
 	build/model_output.o \
 	build/projection.o \
 	build/overlay_renderer.o \
@@ -76,6 +81,7 @@ OVERLAY_OBJS := build/k230_overlay.o \
 
 PANDAD_OBJS := build/k230_pandad.o \
 	build/panda_client.o \
+	build/common_utils.o \
 	build/k230_ipc.o \
 	build/model_output.o \
 	build/projection.o \

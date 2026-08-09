@@ -1,5 +1,6 @@
 #include "k7_adaptive_cruise.h"
 
+#include "common_utils.h"
 #include "json_utils.h"
 
 #include <algorithm>
@@ -18,11 +19,6 @@ constexpr float kMphToKph = 1.609344f;
 constexpr float kDisplayStep = 2.0f;
 constexpr float kMinimumSpeedKph = 30.0f;
 constexpr float kMinimumSpeedMph = 20.0f;
-
-float clamp_float(float value, float minimum, float maximum) {
-  if (!std::isfinite(value)) return minimum;
-  return std::clamp(value, minimum, maximum);
-}
 
 bool valid_set_speed(float speed_kph) {
   return std::isfinite(speed_kph) && speed_kph > 0.0f && speed_kph < 300.0f;

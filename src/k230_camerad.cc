@@ -15,22 +15,11 @@ namespace {
 
 volatile sig_atomic_t g_stop = 0;
 
-void signal_handler(int)
-{
-    g_stop = 1;
-}
-
-uint64_t timeval_us(const timeval &tv)
-{
-    return static_cast<uint64_t>(tv.tv_sec) * 1000000ULL + tv.tv_usec;
-}
-
 } // namespace
 
 int main()
 {
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+    install_stop_signal_handlers(&g_stop);
 
     try {
         AppConfig config = AppConfig::from_env_defaults();

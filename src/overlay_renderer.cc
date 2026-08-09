@@ -791,22 +791,6 @@ bool project_display_point(const ModelPoint &point, float y_offset, float z_offs
     return true;
 }
 
-bool append_projected_point(std::vector<cv::Point> *vertices,
-                            const ModelPoint &point, float y_offset, float z_offset,
-                            const ProjectionState &projection,
-                            int logical_width, int logical_height,
-                            bool rotate_landscape)
-{
-    cv::Point projected;
-    if (!project_display_point(point, y_offset, z_offset, projection,
-                               logical_width, logical_height, rotate_landscape,
-                               &projected)) {
-        return false;
-    }
-    vertices->push_back(projected);
-    return true;
-}
-
 void draw_model_ribbon(cv::Mat &img,
                        const std::array<ModelPoint, kTrajectorySize> &points,
                        float half_width, float z_offset, float max_distance,
@@ -881,46 +865,6 @@ void draw_model_ribbon(cv::Mat &img,
     const cv::Point *polygon[] = {vertices.data()};
     const int count[] = {static_cast<int>(vertices.size())};
     cv::fillPoly(img, polygon, count, 1, color, cv::LINE_8);
-}
-
-void draw_stop_line(cv::Mat &img, const ParsedStopLine &stop_line,
-                    const ProjectionState &projection,
-                    int logical_width, int logical_height, bool rotate_landscape)
-{
-    constexpr float kProbabilityThreshold = 0.7f;
-    constexpr float kMinDistanceM = 0.5f;
-    constexpr float kMaxDistanceM = 80.0f;
-    constexpr float kHalfWidthM = 2.0f;
-    constexpr float kHalfDepthM = 0.5f;
-
-    const ModelPoint &center = stop_line.position;
-    if (!stop_line.valid || stop_line.probability < kProbabilityThreshold ||
-        !std::isfinite(center.x) || !std::isfinite(center.y) ||
-        !std::isfinite(center.z) ||
-        center.x < kMinDistanceM || center.x > kMaxDistanceM) {
-        return;
-    }
-
-    const std::array<ModelPoint, 4> corners = {{
-        {center.x + kHalfDepthM, center.y - kHalfWidthM, center.z + kModelHeight},
-        {center.x + kHalfDepthM, center.y + kHalfWidthM, center.z + kModelHeight},
-        {center.x - kHalfDepthM, center.y + kHalfWidthM, center.z + kModelHeight},
-        {center.x - kHalfDepthM, center.y - kHalfWidthM, center.z + kModelHeight},
-    }};
-
-    std::vector<cv::Point> vertices;
-    vertices.reserve(corners.size());
-    for (const ModelPoint &corner : corners) {
-        if (!append_projected_point(&vertices, corner, 0.0f, 0.0f, projection,
-                                    logical_width, logical_height,
-                                    rotate_landscape)) {
-            return;
-        }
-    }
-
-    const int alpha = static_cast<int>(
-        std::clamp(stop_line.probability, 0.0f, 1.0f) * 255.0f);
-    cv::fillConvexPoly(img, vertices, bgra(0, 0, 179, alpha), cv::LINE_8);
 }
 
 cv::Scalar openpilot_path_color(const OverlayHudState &hud)
@@ -1005,9 +949,6 @@ void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &outp
                                   projection, logical_width, logical_height, rotate_landscape);
             }
         }
-
-        draw_stop_line(frame, output.stop_line, projection,
-                       logical_width, logical_height, rotate_landscape);
 
         ParsedLeadPoint lead;
         float lead_probability = 0.0f;

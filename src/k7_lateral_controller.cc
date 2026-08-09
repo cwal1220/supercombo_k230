@@ -1,5 +1,7 @@
 #include "k7_lateral_controller.h"
 
+#include "common_utils.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -14,11 +16,6 @@ constexpr float kDesiredCurvatureLimit = 0.1f;
 constexpr float kMaxCurvature = 0.3f;
 constexpr float kGravity = 9.8f;
 constexpr double kPandaEngageGraceS = 1.0;
-
-float clamp_float(float value, float lo, float hi) {
-  if (!std::isfinite(value)) return lo;
-  return std::min(std::max(value, lo), hi);
-}
 
 bool is_hard_disengage_block(const std::string &block) {
   return block == "gear_not_drive" ||

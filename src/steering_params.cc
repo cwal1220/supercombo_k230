@@ -1,5 +1,7 @@
 #include "steering_params.h"
 
+#include "common_utils.h"
+
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
@@ -23,15 +25,6 @@ constexpr float kCivicCenterToFront = kCivicWheelbase * 0.4f;
 constexpr float kCivicCenterToRear = kCivicWheelbase - kCivicCenterToFront;
 constexpr float kCivicTireStiffnessFront = 192150.0f;
 constexpr float kCivicTireStiffnessRear = 202500.0f;
-
-float clamp_float(float value, float lo, float hi) {
-  if (!std::isfinite(value)) return lo;
-  return std::min(std::max(value, lo), hi);
-}
-
-int clamp_int(int value, int lo, int hi) {
-  return std::min(std::max(value, lo), hi);
-}
 
 float interp(float x, std::initializer_list<float> xp, std::initializer_list<float> fp) {
   const auto xs = xp.begin();

@@ -1,5 +1,7 @@
 #include "vehicle_can.h"
 
+#include "common_utils.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -42,18 +44,6 @@ bool expected_openpilot_k7_bus(uint32_t address, uint8_t bus) {
     default:
       return true;
   }
-}
-
-// little-endian DBC 신호를 raw integer로 읽는다.
-uint32_t get_signal_le(const uint8_t *data, int start_bit, int length) {
-  uint32_t raw = 0;
-  for (int i = 0; i < length; ++i) {
-    const int bit = start_bit + i;
-    if (data[bit / 8] & (1U << (bit % 8))) {
-      raw |= 1U << i;
-    }
-  }
-  return raw;
 }
 
 // signed raw 값을 지정 bit 수로 sign extension한다.

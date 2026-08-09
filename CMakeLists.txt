@@ -127,6 +127,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
 
   set(COMMON_SOURCES
     src/app_config.cc
+    src/common_utils.cc
     src/model_output.cc
     src/projection.cc
   )
@@ -195,6 +196,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
 
   add_executable(k230_recordd
     src/k230_recordd.cc
+    src/common_utils.cc
     src/json_utils.cc
     src/k230_can_queue.cc
     src/k230_ipc.cc
@@ -228,6 +230,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
       src/panda_client.cc
       src/panda_can_codec.cc
       src/k230_can_queue.cc
+      src/common_utils.cc
       src/k230_ipc.cc
       src/model_output.cc
       src/projection.cc
@@ -238,7 +241,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     add_executable(k230_k7_controlsd
       src/k230_k7_controlsd.cc
       src/k230_can_queue.cc
-      src/k230_latest_channel.cc
+      src/common_utils.cc
       src/openpilot_lateral_planner.cc
     )
     target_include_directories(k230_k7_controlsd SYSTEM PRIVATE

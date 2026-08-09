@@ -21,11 +21,6 @@ volatile sig_atomic_t g_stop = 0;
 constexpr uint64_t kCanPublishIntervalNs = 10000000ULL;
 constexpr uint64_t kMaxSendCanAgeNs = 100000000ULL;
 
-void signal_handler(int)
-{
-    g_stop = 1;
-}
-
 bool env_enabled(const char *name, bool default_value = false)
 {
     const char *value = std::getenv(name);
@@ -147,8 +142,7 @@ void publish_health(K230LatestChannel &state_pub, PandaClient &panda, bool tx_en
 
 int main()
 {
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+    install_stop_signal_handlers(&g_stop);
 
     try {
         K230CanQueue can_pub;

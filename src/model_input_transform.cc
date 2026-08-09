@@ -388,8 +388,71 @@ void ModelInputTransform::warp_rvv(const uint8_t *nv12, int src_w, int src_h,
 
     for (int plane = 0; plane < 4; ++plane)
         sample_plane(y_src, y_maps_[plane], 0, out + plane * plane_size);
-    sample_plane(uv_src, uv_map_, 0, out + 4 * plane_size);
-    sample_plane(uv_src, uv_map_, 1, out + 5 * plane_size);
+
+    // U와 V는 같은 위치와 가중치를 사용하므로 LUT와 주소 계산을 한 번만 한다.
+    float *u_dst = out + 4 * plane_size;
+    float *v_dst = out + 5 * plane_size;
+    size_t offset_index = 0;
+    while (offset_index < uv_map_.size()) {
+        const size_t vl = __riscv_vsetvl_e32m4(uv_map_.size() - offset_index);
+        const vuint32m4_t offset = __riscv_vle32_v_u32m4(
+            uv_map_.offset.data() + offset_index, vl);
+        const vuint16m2_t x_step16 = __riscv_vle16_v_u16m2(
+            uv_map_.x_step.data() + offset_index, vl);
+        const vuint16m2_t y_step16 = __riscv_vle16_v_u16m2(
+            uv_map_.y_step.data() + offset_index, vl);
+        const vuint32m4_t x_step = __riscv_vzext_vf2_u32m4(x_step16, vl);
+        const vuint32m4_t y_step = __riscv_vzext_vf2_u32m4(y_step16, vl);
+        const vuint32m4_t offset_x = __riscv_vadd_vv_u32m4(offset, x_step, vl);
+        const vuint32m4_t offset_y = __riscv_vadd_vv_u32m4(offset, y_step, vl);
+        const vuint32m4_t offset_xy = __riscv_vadd_vv_u32m4(offset_y, x_step, vl);
+        const vuint32m4_t offset_v = __riscv_vadd_vx_u32m4(offset, 1, vl);
+        const vuint32m4_t offset_vx = __riscv_vadd_vx_u32m4(offset_x, 1, vl);
+        const vuint32m4_t offset_vy = __riscv_vadd_vx_u32m4(offset_y, 1, vl);
+        const vuint32m4_t offset_vxy = __riscv_vadd_vx_u32m4(offset_xy, 1, vl);
+
+        const vuint16m2_t weight0 = __riscv_vle16_v_u16m2(
+            uv_map_.weight[0].data() + offset_index, vl);
+        const vuint16m2_t weight1 = __riscv_vle16_v_u16m2(
+            uv_map_.weight[1].data() + offset_index, vl);
+        const vuint16m2_t weight2 = __riscv_vle16_v_u16m2(
+            uv_map_.weight[2].data() + offset_index, vl);
+        const vuint16m2_t weight3 = __riscv_vle16_v_u16m2(
+            uv_map_.weight[3].data() + offset_index, vl);
+
+        auto interpolate = [&](vuint32m4_t channel_offset,
+                               vuint32m4_t channel_offset_x,
+                               vuint32m4_t channel_offset_y,
+                               vuint32m4_t channel_offset_xy) {
+            const vuint8m1_t pixel0 = __riscv_vluxei32_v_u8m1(
+                uv_src, channel_offset, vl);
+            const vuint8m1_t pixel1 = __riscv_vluxei32_v_u8m1(
+                uv_src, channel_offset_x, vl);
+            const vuint8m1_t pixel2 = __riscv_vluxei32_v_u8m1(
+                uv_src, channel_offset_y, vl);
+            const vuint8m1_t pixel3 = __riscv_vluxei32_v_u8m1(
+                uv_src, channel_offset_xy, vl);
+            vuint32m4_t sum = __riscv_vwmulu_vv_u32m4(
+                __riscv_vzext_vf2_u16m2(pixel0, vl), weight0, vl);
+            sum = __riscv_vwmaccu_vv_u32m4(
+                sum, __riscv_vzext_vf2_u16m2(pixel1, vl), weight1, vl);
+            sum = __riscv_vwmaccu_vv_u32m4(
+                sum, __riscv_vzext_vf2_u16m2(pixel2, vl), weight2, vl);
+            sum = __riscv_vwmaccu_vv_u32m4(
+                sum, __riscv_vzext_vf2_u16m2(pixel3, vl), weight3, vl);
+            sum = __riscv_vadd_vx_u32m4(sum, kWeightScale / 2, vl);
+            sum = __riscv_vsrl_vx_u32m4(sum, kWeightBits, vl);
+            return __riscv_vminu_vx_u32m4(sum, 255, vl);
+        };
+        auto store = [&](float *dst, vuint32m4_t sum) {
+            const vfloat32m4_t result = __riscv_vfcvt_f_xu_v_f32m4(sum, vl);
+            __riscv_vse32_v_f32m4(dst + offset_index, result, vl);
+        };
+
+        store(u_dst, interpolate(offset, offset_x, offset_y, offset_xy));
+        store(v_dst, interpolate(offset_v, offset_vx, offset_vy, offset_vxy));
+        offset_index += vl;
+    }
 #else
     warp_scalar(nv12, src_w, src_h, out);
 #endif

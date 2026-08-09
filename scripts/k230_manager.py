@@ -168,7 +168,7 @@ class Manager:
         enable_control = env_enabled("K230_ENABLE_CONTROL")
         specs = [
             ProcSpec("k230_camerad", ["./k230_camerad"], 0),
-            ProcSpec("k230_modeld", ["./k230_modeld", self.kmodel, self.debug], -5),
+            ProcSpec("k230_modeld", ["./k230_modeld", self.kmodel, self.debug], -15),
             ProcSpec("k230_overlay", ["./k230_overlay"], 10),
             ProcSpec("k230_recordd", ["./k230_recordd"], 15),
         ]

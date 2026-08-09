@@ -2,6 +2,7 @@
 #define K230_IPC_H
 
 #include "app_config.h"
+#include "common_utils.h"
 #include "lateral_control.h"
 #include "model_output.h"
 #include "online_calibrator.h"
@@ -38,8 +39,6 @@ constexpr uint32_t kK230HudFlagBrakeHold = 1U << 1;
 constexpr char kK230RoadAiFrameRing[] = "/k230_road_ai";
 constexpr unsigned kK230CanBatchMaxFrames = 256;
 constexpr unsigned kK230CanQueueSlots = 64;
-
-uint64_t k230_now_ns();
 
 struct K230IpcHeader {
     uint32_t magic = kK230IpcMagic;
