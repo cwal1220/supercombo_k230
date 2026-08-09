@@ -35,6 +35,21 @@ double interp(double x, const double *xp, const double *fp, size_t count) {
   return fp[count - 1];
 }
 
+double path_heading_at(
+    const std::array<std::array<double, 3>, kTrajectorySize> &path, int index) {
+  const int previous = std::max(0, index - 1);
+  const int next = std::min(kTrajectorySize - 1, index + 1);
+  if (previous == next) return 0.0;
+
+  const double dx = path[next][0] - path[previous][0];
+  const double dy = path[next][1] - path[previous][1];
+  if (!std::isfinite(dx) || !std::isfinite(dy))
+    return 0.0;
+  const double safe_dx = std::fabs(dx) < 1e-3
+      ? std::copysign(1e-3, dx == 0.0 ? 1.0 : dx) : dx;
+  return std::atan2(dy, safe_dx);
+}
+
 class FirstOrderFilter {
 public:
   FirstOrderFilter(double value, double rc)
@@ -309,13 +324,10 @@ struct OpenpilotLateralPlanner::Impl {
       lane_planner.scale_near_probability(lane_change_lane_prob);
     std::array<std::array<double, 3>, kTrajectorySize> path{};
     std::array<double, kTrajectorySize> path_t{};
-    std::array<double, kTrajectorySize> yaw{};
     for (int i = 0; i < kTrajectorySize; ++i) {
       path[i] = {model.plan[i].x, model.plan[i].y, model.plan[i].z};
       path_t[i] = model.model_t[i];
-      yaw[i] = model.plan_orientations[i].z;
     }
-    const auto model_path = path;
 
     const double lane_probability = lane_planner.mean_near_probability();
     bool use_model_path = false;
@@ -335,16 +347,16 @@ struct OpenpilotLateralPlanner::Impl {
     lane_planner.apply_path_offset(&path);
 
     std::array<double, kTrajectorySize> distance{};
-    std::array<double, kTrajectorySize> model_distance{};
     std::array<double, kTrajectorySize> path_y{};
-    for (int i = 0; i < kTrajectorySize; ++i)
+    std::array<double, kTrajectorySize> path_heading{};
+    for (int i = 0; i < kTrajectorySize; ++i) {
       distance[i] = std::sqrt(path[i][0] * path[i][0] + path[i][1] * path[i][1] +
                               path[i][2] * path[i][2]);
-    for (int i = 0; i < kTrajectorySize; ++i) {
-      model_distance[i] = std::sqrt(model_path[i][0] * model_path[i][0] +
-                                    model_path[i][1] * model_path[i][1] +
-                                    model_path[i][2] * model_path[i][2]);
       path_y[i] = path[i][1];
+      // 최종 경로와 heading을 같은 좌표계에서 계산한다. 차선 융합이나
+      // 경로 오프셋 뒤에 모델 원본 heading을 재사용하면 좌우 곡률 부호가
+      // 서로 달라져 한쪽 커브에서 경로를 안쪽으로 자를 수 있다.
+      path_heading[i] = path_heading_at(path, i);
     }
 
     std::array<double, kMpcNodes> y_pts{};
@@ -352,7 +364,7 @@ struct OpenpilotLateralPlanner::Impl {
     for (int i = 0; i < kMpcNodes; ++i) {
       const double query = std::max(0.0f, v_ego) * path_t[i];
       y_pts[i] = interp(query, distance.data(), path_y.data(), distance.size());
-      heading_pts[i] = interp(query, model_distance.data(), yaw.data(), model_distance.size());
+      heading_pts[i] = interp(query, distance.data(), path_heading.data(), distance.size());
     }
 
     const double lateral_factor = std::max(0.0, factor1 - factor2 * v_ego * v_ego);
