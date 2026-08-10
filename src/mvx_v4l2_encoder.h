@@ -65,7 +65,7 @@ private:
   unsigned fps_ = 0;
   unsigned bitrate_ = 0;
   unsigned raw_plane_count_ = 0;
-  uint32_t raw_stride_[2] = {};
+  uint32_t raw_stride_[3] = {};
   bool streaming_ = false;
   std::vector<RawBuffer> raw_buffers_;
   std::vector<CaptureBuffer> capture_buffers_;

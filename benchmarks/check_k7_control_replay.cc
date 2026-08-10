@@ -152,6 +152,35 @@ void verify_lca11() {
           "LCA11 vehicle-state update");
 }
 
+void verify_whl_spd11() {
+  std::array<uint8_t, 8> bytes{};
+  const auto set_speed = [&bytes](int start_bit, float speed_kph) {
+    set_signal_le(&bytes, start_bit, 14,
+                  static_cast<uint32_t>(std::lround(speed_kph / 0.03125f)));
+  };
+  set_speed(0, 40.0f);
+  set_speed(16, 41.0f);
+  set_speed(32, 39.0f);
+  set_speed(48, 40.5f);
+
+  const WhlSpd11Values decoded = decode_whl_spd11(bytes);
+  require(std::fabs(decoded.speed_fl_kph - 40.0f) < 0.001f &&
+              std::fabs(decoded.speed_fr_kph - 41.0f) < 0.001f &&
+              std::fabs(decoded.speed_rl_kph - 39.0f) < 0.001f &&
+              std::fabs(decoded.speed_rr_kph - 40.5f) < 0.001f,
+          "WHL_SPD11 wheel speed decoding");
+
+  K7VehicleCanState vehicle;
+  vehicle.cluster_speed = 72.0f;
+  update_k7_vehicle_can_state(&vehicle, kHyundaiWhlSpd11Address, bytes,
+                              bytes.size(), kK7PowertrainBus, 1.0);
+  require(vehicle.whl_spd11_time_s == 1.0 &&
+              std::fabs(k7_vehicle_speed_kph(vehicle, 1.2) - 40.125f) < 0.001f,
+          "WHL_SPD11 vehicle speed average");
+  require(std::fabs(k7_vehicle_speed_kph(vehicle, 1.6) - 72.0f) < 0.001f,
+          "stale WHL_SPD11 falls back to CLU speed");
+}
+
 void verify_tpms11() {
   std::array<uint8_t, 8> bytes{};
   set_signal_le(&bytes, 11, 2, 2);
@@ -720,6 +749,7 @@ int main(int argc, char **argv) {
   try {
     verify_mdps_speed_spoof();
     verify_lca11();
+    verify_whl_spd11();
     verify_tpms11();
     verify_tcs15();
     verify_tcs13_driver_override();

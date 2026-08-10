@@ -11,12 +11,14 @@
 #include <cstring>
 
 static_assert(sizeof(K230IpcHeader) == 40, "K230IpcHeader layout is part of the Python manager ABI");
-static_assert(sizeof(K230ControlState) == 232,
+static_assert(sizeof(K230ControlState) == 240,
               "K230ControlState layout is shared by controlsd and overlay");
 static_assert(offsetof(K230ControlState, hud_flags) == 184,
               "K230ControlState HUD flag offset is part of the shared ABI");
 static_assert(offsetof(K230ControlState, engage_event_id) == 188,
               "K230ControlState engagement event offset is part of the shared ABI");
+static_assert(offsetof(K230ControlState, ego_speed_kph) == 232,
+              "K230ControlState ego speed offset is shared by runtime processes");
 
 namespace {
 

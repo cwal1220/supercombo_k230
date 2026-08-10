@@ -190,7 +190,7 @@ int main() {
       while (can_log_sub.pop(&batch)) writer.write_can(K230RecordType::CanRx, batch);
       while (sendcan_log_sub.pop(&batch)) writer.write_can(K230RecordType::CanTx, batch);
 
-      if (writer.active()) {
+      if (writer.requested_enabled()) {
         open_optional_channel(model_sub, &model_open, kK230ModelStateTopic,
                               sizeof(K230ModelState));
         open_optional_channel(control_sub, &control_open, kK230ControlStateTopic,
@@ -222,7 +222,7 @@ int main() {
         std::fprintf(stderr,
                      "recordd: enabled=%u active=%u warmed=%u selected=%llu "
                      "submitted=%llu encoded=%llu dropped=%llu stale=%llu sync=%llu queues=%llu/%llu "
-                     "frames=%llu%s\n",
+                     "frames=%llu write_queue_drops=%llu%s\n",
                      writer.requested_enabled() ? 1 : 0, writer.active() ? 1 : 0,
                      warmed ? 1 : 0,
                      static_cast<unsigned long long>(selected_frames),
@@ -234,6 +234,7 @@ int main() {
                      static_cast<unsigned long long>(can_log_sub.depth()),
                      static_cast<unsigned long long>(sendcan_log_sub.depth()),
                      static_cast<unsigned long long>(writer.video_frames()),
+                     static_cast<unsigned long long>(writer.queue_drops()),
                      writer.blocked_for_space() ? " storage-blocked" : "");
       }
     }

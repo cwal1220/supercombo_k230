@@ -5,6 +5,7 @@
 
 constexpr uint32_t kHyundaiSas11Address = 688;       // 0x2b0
 constexpr uint32_t kHyundaiEsp12Address = 544;       // 0x220
+constexpr uint32_t kHyundaiWhlSpd11Address = 902;    // 0x386
 constexpr uint32_t kHyundaiScc11Address = 1056;      // 0x420
 constexpr uint32_t kHyundaiScc12Address = 1057;      // 0x421
 constexpr uint32_t kHyundaiTcs13Address = 916;       // 0x394
@@ -43,6 +44,13 @@ struct Esp12Values {
   float yaw_rate_rad_s = 0.0f;
   bool yaw_rate_valid = true;
   float lat_accel_mps2 = 0.0f;
+};
+
+struct WhlSpd11Values {
+  float speed_fl_kph = 0.0f;
+  float speed_fr_kph = 0.0f;
+  float speed_rl_kph = 0.0f;
+  float speed_rr_kph = 0.0f;
 };
 
 struct Scc11Values {
@@ -118,6 +126,7 @@ struct K7VehicleCanState {
   double clu11_time_s = -1.0;
   double sas11_time_s = -1.0;
   double esp12_time_s = -1.0;
+  double whl_spd11_time_s = -1.0;
   double scc11_time_s = -1.0;
   double mdps12_time_s = -1.0;
   double tcs13_time_s = -1.0;
@@ -140,6 +149,10 @@ struct K7VehicleCanState {
   float yaw_rate_rad_s = 0.0f;
   bool yaw_rate_valid = true;
   float lat_accel_mps2 = 0.0f;
+  float wheel_speed_fl_kph = 0.0f;
+  float wheel_speed_fr_kph = 0.0f;
+  float wheel_speed_rl_kph = 0.0f;
+  float wheel_speed_rr_kph = 0.0f;
   int driver_torque = 0;
   int panda_driver_torque = 0;
   bool mdps_toi_unavailable = false;
@@ -201,6 +214,9 @@ Mdps12Values decode_mdps12(const std::array<uint8_t, 8> &data);
 // K7 ESP12 yaw/lateral acceleration 값을 해석한다.
 Esp12Values decode_esp12(const std::array<uint8_t, 8> &data);
 
+// K7 WHL_SPD11 네 바퀴 속도를 해석한다.
+WhlSpd11Values decode_whl_spd11(const std::array<uint8_t, 8> &data);
+
 // K7 SCC11 cruise와 전방 객체 상태를 해석한다.
 Scc11Values decode_scc11(const std::array<uint8_t, 8> &data);
 
@@ -245,3 +261,7 @@ bool k7_tpms_state_fresh(const K7VehicleCanState &state, double now_s,
 
 // SCC11 설정 속도를 사용하고, 없으면 고정형 크루즈 추정값을 반환한다.
 float k7_cruise_set_speed_kph(const K7VehicleCanState &state);
+
+// 최신 휠속도 평균을 반환하고, 프레임이 없거나 오래되면 CLU 속도로 대체한다.
+float k7_vehicle_speed_kph(const K7VehicleCanState &state, double now_s,
+                           double timeout_s = 0.5);

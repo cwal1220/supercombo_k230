@@ -642,7 +642,7 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
         display_lead_distance_m(hud, have_lead ? &lead : nullptr);
     const float relative_speed_kph = have_radar_lead
         ? hud.radar_lead_relative_speed_mps * 3.6f
-        : (have_lead ? (lead.velocity - hud.speed_kph / 3.6f) * 3.6f : 0.0f);
+        : (have_lead ? (lead.velocity - hud.ego_speed_kph / 3.6f) * 3.6f : 0.0f);
     const uint32_t lead_color = !have_display_lead ? dim :
         ((lead_distance_m < 15.0f || relative_speed_kph < -20.0f)
              ? orange : blue);
@@ -964,7 +964,8 @@ void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &outp
                     static_cast<int>(13.0f - lead_distance_m * 0.05f),
                     7, 11);
                 const int marker_y = py + size + 3;
-                const float relative_speed_mps = lead.velocity - hud.speed_kph / 3.6f;
+                const float relative_speed_mps =
+                    lead.velocity - hud.ego_speed_kph / 3.6f;
                 draw_lead_chevron_180(frame, px, marker_y, size, lead_distance_m,
                                       relative_speed_mps,
                                       lead_probability, logical_width, logical_height,

@@ -98,8 +98,10 @@ bool MvxV4l2Encoder::open(const char *device, unsigned width, unsigned height,
     return false;
   }
   std::fprintf(stderr,
-               "recordd: MVX ready device=%s frame=%ux%u fps=%u bitrate=%u buffers=%zu/%zu\n",
-               device, width_, height_, fps_, bitrate_, raw_buffers_.size(),
+               "recordd: MVX ready device=%s frame=%ux%u fps=%u bitrate=%u "
+               "stride=%u/%u/%u buffers=%zu/%zu\n",
+               device, width_, height_, fps_, bitrate_, raw_stride_[0],
+               raw_stride_[1], raw_stride_[2], raw_buffers_.size(),
                capture_buffers_.size());
   return true;
 }
@@ -109,23 +111,25 @@ bool MvxV4l2Encoder::set_formats() {
   raw.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
   raw.fmt.pix_mp.width = width_;
   raw.fmt.pix_mp.height = height_;
-  raw.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12;
+  raw.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_YUV420M;
   raw.fmt.pix_mp.field = V4L2_FIELD_NONE;
-  raw.fmt.pix_mp.num_planes = 2;
+  raw.fmt.pix_mp.num_planes = 3;
   if (xioctl(fd_, VIDIOC_S_FMT, &raw) != 0) {
-    fail("set NV12 input format");
+    fail("set YUV420 input format");
     return false;
   }
   raw_plane_count_ = raw.fmt.pix_mp.num_planes;
-  if (raw_plane_count_ != 2) {
-    std::fprintf(stderr, "recordd: MVX expected 2 NV12 planes, got %u\n",
+  if (raw_plane_count_ != 3) {
+    std::fprintf(stderr, "recordd: MVX expected 3 YUV420 planes, got %u\n",
                  raw_plane_count_);
     return false;
   }
   raw_stride_[0] = raw.fmt.pix_mp.plane_fmt[0].bytesperline;
   raw_stride_[1] = raw.fmt.pix_mp.plane_fmt[1].bytesperline;
+  raw_stride_[2] = raw.fmt.pix_mp.plane_fmt[2].bytesperline;
   if (raw_stride_[0] < width_) raw_stride_[0] = width_;
-  if (raw_stride_[1] < width_) raw_stride_[1] = width_;
+  if (raw_stride_[1] < width_ / 2) raw_stride_[1] = width_ / 2;
+  if (raw_stride_[2] < width_ / 2) raw_stride_[2] = width_ / 2;
 
   v4l2_format encoded{};
   encoded.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -168,7 +172,7 @@ bool MvxV4l2Encoder::allocate_buffers() {
   request.memory = V4L2_MEMORY_MMAP;
   request.count = kBufferCount;
   if (xioctl(fd_, VIDIOC_REQBUFS, &request) != 0 || request.count == 0) {
-    fail("request NV12 buffers");
+    fail("request YUV420 buffers");
     return false;
   }
   raw_buffers_.resize(request.count);
@@ -181,7 +185,7 @@ bool MvxV4l2Encoder::allocate_buffers() {
     buffer.length = VIDEO_MAX_PLANES;
     buffer.m.planes = planes;
     if (xioctl(fd_, VIDIOC_QUERYBUF, &buffer) != 0) {
-      fail("query NV12 buffer");
+      fail("query YUV420 buffer");
       return false;
     }
     if (buffer.length != raw_plane_count_) {
@@ -198,7 +202,7 @@ bool MvxV4l2Encoder::allocate_buffers() {
                             MAP_SHARED, fd_, mapped.offset);
       if (mapped.address == MAP_FAILED) {
         mapped.address = nullptr;
-        fail("map NV12 buffer");
+        fail("map YUV420 buffer");
         return false;
       }
     }
@@ -254,7 +258,7 @@ bool MvxV4l2Encoder::start_streaming() {
   if (streaming_) return true;
   v4l2_buf_type raw_type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
   if (xioctl(fd_, VIDIOC_STREAMON, &raw_type) != 0) {
-    fail("start NV12 stream");
+    fail("start YUV420 stream");
     return false;
   }
   v4l2_buf_type encoded_type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -277,7 +281,7 @@ void MvxV4l2Encoder::reclaim_raw() {
     buffer.length = raw_plane_count_;
     buffer.m.planes = planes;
     if (xioctl(fd_, VIDIOC_DQBUF, &buffer) != 0) {
-      if (errno != EAGAIN) fail("dequeue NV12 buffer");
+      if (errno != EAGAIN) fail("dequeue YUV420 buffer");
       break;
     }
     free_raw_.push_back(buffer.index);
@@ -344,13 +348,20 @@ bool MvxV4l2Encoder::submit_frame(const uint8_t *nv12, size_t size,
   free_raw_.pop_back();
   RawBuffer &raw = raw_buffers_[index];
   const size_t y_size = static_cast<size_t>(width_) * height_;
-  const uint8_t *source_planes[2] = {nv12, nv12 + y_size};
-  const unsigned rows[2] = {height_, height_ / 2};
-  for (unsigned plane = 0; plane < 2; ++plane) {
+  const uint8_t *source_uv = nv12 + y_size;
+  const unsigned rows[3] = {height_, height_ / 2, height_ / 2};
+  for (unsigned plane = 0; plane < 3; ++plane) {
     uint8_t *destination = static_cast<uint8_t *>(raw.planes[plane].address);
     for (unsigned row = 0; row < rows[plane]; ++row) {
-      std::memcpy(destination + static_cast<size_t>(row) * raw_stride_[plane],
-                  source_planes[plane] + static_cast<size_t>(row) * width_, width_);
+      uint8_t *dst = destination + static_cast<size_t>(row) * raw_stride_[plane];
+      if (plane == 0) {
+        std::memcpy(dst, nv12 + static_cast<size_t>(row) * width_, width_);
+      } else {
+        const uint8_t *src = source_uv + static_cast<size_t>(row) * width_;
+        for (unsigned column = 0; column < width_ / 2; ++column) {
+          dst[column] = src[column * 2 + (plane - 1)];
+        }
+      }
     }
   }
 
@@ -367,7 +378,7 @@ bool MvxV4l2Encoder::submit_frame(const uint8_t *nv12, size_t size,
     planes[plane].bytesused = raw_stride_[plane] * rows[plane];
   }
   if (xioctl(fd_, VIDIOC_QBUF, &buffer) != 0) {
-    fail("queue NV12 frame");
+    fail("queue YUV420 frame");
     free_raw_.push_back(index);
     return false;
   }

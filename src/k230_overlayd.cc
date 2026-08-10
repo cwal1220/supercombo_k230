@@ -567,6 +567,8 @@ private:
             (latest_control_state_.hud_flags & kK230HudFlagBrakeHold) != 0;
         hud_.gear = control_fresh ? latest_control_state_.gear : 0;
         hud_.speed_kph = control_fresh ? latest_control_state_.speed_kph : 0.0f;
+        hud_.ego_speed_kph =
+            control_fresh ? latest_control_state_.ego_speed_kph : 0.0f;
         hud_.cruise_max_speed_kph =
             control_fresh ? latest_control_state_.cruise_max_speed_kph : 0.0f;
         hud_.cruise_command_speed_kph =

@@ -28,6 +28,7 @@ struct OverlayHudState {
     int gear = 0;
     int wifi_signal_dbm = 0;
     float speed_kph = 0.0f;
+    float ego_speed_kph = 0.0f;
     float cruise_max_speed_kph = 0.0f;
     float cruise_command_speed_kph = 0.0f;
     bool radar_lead_valid = false;

@@ -15,6 +15,7 @@ constexpr int kCruiseButtonResume = 1;
 constexpr int kCruiseButtonSet = 2;
 constexpr int kCruiseButtonCancel = 4;
 constexpr float kMphToKph = 1.609344f;
+constexpr float kWheelSpeedScaleKph = 0.03125f;
 constexpr float kFixedCruiseStep = 2.0f;
 constexpr float kMinimumCruiseSpeedKph = 30.0f;
 constexpr float kMinimumCruiseSpeedMph = 20.0f;
@@ -26,6 +27,7 @@ bool expected_openpilot_k7_bus(uint32_t address, uint8_t bus) {
       return bus == kK7CameraBus;
     case kHyundaiClu11Address:
     case kHyundaiEsp12Address:
+    case kHyundaiWhlSpd11Address:
     case kHyundaiScc11Address:
     case kHyundaiScc12Address:
     case kHyundaiTcs13Address:
@@ -159,6 +161,19 @@ Esp12Values decode_esp12(const std::array<uint8_t, 8> &data) {
   return values;
 }
 
+WhlSpd11Values decode_whl_spd11(const std::array<uint8_t, 8> &data) {
+  WhlSpd11Values values;
+  values.speed_fl_kph = static_cast<float>(get_signal_le(data.data(), 0, 14)) *
+                        kWheelSpeedScaleKph;
+  values.speed_fr_kph = static_cast<float>(get_signal_le(data.data(), 16, 14)) *
+                        kWheelSpeedScaleKph;
+  values.speed_rl_kph = static_cast<float>(get_signal_le(data.data(), 32, 14)) *
+                        kWheelSpeedScaleKph;
+  values.speed_rr_kph = static_cast<float>(get_signal_le(data.data(), 48, 14)) *
+                        kWheelSpeedScaleKph;
+  return values;
+}
+
 Scc11Values decode_scc11(const std::array<uint8_t, 8> &data) {
   Scc11Values values;
   values.main_mode = get_signal_le(data.data(), 0, 1) != 0;
@@ -281,6 +296,13 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     state->yaw_rate_valid = esp.yaw_rate_valid;
     state->lat_accel_mps2 = esp.lat_accel_mps2;
     state->esp12_time_s = now_s;
+  } else if (address == kHyundaiWhlSpd11Address && length >= 8) {
+    const WhlSpd11Values wheel = decode_whl_spd11(data);
+    state->wheel_speed_fl_kph = wheel.speed_fl_kph;
+    state->wheel_speed_fr_kph = wheel.speed_fr_kph;
+    state->wheel_speed_rl_kph = wheel.speed_rl_kph;
+    state->wheel_speed_rr_kph = wheel.speed_rr_kph;
+    state->whl_spd11_time_s = now_s;
   } else if (address == kHyundaiMdps12Address && length >= 8) {
     state->mdps12_seed = data;
     state->has_mdps12_seed = true;
@@ -396,4 +418,31 @@ float k7_cruise_set_speed_kph(const K7VehicleCanState &state) {
   return state.estimated_cruise_set_speed_valid
       ? state.estimated_cruise_set_speed_kph
       : 0.0f;
+}
+
+float k7_vehicle_speed_kph(const K7VehicleCanState &state, double now_s,
+                           double timeout_s) {
+  const bool wheel_speed_fresh =
+      fresh_time(state.whl_spd11_time_s, now_s, timeout_s);
+  const float wheel_speeds[] = {
+      state.wheel_speed_fl_kph,
+      state.wheel_speed_fr_kph,
+      state.wheel_speed_rl_kph,
+      state.wheel_speed_rr_kph,
+  };
+  if (wheel_speed_fresh) {
+    bool wheel_speed_valid = true;
+    float wheel_speed_sum = 0.0f;
+    for (const float speed_kph : wheel_speeds) {
+      wheel_speed_valid = wheel_speed_valid && std::isfinite(speed_kph) &&
+                          speed_kph >= 0.0f;
+      wheel_speed_sum += speed_kph;
+    }
+    if (wheel_speed_valid) return wheel_speed_sum * 0.25f;
+  }
+
+  const float unit_scale = state.speed_unit_mph ? kMphToKph : 1.0f;
+  if (!std::isfinite(state.cluster_speed) || state.cluster_speed < 0.0f)
+    return 0.0f;
+  return state.cluster_speed * unit_scale;
 }

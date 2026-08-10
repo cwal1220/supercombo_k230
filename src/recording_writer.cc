@@ -69,10 +69,68 @@ RecordingWriter::RecordingWriter(std::string root, std::string params_directory,
                                  unsigned width, unsigned height, unsigned fps,
                                  unsigned bitrate)
     : root_(std::move(root)), params_directory_(std::move(params_directory)),
-      width_(width), height_(height), fps_(fps), bitrate_(bitrate) {}
+      width_(width), height_(height), fps_(fps), bitrate_(bitrate),
+      worker_(&RecordingWriter::worker_loop, this) {}
 
 RecordingWriter::~RecordingWriter() {
   close();
+}
+
+void RecordingWriter::enqueue(PendingWrite &&write, bool force) {
+  {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    if (!force && queue_.size() >= kMaximumPendingWrites) {
+      queue_drops_.fetch_add(1);
+      return;
+    }
+    queue_.push_back(std::move(write));
+  }
+  queue_cv_.notify_one();
+}
+
+void RecordingWriter::worker_loop() {
+  while (true) {
+    PendingWrite write;
+    {
+      std::unique_lock<std::mutex> lock(queue_mutex_);
+      queue_cv_.wait(lock, [this] { return !queue_.empty(); });
+      write = std::move(queue_.front());
+      queue_.pop_front();
+    }
+    const bool stop = write.kind == PendingWrite::Kind::Stop;
+    process(std::move(write));
+    if (stop) return;
+  }
+}
+
+void RecordingWriter::process(PendingWrite &&write) {
+  switch (write.kind) {
+    case PendingWrite::Kind::Enable:
+      if (!start_route(write.timestamp_ns)) {
+        requested_enabled_.store(false);
+      }
+      break;
+    case PendingWrite::Kind::Disable:
+      close_route(true);
+      break;
+    case PendingWrite::Kind::CodecConfig:
+      codec_config_ = std::move(write.data);
+      break;
+    case PendingWrite::Kind::EncodedFrame:
+      write_encoded_frame_impl(write.frame, write.data.data(), write.data.size(),
+                               write.keyframe);
+      break;
+    case PendingWrite::Kind::Can:
+      write_can_impl(write.record_type, write.can_batch);
+      break;
+    case PendingWrite::Kind::State:
+      write_state_impl(write.record_type, write.timestamp_ns, write.data.data(),
+                       write.data.size());
+      break;
+    case PendingWrite::Kind::Stop:
+      close_route(true);
+      break;
+  }
 }
 
 FILE *RecordingWriter::open_buffered(const std::string &path) {
@@ -93,21 +151,26 @@ bool RecordingWriter::has_storage_reserve() const {
 
 void RecordingWriter::set_enabled(bool enabled, uint64_t now_ns) {
   if (!enabled) {
-    requested_enabled_ = false;
-    if (active()) close_route(true);
-    blocked_for_space_ = false;
+    if (!requested_enabled_.exchange(false)) return;
+    blocked_for_space_.store(false);
+    PendingWrite write;
+    write.kind = PendingWrite::Kind::Disable;
+    enqueue(std::move(write), true);
     return;
   }
-  if (requested_enabled_) return;
-  requested_enabled_ = true;
-  blocked_for_space_ = false;
-  if (!start_route(now_ns)) requested_enabled_ = false;
+  if (requested_enabled_.exchange(true)) return;
+  blocked_for_space_.store(false);
+  PendingWrite write;
+  write.kind = PendingWrite::Kind::Enable;
+  write.timestamp_ns = now_ns;
+  enqueue(std::move(write), true);
 }
 
 bool RecordingWriter::start_route(uint64_t now_ns) {
   if (!make_directories(root_) || !has_storage_reserve()) {
     std::fprintf(stderr, "recordd: recording refused: storage reserve is below 5 GiB/10%%\n");
-    blocked_for_space_ = true;
+    blocked_for_space_.store(true);
+    active_.store(false);
     return false;
   }
   route_path_ = root_ + "/" + route_name();
@@ -117,7 +180,7 @@ bool RecordingWriter::start_route(uint64_t now_ns) {
     return false;
   }
   segment_index_ = 0;
-  total_video_frames_ = 0;
+  total_video_frames_.store(0);
   event_records_ = 0;
   event_file_ = open_buffered(route_path_ + "/events.bin");
   if (!event_file_) {
@@ -133,13 +196,17 @@ bool RecordingWriter::start_route(uint64_t now_ns) {
   snapshot_params();
   write_manifest(false);
   next_storage_check_ns_ = now_ns + kStorageCheckIntervalNs;
+  active_.store(true);
   std::fprintf(stderr, "recordd: recording started route=%s\n", route_path_.c_str());
   return true;
 }
 
 void RecordingWriter::set_codec_config(const uint8_t *data, size_t size) {
   if (!data || size == 0) return;
-  codec_config_.assign(data, data + size);
+  PendingWrite write;
+  write.kind = PendingWrite::Kind::CodecConfig;
+  write.data.assign(data, data + size);
+  enqueue(std::move(write));
 }
 
 bool RecordingWriter::open_segment(const K230RoadAiFrame &frame) {
@@ -175,12 +242,24 @@ bool RecordingWriter::open_segment(const K230RoadAiFrame &frame) {
 void RecordingWriter::write_encoded_frame(const K230RoadAiFrame &frame,
                                            const uint8_t *data, size_t size,
                                            bool keyframe) {
-  if (!requested_enabled_ || !event_file_ || !data || size == 0) return;
+  if (!requested_enabled_.load() || !data || size == 0) return;
+  PendingWrite write;
+  write.kind = PendingWrite::Kind::EncodedFrame;
+  write.frame = frame;
+  write.keyframe = keyframe;
+  write.data.assign(data, data + size);
+  enqueue(std::move(write));
+}
+
+void RecordingWriter::write_encoded_frame_impl(const K230RoadAiFrame &frame,
+                                                const uint8_t *data, size_t size,
+                                                bool keyframe) {
+  if (!event_file_) return;
   if (frame.timestamp_ns >= next_storage_check_ns_) {
     next_storage_check_ns_ = frame.timestamp_ns + kStorageCheckIntervalNs;
     if (!has_storage_reserve()) {
-      blocked_for_space_ = true;
-      requested_enabled_ = false;
+      blocked_for_space_.store(true);
+      requested_enabled_.store(false);
       close_route(true);
       std::fprintf(stderr, "recordd: recording stopped to preserve storage reserve\n");
       return;
@@ -202,7 +281,7 @@ void RecordingWriter::write_encoded_frame(const K230RoadAiFrame &frame,
   K230FrameIndexRecord index;
   index.frame_id = frame.frame_id;
   index.capture_timestamp_ns = frame.timestamp_ns;
-  index.encode_index = total_video_frames_;
+  index.encode_index = total_video_frames_.load();
   index.file_offset = offset;
   index.packet_size = static_cast<uint32_t>(size);
   index.flags = keyframe ? 1U : 0U;
@@ -211,7 +290,7 @@ void RecordingWriter::write_encoded_frame(const K230RoadAiFrame &frame,
     return;
   }
   video_offset_ += size;
-  ++total_video_frames_;
+  total_video_frames_.fetch_add(1);
 }
 
 bool RecordingWriter::write_event_header(K230RecordType type, uint64_t timestamp_ns,
@@ -225,7 +304,18 @@ bool RecordingWriter::write_event_header(K230RecordType type, uint64_t timestamp
 }
 
 void RecordingWriter::write_can(K230RecordType type, const K230CanBatch &batch) {
-  if (!event_file_ || (type != K230RecordType::CanRx && type != K230RecordType::CanTx)) return;
+  if (!requested_enabled_.load() ||
+      (type != K230RecordType::CanRx && type != K230RecordType::CanTx)) return;
+  PendingWrite write;
+  write.kind = PendingWrite::Kind::Can;
+  write.record_type = type;
+  write.can_batch = batch;
+  enqueue(std::move(write));
+}
+
+void RecordingWriter::write_can_impl(K230RecordType type,
+                                     const K230CanBatch &batch) {
+  if (!event_file_) return;
   const uint32_t count = std::min<uint32_t>(batch.count, kK230CanBatchMaxFrames);
   const uint32_t payload_size = sizeof(K230RecordedCanBatchHeader) +
       count * sizeof(K230RecordedCanFrame);
@@ -248,7 +338,20 @@ void RecordingWriter::write_can(K230RecordType type, const K230CanBatch &batch) 
 
 void RecordingWriter::write_state(K230RecordType type, uint64_t timestamp_ns,
                                   const void *data, size_t size) {
-  if (!event_file_ || !data || size == 0 || size > UINT32_MAX) return;
+  if (!requested_enabled_.load() || !data ||
+      size == 0 || size > UINT32_MAX) return;
+  PendingWrite write;
+  write.kind = PendingWrite::Kind::State;
+  write.record_type = type;
+  write.timestamp_ns = timestamp_ns;
+  write.data.assign(static_cast<const uint8_t *>(data),
+                    static_cast<const uint8_t *>(data) + size);
+  enqueue(std::move(write));
+}
+
+void RecordingWriter::write_state_impl(K230RecordType type, uint64_t timestamp_ns,
+                                       const void *data, size_t size) {
+  if (!event_file_) return;
   if (!write_event_header(type, timestamp_ns, static_cast<uint32_t>(size))) return;
   if (std::fwrite(data, 1, size, event_file_) == size) ++event_records_;
 }
@@ -274,7 +377,7 @@ void RecordingWriter::write_manifest(bool complete) const {
            << "  \"fps\": " << fps_ << ",\n"
            << "  \"bitrate\": " << bitrate_ << ",\n"
            << "  \"segment_seconds\": 60,\n"
-           << "  \"video_frames\": " << total_video_frames_ << ",\n"
+           << "  \"video_frames\": " << total_video_frames_.load() << ",\n"
            << "  \"event_records\": " << event_records_ << "\n"
            << "}\n";
 }
@@ -302,14 +405,19 @@ void RecordingWriter::close_route(bool complete) {
     std::fprintf(stderr,
                  "recordd: recording stopped route=%s frames=%llu events=%llu\n",
                  route_path_.c_str(),
-                 static_cast<unsigned long long>(total_video_frames_),
+                 static_cast<unsigned long long>(total_video_frames_.load()),
                  static_cast<unsigned long long>(event_records_));
   }
   route_path_.clear();
   segment_index_ = 0;
+  active_.store(false);
 }
 
 void RecordingWriter::close() {
-  requested_enabled_ = false;
-  close_route(true);
+  if (!worker_.joinable()) return;
+  requested_enabled_.store(false);
+  PendingWrite write;
+  write.kind = PendingWrite::Kind::Stop;
+  enqueue(std::move(write), true);
+  if (worker_.joinable()) worker_.join();
 }

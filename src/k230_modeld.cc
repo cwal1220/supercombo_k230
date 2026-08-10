@@ -206,7 +206,11 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
         if (control_sub_open) {
             K230ControlState control_state;
             if (control_sub.read(&control_state, sizeof(control_state))) {
-                v_ego = std::max(0.0f, control_state.speed_kph / 3.6f);
+                const float ego_speed_kph =
+                    control_state.ego_speed_kph > 0.0f
+                        ? control_state.ego_speed_kph
+                        : control_state.speed_kph;
+                v_ego = std::max(0.0f, ego_speed_kph / 3.6f);
                 desire = static_cast<int>(control_state.desire);
             }
         }

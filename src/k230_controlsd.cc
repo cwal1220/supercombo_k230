@@ -594,7 +594,8 @@ int main() {
       const bool vision_lead_valid =
           vision_lead_signal_valid &&
           model.lead.probability >= kLeadProbabilityThreshold;
-      const float ego_speed_mps = vehicle_speed_mps(vehicle);
+      const float ego_speed_kph = k7_vehicle_speed_kph(vehicle, now_s);
+      const float ego_speed_mps = ego_speed_kph / 3.6f;
       const float vision_lead_distance_m = vision_lead_signal_valid
           ? model.lead.x - kRadarToCameraDistanceM
           : 0.0f;
@@ -628,7 +629,7 @@ int main() {
       adaptive_input.speed_unit_mph = vehicle.speed_unit_mph;
       adaptive_input.driver_button = vehicle.clu_button;
       adaptive_input.driver_main_button = vehicle.clu_main_button;
-      adaptive_input.ego_speed_kph = last_result.speed_kph;
+      adaptive_input.ego_speed_kph = ego_speed_kph;
       adaptive_input.driver_set_speed_kph = k7_cruise_set_speed_kph(vehicle);
       adaptive_input.vision_lead_updated = model_updated;
       adaptive_input.vision_lead_valid = vision_lead_signal_valid;
@@ -737,6 +738,7 @@ int main() {
       control_state.engage_reject_event_id = engage_reject_event_id;
       std::memcpy(control_state.engage_reject_block, engage_reject_block,
                   sizeof(control_state.engage_reject_block));
+      control_state.ego_speed_kph = ego_speed_kph;
       if (!control_state_pub.publish(&control_state, sizeof(control_state))) {
         ++publish_errors;
       }

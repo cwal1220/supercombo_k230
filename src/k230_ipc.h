@@ -289,6 +289,7 @@ struct K230ControlState {
     uint32_t disengage_event_id = 0;
     uint32_t engage_reject_event_id = 0;
     char engage_reject_block[32] = {};
+    float ego_speed_kph = 0.0f;
 };
 
 class K230LatestChannel {
