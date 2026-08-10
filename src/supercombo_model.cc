@@ -113,17 +113,33 @@ void SupercomboModel::set_input_calibration(const float rpy[3])
 
 bool SupercomboModel::run_frame_nv12(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &raw_output)
 {
+    return run_frame_nv12_impl(nv12, src_w, src_h, raw_output, true);
+}
+
+bool SupercomboModel::run_frame_nv12_stable(const uint8_t *nv12, int src_w, int src_h,
+                                            std::vector<float> &raw_output)
+{
+    return run_frame_nv12_impl(nv12, src_w, src_h, raw_output, false);
+}
+
+bool SupercomboModel::run_frame_nv12_impl(const uint8_t *nv12, int src_w, int src_h,
+                                          std::vector<float> &raw_output, bool copy_input)
+{
     if (!nv12 || src_w <= 0 || src_h <= 0)
         return false;
 
     const bool profile = profile_enabled();
     const uint64_t t0 = profile ? now_ns() : 0;
     const size_t nv12_bytes = static_cast<size_t>(src_w) * static_cast<size_t>(src_h) * 3 / 2;
-    nv12_cache_.resize(nv12_bytes);
-    std::memcpy(nv12_cache_.data(), nv12, nv12_bytes);
+    const uint8_t *input_nv12 = nv12;
+    if (copy_input) {
+        nv12_cache_.resize(nv12_bytes);
+        std::memcpy(nv12_cache_.data(), nv12, nv12_bytes);
+        input_nv12 = nv12_cache_.data();
+    }
     const uint64_t t1 = profile ? now_ns() : 0;
-    if (!prepare_image_input(0, input_transform_, nv12_cache_.data(), src_w, src_h)) return false;
-    if (!prepare_image_input(1, big_input_transform_, nv12_cache_.data(), src_w, src_h)) return false;
+    if (!prepare_image_input(0, input_transform_, input_nv12, src_w, src_h)) return false;
+    if (!prepare_image_input(1, big_input_transform_, input_nv12, src_w, src_h)) return false;
     const uint64_t t2 = profile ? now_ns() : 0;
 
     hrt::sync(input_tensors_[0], sync_op_t::sync_write_back, true).expect("sync input 0 failed");

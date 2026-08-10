@@ -15,6 +15,8 @@ public:
     SupercomboModel(const char *kmodel_file, int debug_mode, const AppConfig &config);
 
     bool run_frame_nv12(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &raw_output);
+    bool run_frame_nv12_stable(const uint8_t *nv12, int src_w, int src_h,
+                               std::vector<float> &raw_output);
     void set_input_calibration(const float rpy[3]);
     void set_desire(int desire);
 
@@ -29,6 +31,8 @@ private:
 
     bool prepare_image_input(size_t index, ModelInputTransform &transform,
                              const uint8_t *nv12, int src_w, int src_h);
+    bool run_frame_nv12_impl(const uint8_t *nv12, int src_w, int src_h,
+                             std::vector<float> &raw_output, bool copy_input);
     bool advance_image_history(size_t index);
     bool clear_image_input(size_t index);
     bool write_input(size_t index, const float *data, size_t count);

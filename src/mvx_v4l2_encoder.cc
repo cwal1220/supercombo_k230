@@ -12,7 +12,7 @@
 
 namespace {
 
-constexpr unsigned kBufferCount = 6;
+constexpr unsigned kBufferCount = 8;
 constexpr uint32_t kMvxCodecConfigFlag = 0xc1000000U;
 constexpr uint32_t kMvxVendorFlagMask = 0xfff00000U;
 constexpr uint32_t kMvxFrameRateControl = V4L2_CTRL_CLASS_MPEG + 0x2000;

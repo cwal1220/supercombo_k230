@@ -61,12 +61,12 @@ int main()
             }
 
             const unsigned slot = static_cast<unsigned>(frame_id % frame_ring.slot_count());
-            uint8_t *dst = frame_ring.slot(slot);
-            if (!dst) {
+            if (!frame_ring.write_slot(slot, frame_id, frame.data.data(), frame.data.size())) {
+                std::fprintf(stderr, "\ncamerad: frame ring write failed slot=%u frame=%llu\n",
+                             slot, static_cast<unsigned long long>(frame_id));
                 ++errors;
                 continue;
             }
-            std::memcpy(dst, frame.data.data(), frame.data.size());
 
             K230RoadAiFrame msg;
             msg.frame_id = frame_id;

@@ -16,9 +16,10 @@
 constexpr uint32_t kK230IpcMagic = 0x4b323349;
 constexpr uint32_t kK230IpcVersion = 1;
 constexpr uint32_t kK230FrameRingMagic = 0x4b465249;
+constexpr uint32_t kK230FrameRingVersion = 3;
 constexpr uint32_t kK230CanQueueMagic = 0x4b435151;
 constexpr uint32_t kK230CanQueueVersion = 1;
-constexpr unsigned kK230FrameSlots = 4;
+constexpr unsigned kK230FrameSlots = 8;
 constexpr unsigned kK230MaxProcesses = 7;
 constexpr unsigned kK230AiWidth = kDefaultAiWidth;
 constexpr unsigned kK230AiHeight = kDefaultAiHeight;
@@ -53,13 +54,15 @@ struct K230IpcHeader {
 
 struct K230FrameRingHeader {
     uint32_t magic = kK230FrameRingMagic;
-    uint32_t version = kK230IpcVersion;
+    uint32_t version = kK230FrameRingVersion;
     uint32_t slot_count = kK230FrameSlots;
     uint32_t width = kK230AiWidth;
     uint32_t height = kK230AiHeight;
     uint32_t frame_bytes = kK230AiFrameBytes;
     uint32_t reserved0 = 0;
     uint32_t reserved1 = 0;
+    std::atomic<uint64_t> slot_seq[kK230FrameSlots]{};
+    std::atomic<uint64_t> slot_frame_id[kK230FrameSlots]{};
 };
 
 struct K230RoadAiFrame {
@@ -339,8 +342,10 @@ public:
     bool open(bool create, unsigned width = kK230AiWidth, unsigned height = kK230AiHeight,
               unsigned slots = kK230FrameSlots);
     void close();
-    uint8_t *slot(unsigned index);
-    const uint8_t *slot(unsigned index) const;
+    bool write_slot(unsigned index, uint64_t frame_id, const uint8_t *source,
+                    size_t size);
+    bool copy_slot(unsigned index, uint64_t frame_id, uint8_t *destination,
+                   size_t size) const;
     unsigned slot_count() const { return header_ ? header_->slot_count : 0; }
     unsigned frame_bytes() const { return header_ ? header_->frame_bytes : 0; }
     unsigned width() const { return header_ ? header_->width : 0; }

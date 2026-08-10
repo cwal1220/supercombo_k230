@@ -82,7 +82,7 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
 
     while (!g_stop && source.read(frame)) {
         const uint64_t t0 = steady_ns();
-        const bool ok = model.run_frame_nv12(frame.data.data(), frame.width, frame.height, raw);
+        const bool ok = model.run_frame_nv12_stable(frame.data.data(), frame.width, frame.height, raw);
         const uint64_t t1 = steady_ns();
         if (ok) {
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);
@@ -150,6 +150,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
     unsigned processed = 0;
     unsigned errors = 0;
     unsigned missed = 0;
+    unsigned frame_sync_failures = 0;
     uint64_t last_frame_id = 0;
     bool have_last_frame_id = false;
     const unsigned target_fps = std::max(1U, std::min(config.model_fps, 30U));
@@ -162,6 +163,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
     last = start;
     unsigned last_processed = 0;
     unsigned last_errors = 0;
+    std::vector<uint8_t> frame_copy(frame_ring.frame_bytes());
 
     std::fprintf(stderr, "modeld: live shared ring slots=%u frame=%ux%u bytes=%u target=%uHz\n",
                  frame_ring.slot_count(), frame_ring.width(), frame_ring.height(),
@@ -190,11 +192,13 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
         have_last_frame_id = true;
         last_frame_id = meta.frame_id;
 
-        const uint8_t *nv12 = frame_ring.slot(meta.slot);
-        if (!nv12) {
+        if (!frame_ring.copy_slot(meta.slot, meta.frame_id,
+                                  frame_copy.data(), frame_copy.size())) {
+            ++frame_sync_failures;
             ++errors;
             continue;
         }
+        const uint8_t *nv12 = frame_copy.data();
 
         if (!control_sub_open)
             control_sub_open = control_sub.open(kK230ControlStateTopic,
@@ -215,7 +219,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
         }
 
         const uint64_t t0 = steady_ns();
-        const bool ok = model.run_frame_nv12(nv12, meta.width, meta.height, raw);
+        const bool ok = model.run_frame_nv12_stable(nv12, meta.width, meta.height, raw);
         const uint64_t t1 = steady_ns();
         next_model_start_ns = t0 + model_interval_ns;
         if (ok) {
@@ -240,10 +244,11 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
             const unsigned frames_delta = processed - last_processed;
             const unsigned errors_delta = errors - last_errors;
             std::fprintf(stderr,
-                         "modeld: fps=%.2f frames=%u missed=%u errors=%u(+%u) last_ms=%.2f          \r",
+                         "modeld: fps=%.2f frames=%u missed=%u sync=%u errors=%u(+%u) last_ms=%.2f          \r",
                          frames_delta * 1000000.0 / duration,
                          processed,
                          missed,
+                         frame_sync_failures,
                          errors,
                          errors_delta,
                          ok ? (t1 - t0) / 1000000.0 : 0.0);
@@ -258,8 +263,8 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
     gettimeofday(&end, nullptr);
     const uint64_t total_us = timeval_us(end) - timeval_us(start);
     const double fps = total_us > 0 ? processed * 1000000.0 / total_us : 0.0;
-    std::fprintf(stderr, "\nmodeld done frames=%u missed=%u errors=%u fps=%.2f\n",
-                 processed, missed, errors, fps);
+    std::fprintf(stderr, "\nmodeld done frames=%u missed=%u sync=%u errors=%u fps=%.2f\n",
+                 processed, missed, frame_sync_failures, errors, fps);
     return processed > 0 && errors == 0 ? 0 : 1;
 }
 

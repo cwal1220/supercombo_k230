@@ -48,16 +48,23 @@ K230FrameRing::~K230FrameRing()
 bool K230FrameRing::open(bool create, unsigned width, unsigned height, unsigned slots)
 {
     close();
+    if (width == 0 || height == 0 || slots == 0 || slots > kK230FrameSlots)
+        return false;
+
     const int flags = O_RDWR | (create ? O_CREAT : 0);
     fd_ = shm_open(kK230RoadAiFrameRing, flags, 0664);
     if (fd_ < 0) return false;
 
-    map_size_ = sizeof(K230FrameRingHeader) +
+    const size_t expected_size = sizeof(K230FrameRingHeader) +
         static_cast<size_t>(width) * height * 3 / 2 * slots;
+    map_size_ = expected_size;
     if (!create) {
         struct stat st {};
-        if (fstat(fd_, &st) == 0 && st.st_size > 0)
-            map_size_ = static_cast<size_t>(st.st_size);
+        if (fstat(fd_, &st) != 0 || st.st_size < static_cast<off_t>(sizeof(K230FrameRingHeader))) {
+            close();
+            return false;
+        }
+        map_size_ = static_cast<size_t>(st.st_size);
     }
     if (create && ftruncate(fd_, static_cast<off_t>(map_size_)) != 0) {
         std::perror("ftruncate frame ring");
@@ -75,20 +82,32 @@ bool K230FrameRing::open(bool create, unsigned width, unsigned height, unsigned 
     header_ = static_cast<K230FrameRingHeader *>(map);
     frames_ = reinterpret_cast<uint8_t *>(header_) + sizeof(K230FrameRingHeader);
     if (create && (header_->magic != kK230FrameRingMagic ||
+                   header_->version != kK230FrameRingVersion ||
                    header_->width != width ||
                    header_->height != height ||
                    header_->slot_count != slots)) {
         header_->magic = kK230FrameRingMagic;
-        header_->version = kK230IpcVersion;
+        header_->version = kK230FrameRingVersion;
         header_->slot_count = slots;
         header_->width = width;
         header_->height = height;
         header_->frame_bytes = static_cast<uint32_t>(width * height * 3 / 2);
         header_->reserved0 = 0;
         header_->reserved1 = 0;
+        for (unsigned index = 0; index < kK230FrameSlots; ++index) {
+            header_->slot_seq[index].store(0, std::memory_order_release);
+            header_->slot_frame_id[index].store(UINT64_MAX, std::memory_order_release);
+        }
         std::memset(frames_, 0, static_cast<size_t>(header_->frame_bytes) * slots);
     }
-    return header_->magic == kK230FrameRingMagic && header_->frame_bytes > 0;
+    const bool valid = header_->magic == kK230FrameRingMagic &&
+        header_->version == kK230FrameRingVersion &&
+        header_->slot_count > 0 && header_->slot_count <= kK230FrameSlots &&
+        header_->frame_bytes > 0 &&
+        map_size_ >= sizeof(K230FrameRingHeader) +
+            static_cast<size_t>(header_->slot_count) * header_->frame_bytes;
+    if (!valid) close();
+    return valid;
 }
 
 void K230FrameRing::close()
@@ -105,16 +124,51 @@ void K230FrameRing::close()
     map_size_ = 0;
 }
 
-uint8_t *K230FrameRing::slot(unsigned index)
+bool K230FrameRing::write_slot(unsigned index, uint64_t frame_id,
+                               const uint8_t *source, size_t size)
 {
-    if (!header_ || index >= header_->slot_count) return nullptr;
-    return frames_ + static_cast<size_t>(index) * header_->frame_bytes;
+    if (!header_ || !source || index >= header_->slot_count ||
+        size != header_->frame_bytes) return false;
+
+    std::atomic<uint64_t> &sequence = header_->slot_seq[index];
+    uint64_t next = sequence.load(std::memory_order_relaxed);
+    if (next & 1ULL) ++next;
+    sequence.store(next + 1, std::memory_order_release);
+    std::memcpy(frames_ + static_cast<size_t>(index) * header_->frame_bytes,
+                source, size);
+    header_->slot_frame_id[index].store(frame_id, std::memory_order_release);
+    sequence.store(next + 2, std::memory_order_release);
+    return true;
 }
 
-const uint8_t *K230FrameRing::slot(unsigned index) const
+bool K230FrameRing::copy_slot(unsigned index, uint64_t frame_id,
+                              uint8_t *destination, size_t size) const
 {
-    if (!header_ || index >= header_->slot_count) return nullptr;
-    return frames_ + static_cast<size_t>(index) * header_->frame_bytes;
+    if (!header_ || !destination || index >= header_->slot_count ||
+        size != header_->frame_bytes) return false;
+
+    constexpr unsigned kCopyAttempts = 8;
+    const uint8_t *source = frames_ + static_cast<size_t>(index) * header_->frame_bytes;
+    const std::atomic<uint64_t> &sequence = header_->slot_seq[index];
+    const std::atomic<uint64_t> &stored_frame_id = header_->slot_frame_id[index];
+    for (unsigned attempt = 0; attempt < kCopyAttempts; ++attempt) {
+        const uint64_t before = sequence.load(std::memory_order_acquire);
+        if (before == 0 || (before & 1ULL) != 0) continue;
+        const uint64_t before_frame_id = stored_frame_id.load(std::memory_order_acquire);
+        if (before_frame_id != frame_id) {
+            if (before_frame_id > frame_id) return false;
+            continue;
+        }
+
+        std::memcpy(destination, source, size);
+
+        const uint64_t after = sequence.load(std::memory_order_acquire);
+        const uint64_t after_frame_id = stored_frame_id.load(std::memory_order_acquire);
+        if (before == after && (after & 1ULL) == 0 &&
+            after_frame_id == frame_id)
+            return true;
+    }
+    return false;
 }
 
 void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parsed,

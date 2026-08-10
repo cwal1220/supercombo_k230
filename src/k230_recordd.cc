@@ -132,6 +132,7 @@ int main() {
     uint64_t selected_frames = 0;
     uint64_t dropped_frames = 0;
     uint64_t stale_frames = 0;
+    uint64_t frame_sync_failures = 0;
     bool warmed = false;
     std::vector<uint8_t> frame_copy(frame_ring.frame_bytes());
 
@@ -164,15 +165,16 @@ int main() {
         if (frame.slot < frame_ring.slot_count() &&
             frame.width == frame_ring.width() && frame.height == frame_ring.height()) {
           if (age_ns <= kMaximumFrameAgeNs) {
-            const uint8_t *source = frame_ring.slot(frame.slot);
-            if (source) {
-              std::memcpy(frame_copy.data(), source, frame_copy.size());
+            if (frame_ring.copy_slot(frame.slot, frame.frame_id,
+                                     frame_copy.data(), frame_copy.size())) {
               if (encoder.submit_frame(frame_copy.data(), frame_copy.size(), frame,
                                        packet_handler)) {
                 warmed = true;
               } else {
                 ++dropped_frames;
               }
+            } else {
+              ++frame_sync_failures;
             }
           } else {
             ++stale_frames;
@@ -219,7 +221,7 @@ int main() {
         next_log_ns = now_ns + 1000000000ULL;
         std::fprintf(stderr,
                      "recordd: enabled=%u active=%u warmed=%u selected=%llu "
-                     "submitted=%llu encoded=%llu dropped=%llu stale=%llu queues=%llu/%llu "
+                     "submitted=%llu encoded=%llu dropped=%llu stale=%llu sync=%llu queues=%llu/%llu "
                      "frames=%llu%s\n",
                      writer.requested_enabled() ? 1 : 0, writer.active() ? 1 : 0,
                      warmed ? 1 : 0,
@@ -228,6 +230,7 @@ int main() {
                      static_cast<unsigned long long>(encoder.encoded_frames()),
                      static_cast<unsigned long long>(dropped_frames),
                      static_cast<unsigned long long>(stale_frames),
+                     static_cast<unsigned long long>(frame_sync_failures),
                      static_cast<unsigned long long>(can_log_sub.depth()),
                      static_cast<unsigned long long>(sendcan_log_sub.depth()),
                      static_cast<unsigned long long>(writer.video_frames()),
