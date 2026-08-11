@@ -232,6 +232,11 @@ void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parse
 
         const float current_x = parsed.plan.points[tidx].x;
         const float next_x = parsed.plan.points[tidx + 1].x;
+        if (!std::isfinite(current_x) || !std::isfinite(next_x) ||
+            next_x <= current_x) {
+            state.lane_t[xidx] = NAN;
+            continue;
+        }
         const float p = static_cast<float>(
             (model_x_idx_double(xidx) - current_x) / (next_x - current_x));
         state.lane_t[xidx] = static_cast<float>(
@@ -302,7 +307,7 @@ void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parse
 
 ParsedModelOutput k230_parsed_from_model_state(const K230ModelState &state)
 {
-    ParsedModelOutput parsed;
+    ParsedModelOutput parsed{};
     parsed.valid = state.valid != 0;
     parsed.plan.valid = parsed.valid;
     parsed.plan.best_index = state.best_plan;

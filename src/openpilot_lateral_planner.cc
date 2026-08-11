@@ -20,6 +20,8 @@ namespace {
 constexpr int kMpcN = LAT_N;
 constexpr int kMpcNodes = LAT_N + 1;
 constexpr double kDtModel = 0.05;
+constexpr double kStandstillSpeedMps = 0.5;
+constexpr double kMaxLateralJerk = 5.0;
 
 double interp(double x, const double *xp, const double *fp, size_t count) {
   if (count == 0) return 0.0;
@@ -48,6 +50,10 @@ double path_heading_at(
   const double safe_dx = std::fabs(dx) < 1e-3
       ? std::copysign(1e-3, dx == 0.0 ? 1.0 : dx) : dx;
   return std::atan2(dy, safe_dx);
+}
+
+double angle_delta(double from, double to) {
+  return std::atan2(std::sin(to - from), std::cos(to - from));
 }
 
 class FirstOrderFilter {
@@ -135,7 +141,8 @@ public:
     std::array<double, kTrajectorySize> valid_y{};
     size_t valid_count = 0;
     for (int i = 0; i < kTrajectorySize; ++i) {
-      if (std::isfinite(lane_t_[i])) {
+      if (std::isfinite(lane_t_[i]) &&
+          (valid_count == 0 || lane_t_[i] > valid_t[valid_count - 1])) {
         valid_t[valid_count] = lane_t_[i];
         valid_y[valid_count] = lane_path_y[i];
         ++valid_count;
@@ -220,6 +227,7 @@ public:
            const std::array<double, LAT_NP> &params,
            const std::array<double, kMpcNodes> &y,
            const std::array<double, kMpcNodes> &heading,
+           const std::array<double, kMpcNodes> &curvature_rate,
            double heading_weight) {
     const double weights[9] = {
         1.0, 0.0, 0.0,
@@ -238,7 +246,9 @@ public:
     for (int i = 0; i <= kMpcN; ++i) {
       const double velocity_cost = params[0] + 5.0;
       if (i < kMpcN) {
-        std::array<double, LAT_NY> yref = {y[i], heading[i] * velocity_cost, 0.0};
+        std::array<double, LAT_NY> yref = {
+            y[i], heading[i] * velocity_cost,
+            curvature_rate[i] * velocity_cost * 4.0};
         ocp_nlp_cost_model_set(capsule_->nlp_config, capsule_->nlp_dims,
                                capsule_->nlp_in, i, "yref", yref.data());
       } else {
@@ -310,6 +320,8 @@ struct OpenpilotLateralPlanner::Impl {
                        float measured_curvature, bool active,
                        float output_scale) {
     LateralTarget target;
+    target.source_frame_id = model.frame_id;
+    target.source_model_timestamp_ns = model.model_timestamp_ns;
     if (!model.valid) return target;
 
     lane_planner.parse(model);
@@ -349,22 +361,77 @@ struct OpenpilotLateralPlanner::Impl {
     std::array<double, kTrajectorySize> distance{};
     std::array<double, kTrajectorySize> path_y{};
     std::array<double, kTrajectorySize> path_heading{};
+    std::array<double, kTrajectorySize> path_curvature{};
+    std::array<double, kTrajectorySize> path_curvature_rate{};
     for (int i = 0; i < kTrajectorySize; ++i) {
-      distance[i] = std::sqrt(path[i][0] * path[i][0] + path[i][1] * path[i][1] +
-                              path[i][2] * path[i][2]);
+      if (!std::isfinite(path[i][0]) || !std::isfinite(path[i][1]) ||
+          !std::isfinite(path[i][2]) || !std::isfinite(path_t[i]) ||
+          (i > 0 && (path_t[i] <= path_t[i - 1]))) {
+        return target;
+      }
+      if (i == 0) {
+        distance[i] = std::sqrt(path[i][0] * path[i][0] +
+                                path[i][1] * path[i][1] +
+                                path[i][2] * path[i][2]);
+      } else {
+        const double dx = path[i][0] - path[i - 1][0];
+        const double dy = path[i][1] - path[i - 1][1];
+        const double dz = path[i][2] - path[i - 1][2];
+        const double segment = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (!std::isfinite(segment) || segment <= 1e-3) return target;
+        distance[i] = distance[i - 1] + segment;
+      }
       path_y[i] = path[i][1];
       // 최종 경로와 heading을 같은 좌표계에서 계산한다. 차선 융합이나
       // 경로 오프셋 뒤에 모델 원본 heading을 재사용하면 좌우 곡률 부호가
       // 서로 달라져 한쪽 커브에서 경로를 안쪽으로 자를 수 있다.
       path_heading[i] = path_heading_at(path, i);
+      if (!std::isfinite(distance[i]) ||
+          !std::isfinite(path_heading[i])) {
+        return target;
+      }
+    }
+
+    for (int i = 0; i < kTrajectorySize; ++i) {
+      const int previous = std::max(0, i - 1);
+      const int next = std::min(kTrajectorySize - 1, i + 1);
+      const double ds = distance[next] - distance[previous];
+      if (next == previous || ds <= 1e-3) return target;
+      path_curvature[i] = angle_delta(path_heading[previous], path_heading[next]) / ds;
+      if (!std::isfinite(path_curvature[i])) return target;
+    }
+    for (int i = 0; i < kTrajectorySize; ++i) {
+      const int next = std::min(kTrajectorySize - 1, i + 1);
+      const int previous = std::max(0, i - 1);
+      const double dt = path_t[next] - path_t[previous];
+      if (next == previous || dt <= 1e-3) return target;
+      path_curvature_rate[i] =
+          (path_curvature[next] - path_curvature[previous]) / dt;
+      if (!std::isfinite(path_curvature_rate[i])) return target;
+    }
+
+    const bool standstill = std::max(0.0f, v_ego) < kStandstillSpeedMps;
+    const double max_curvature_rate = kMaxLateralJerk /
+        std::max(static_cast<double>(v_ego) * v_ego, 0.01);
+    for (double &curvature_rate : path_curvature_rate) {
+      // 정차 중에는 모델의 미세한 heading 차이가 조향 명령으로 누적되지 않게 한다.
+      curvature_rate = standstill
+          ? 0.0
+          : std::clamp(curvature_rate, -max_curvature_rate, max_curvature_rate);
     }
 
     std::array<double, kMpcNodes> y_pts{};
     std::array<double, kMpcNodes> heading_pts{};
+    std::array<double, kMpcNodes> curvature_rate_pts{};
     for (int i = 0; i < kMpcNodes; ++i) {
       const double query = std::max(0.0f, v_ego) * path_t[i];
       y_pts[i] = interp(query, distance.data(), path_y.data(), distance.size());
       heading_pts[i] = interp(query, distance.data(), path_heading.data(), distance.size());
+      curvature_rate_pts[i] =
+          interp(query, distance.data(), path_curvature_rate.data(), distance.size());
+      if (!std::isfinite(y_pts[i]) || !std::isfinite(heading_pts[i]) ||
+          !std::isfinite(curvature_rate_pts[i]))
+        return target;
     }
 
     const double lateral_factor = std::max(0.0, factor1 - factor2 * v_ego * v_ego);
@@ -372,19 +439,31 @@ struct OpenpilotLateralPlanner::Impl {
         ? (v_ego <= 5.0f ? 1.0 : v_ego >= 10.0f ? 0.15
                                                 : 1.0 - (v_ego - 5.0) * 0.17)
         : 1.0;
+    if (standstill) {
+      x0 = {0.0, 0.0, 0.0,
+            std::isfinite(measured_curvature) ? measured_curvature : 0.0};
+    }
     mpc.run(x0, {std::max(0.0f, v_ego), lateral_factor}, y_pts, heading_pts,
-            heading_weight);
-    bool has_nan = false;
-    for (const auto &state : mpc.states()) has_nan = has_nan || !std::isfinite(state[3]);
-    if (has_nan || mpc.status() != 0) {
+            curvature_rate_pts, heading_weight);
+    bool has_invalid_curvature = false;
+    for (const auto &state : mpc.states())
+      has_invalid_curvature = has_invalid_curvature || !std::isfinite(state[3]);
+    const bool solver_failed = mpc.status() != 0;
+    if (has_invalid_curvature || solver_failed) {
       mpc.reset({0.0, 0.0, 0.0, 0.0});
       x0 = {0.0, 0.0, 0.0, measured_curvature};
-    } else {
-      std::array<double, kMpcNodes> curvatures{};
-      for (int i = 0; i < kMpcNodes; ++i) curvatures[i] = mpc.states()[i][3];
-      x0[3] = interp(kDtModel, path_t.data(), curvatures.data(), curvatures.size());
+      target.valid = false;
+      target.mpc_solution_valid = false;
+      target.desire = desire;
+      return target;
     }
-    invalid_count = (mpc.cost() > 20000.0 || has_nan) ? invalid_count + 1 : 0;
+
+    std::array<double, kMpcNodes> curvatures{};
+    for (int i = 0; i < kMpcNodes; ++i) curvatures[i] = mpc.states()[i][3];
+    x0[3] = interp(kDtModel, path_t.data(), curvatures.data(), curvatures.size());
+
+    const bool invalid_cost = !std::isfinite(mpc.cost()) || mpc.cost() > 20000.0;
+    invalid_count = invalid_cost ? invalid_count + 1 : 0;
 
     target.valid = true;
     target.mpc_solution_valid = invalid_count < 2;

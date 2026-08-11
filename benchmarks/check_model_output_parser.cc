@@ -6,6 +6,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <vector>
 
 namespace {
@@ -68,8 +69,14 @@ int self_test()
     }
 
     const ParsedModelOutput parsed = ModelOutputParser::parse(raw);
+    const ParsedModelOutput truncated =
+        ModelOutputParser::parse(std::vector<float>(5600, 0.0f));
+    std::vector<float> malformed_raw = raw;
+    malformed_raw[0] = std::numeric_limits<float>::quiet_NaN();
+    const ParsedModelOutput malformed = ModelOutputParser::parse(malformed_raw);
     ParsedLeadPoint lead;
     const bool ok = parsed.valid && parsed.plan.best_index == 4 &&
+        !truncated.valid && !malformed.valid &&
         near(parsed.plan.points[7].x, 17.0f) &&
         near(parsed.plan.points[7].y, -1.25f) &&
         near(parsed.plan.orientations[7].z, 0.12f) &&

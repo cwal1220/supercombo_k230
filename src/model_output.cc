@@ -23,7 +23,7 @@ constexpr int kStopLineOffset = kLeadProbOffset + kLeadMhpSelection;
 constexpr int kStopLineSize = kStopLineMhpN * kStopLinePredictionStride + 1;
 constexpr int kStopLineProbOffset = kStopLineOffset + kStopLineSize - 1;
 constexpr int kMetaOffset = kStopLineOffset + kStopLineSize;
-constexpr int kMinOverlayOutputFloats = kRoadEdgeOffset + kRoadEdgeMeanSize;
+constexpr int kMinOverlayOutputFloats = kRoadEdgeOffset + kRoadEdgeSize;
 constexpr int kMinLeadOutputFloats = kLeadProbOffset + kLeadMhpSelection;
 constexpr int kMinStopLineOutputFloats = kStopLineOffset + kStopLineSize;
 constexpr int kMinMetaOutputFloats = kMetaOffset + kDesireLen;
@@ -64,17 +64,21 @@ bool ParsedLeads::primary(int time_idx, float min_probability, ParsedLeadPoint *
     return true;
 }
 
-void softmax(const float *input, float *output, int size)
+bool softmax(const float *input, float *output, int size)
 {
+    if (!input || !output || size <= 0 || size > kDesireLen) return false;
     const float max_value = *std::max_element(input, input + size);
     float denominator = 0.0f;
     for (int i = 0; i < size; ++i) {
-        output[i] = std::exp(input[i] - max_value);
-        denominator += output[i];
+        const float exponent = std::exp(input[i] - max_value);
+        output[i] = exponent;
+        denominator += exponent;
     }
+    if (!std::isfinite(denominator) || denominator <= 0.0f) return false;
     const float inv_denominator = 1.0f / denominator;
     for (int i = 0; i < size; ++i)
-        output[i] *= inv_denominator;
+        output[i] = std::exp(input[i] - max_value) * inv_denominator;
+    return true;
 }
 
 ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
@@ -82,6 +86,12 @@ ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
     ParsedModelOutput output;
     output.valid = raw.size() >= static_cast<size_t>(kMinOverlayOutputFloats);
     if (!output.valid) return output;
+    for (const float value : raw) {
+        if (!std::isfinite(value)) {
+            output.valid = false;
+            return output;
+        }
+    }
 
     int best_plan = 0;
     float best_prob = raw[kPlanStride - 1];
@@ -198,8 +208,11 @@ ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
         output.stop_line.time = raw[base + 7];
     }
 
-    if (raw.size() >= static_cast<size_t>(kMinMetaOutputFloats))
-        softmax(raw.data() + kMetaOffset, output.meta.desire_state.data(), kDesireLen);
+    if (raw.size() >= static_cast<size_t>(kMinMetaOutputFloats) &&
+        !softmax(raw.data() + kMetaOffset, output.meta.desire_state.data(), kDesireLen)) {
+        output.valid = false;
+        return output;
+    }
 
     if (raw.size() >= static_cast<size_t>(kMinPoseOutputFloats)) {
         output.has_pose = true;

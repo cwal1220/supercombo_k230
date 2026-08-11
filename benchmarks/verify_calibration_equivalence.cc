@@ -258,7 +258,7 @@ struct RefCalibrator {
 
     bool update(const PoseObservation &pose, double v_ego = 20.0)
     {
-        old_rpy_weight = std::min(0.0, old_rpy_weight - 1.0 / 400.0);
+        old_rpy_weight = std::max(0.0, old_rpy_weight - 1.0 / 400.0);
 
         const double trans[3] = {pose.trans[0], pose.trans[1], pose.trans[2]};
         const double rot[3] = {pose.rot[0], pose.rot[1], pose.rot[2]};
@@ -449,6 +449,7 @@ void test_calibration_service()
     AppConfig manual_config;
     manual_config.calibration_auto = true;
     manual_config.manual_calibration = true;
+    manual_config.manual_roll = deg_to_rad(0.4f);
     manual_config.manual_pitch = deg_to_rad(1.0f);
     manual_config.manual_yaw = deg_to_rad(-0.5f);
     CalibrationService manual(manual_config);
@@ -457,7 +458,7 @@ void test_calibration_service()
 
     float manual_rpy[3] = {};
     manual.input_rpy(manual_rpy);
-    expect_near(manual_rpy[0], 0.0, 1e-7, "manual roll wins");
+    expect_near(manual_rpy[0], manual_config.manual_roll, 1e-7, "manual roll wins");
     expect_near(manual_rpy[1], manual_config.manual_pitch, 1e-7, "manual pitch wins");
     expect_near(manual_rpy[2], manual_config.manual_yaw, 1e-7, "manual yaw wins");
     expect_equal_int(manual.snapshot().valid_blocks, 5,
@@ -469,6 +470,8 @@ void test_calibration_service()
     CalibrationService restored(restored_config);
     float persisted_rpy[3] = {};
     restored.input_rpy(persisted_rpy);
+    expect_near(persisted_rpy[0], manual_config.manual_roll, 1e-7,
+                "persisted roll reloads");
     expect_near(persisted_rpy[1], manual_config.manual_pitch, 1e-7,
                 "persisted pitch reloads");
     expect_near(persisted_rpy[2], manual_config.manual_yaw, 1e-7,

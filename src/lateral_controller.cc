@@ -112,7 +112,10 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
       vehicle_state, now_s,
       static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) / 1000.0);
   result.speed_kph = cluster_speed_kph(vehicle_state);
-  const float speed_mps = result.speed_kph / 3.6f;
+  result.control_speed_kph = k7_vehicle_speed_kph(
+      vehicle_state, now_s,
+      static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) / 1000.0);
+  const float speed_mps = result.control_speed_kph / 3.6f;
   if (logical_engaged) {
     update_manual_blinker_timers(vehicle_state, speed_mps);
   }
@@ -121,7 +124,7 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
   result.active_block = active_block_reason(path, target, vehicle_state, now_s,
                                             result.seeds_ready, result.vehicle_fresh,
                                             panda_ready, panda_controls_allowed,
-                                            result.speed_kph);
+                                            result.control_speed_kph);
   if (logical_engaged && is_hard_disengage_block(result.active_block)) {
     panda_engage_pending_ = false;
     engaged_ = false;
@@ -174,7 +177,8 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
   const bool driver_guard_active =
       driver_steering_torque_above_timer_ >= 0 && driver_steering_torque_above_timer_ < 100;
   const EffectiveSteerLimits effective_limits = config_.steering_params.effective_steer_limits(
-      result.speed_kph, vehicle_state.steering_angle_deg, speed_mps, driver_guard_active);
+      result.control_speed_kph, vehicle_state.steering_angle_deg, speed_mps,
+      driver_guard_active);
   K7SteeringParams control_params = config_.steering_params;
   control_params.steer_max = effective_limits.steer_max;
   control_params.steer_delta_up = effective_limits.steer_delta_up;

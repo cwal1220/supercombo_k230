@@ -184,7 +184,7 @@ void CalibrationService::set_fixed_projection()
 void CalibrationService::input_rpy(float rpy[3]) const
 {
     const float *src = can_apply_online() ? online_rpy_ : fixed_rpy_;
-    rpy[0] = can_apply_online() ? 0.0f : src[0];
+    rpy[0] = src[0];
     rpy[1] = src[1];
     rpy[2] = src[2];
 }

@@ -4,6 +4,8 @@
 #include "model_output.h"
 #include "projection.h"
 
+#include <cstdint>
+
 constexpr int kLateralControlN = 17;
 
 struct LateralTarget {
@@ -16,6 +18,8 @@ struct LateralTarget {
     float curvature = 0.0f;
     float output_scale = 0.0f;
     int desire = 0;
+    uint64_t source_frame_id = 0;
+    uint64_t source_model_timestamp_ns = 0;
     float psis[kLateralControlN] = {};
     float curvatures[kLateralControlN] = {};
     float curvature_rates[kLateralControlN] = {};

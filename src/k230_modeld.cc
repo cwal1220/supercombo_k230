@@ -20,6 +20,7 @@
 namespace {
 
 volatile sig_atomic_t g_stop = 0;
+constexpr uint64_t kControlStateTimeoutNs = 500000000ULL;
 
 uint64_t steady_ns()
 {
@@ -203,16 +204,24 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
         if (!control_sub_open)
             control_sub_open = control_sub.open(kK230ControlStateTopic,
                                                 sizeof(K230ControlState), false);
+        bool control_state_fresh = false;
         if (control_sub_open) {
             K230ControlState control_state;
             if (control_sub.read(&control_state, sizeof(control_state))) {
-                const float ego_speed_kph =
-                    control_state.ego_speed_kph > 0.0f
-                        ? control_state.ego_speed_kph
-                        : control_state.speed_kph;
-                v_ego = std::max(0.0f, ego_speed_kph / 3.6f);
-                desire = static_cast<int>(control_state.desire);
+                const uint64_t now_ns = k230_now_ns();
+                control_state_fresh = control_state.timestamp_ns != 0 &&
+                    now_ns >= control_state.timestamp_ns &&
+                    now_ns - control_state.timestamp_ns <= kControlStateTimeoutNs;
+                if (control_state_fresh) {
+                    // 휠속도 0은 정차 상태로 유효하므로 CLU 표시속도로 대체하지 않는다.
+                    v_ego = std::max(0.0f, control_state.ego_speed_kph / 3.6f);
+                    desire = static_cast<int>(control_state.desire);
+                }
             }
+        }
+        if (!control_state_fresh) {
+            v_ego = 0.0f;
+            desire = 0;
         }
         model.set_desire(desire);
 

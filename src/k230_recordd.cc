@@ -197,7 +197,7 @@ int main() {
                               sizeof(K230ControlState));
         open_optional_channel(panda_sub, &panda_open, kK230PandaStateTopic,
                               sizeof(K230PandaState));
-        K230ModelState model_state;
+        K230ModelState model_state{};
         if (model_open && model_sub.read_new(&model_seq, &model_state,
                                              sizeof(model_state), 0)) {
           writer.write_state(K230RecordType::ModelState, model_state.model_timestamp_ns,

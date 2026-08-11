@@ -171,9 +171,9 @@ K230CanBatch make_send_batch(const std::vector<CanFrame> &frames) {
   return batch;
 }
 
-float vehicle_speed_mps(const K7VehicleCanState &vehicle) {
-  const float unit_scale = vehicle.speed_unit_mph ? 1.609344f : 1.0f;
-  return std::max(0.0f, vehicle.cluster_speed * unit_scale / 3.6f);
+float vehicle_speed_mps(const K7VehicleCanState &vehicle, double now_s,
+                        double timeout_s) {
+  return std::max(0.0f, k7_vehicle_speed_kph(vehicle, now_s, timeout_s) / 3.6f);
 }
 
 class LateralPlannerWorker {
@@ -223,7 +223,7 @@ public:
 
 private:
   struct Request {
-    K230ModelState model;
+    K230ModelState model{};
     K7VehicleCanState vehicle;
     float v_ego = 0.0f;
     float measured_curvature = 0.0f;
@@ -342,7 +342,7 @@ int main() {
     DepartureAlertDetector departure_alert_detector;
     LateralPlannerWorker lateral_planner(config.steering_params);
     K7VehicleCanState vehicle;
-    K230ModelState model;
+    K230ModelState model{};
     K230PandaState panda_state;
     LateralTarget lateral_target;
     K7AdaptiveCruiseOutput adaptive_cruise;
@@ -455,7 +455,9 @@ int main() {
         model_seq = next_model_seq;
         model_updated = true;
         lateral_planner.submit(
-            model, vehicle, vehicle_speed_mps(vehicle),
+            model, vehicle, vehicle_speed_mps(
+                vehicle, now_s,
+                static_cast<double>(config.driving_params.vehicle_state_timeout_ms) / 1000.0),
             last_result.actual_curvature, last_result.active,
             last_result.normalized_output);
       }
@@ -470,6 +472,24 @@ int main() {
       /* IPC를 읽는 동안 새 모델/Panda 상태가 발행될 수 있으므로 freshness
        * 판정에는 공유 상태를 읽은 직후의 시간을 사용한다. */
       const uint64_t now_ns = k230_now_ns();
+      const uint64_t model_timeout_ns =
+          static_cast<unsigned long long>(config.driving_params.model_timeout_ms) *
+          1000000ULL;
+      const bool target_timestamp_valid =
+          lateral_target.source_model_timestamp_ns != 0 &&
+          model.model_timestamp_ns != 0 &&
+          now_ns >= lateral_target.source_model_timestamp_ns &&
+          now_ns - lateral_target.source_model_timestamp_ns <=
+              model_timeout_ns &&
+          lateral_target.source_model_timestamp_ns <= model.model_timestamp_ns;
+      const bool target_frame_valid =
+          model.frame_id == 0 || lateral_target.source_frame_id == 0 ||
+          lateral_target.source_frame_id <= model.frame_id;
+      if (lateral_target.valid &&
+          (!target_timestamp_valid || !target_frame_valid)) {
+        lateral_target.valid = false;
+        lateral_target.mpc_solution_valid = false;
+      }
 
       const bool panda_state_fresh =
           panda_state.timestamp_ns != 0 && now_ns >= panda_state.timestamp_ns &&
@@ -500,9 +520,6 @@ int main() {
       const bool panda_controls_allowed =
           config.force_engaged || panda_controls_allowed_raw ||
           (panda_health_hold && last_panda_controls_allowed);
-      const uint64_t model_timeout_ns =
-          static_cast<unsigned long long>(config.driving_params.model_timeout_ms) *
-          1000000ULL;
       const LateralPath raw_path = k7_path_from_model_state(
           model, now_ns,
           model_timeout_ns);
@@ -762,6 +779,11 @@ int main() {
       if (work_end > next_tick) ++misses;
       if (work_end - log_start >= std::chrono::seconds(1)) {
         const double window_s = std::chrono::duration<double>(work_end - log_start).count();
+        const unsigned long long target_age_ms =
+            lateral_target.source_model_timestamp_ns != 0 &&
+                    now_ns >= lateral_target.source_model_timestamp_ns
+                ? (now_ns - lateral_target.source_model_timestamp_ns) / 1000000ULL
+                : 0ULL;
         std::fprintf(stderr,
                      "k230_controlsd: hz=%.3f work_avg_us=%.1f work_max_us=%.1f "
                      "misses=%u can=%u generated=%u errors=%u txFull=%u rxStale=%u "
@@ -770,7 +792,8 @@ int main() {
                      "panda=%u/%u plan=%u mpc=%u desire=%d "
                      "torque=%d/%d driver=%d angle=%.2f "
                      "curve=%.6f/%.6f error=%.6f pathY=%.3f "
-                     "speed=%.1f cruise=%u max=%.1f cmd=%.1f target=%.1f "
+                     "speed=%.1f controlSpeed=%.1f targetAgeMs=%llu "
+                     "cruise=%u max=%.1f cmd=%.1f target=%.1f "
                      "lead=%u/%.1f/%.1f button=%d pedal=%d/%d block=%s\n",
                      ticks / window_s, work_sum_us / std::max(1U, ticks), work_max_us,
                      misses, can_frames, generated_frames, publish_errors,
@@ -787,7 +810,8 @@ int main() {
                      vehicle.driver_torque, vehicle.steering_angle_deg,
                      last_result.desired_curvature, last_result.actual_curvature,
                      last_result.curvature_error, lateral_target.target_y,
-                     last_result.speed_kph,
+                     last_result.speed_kph, last_result.control_speed_kph,
+                     target_age_ms,
                      adaptive_cruise.active ? 1U : 0U,
                      adaptive_cruise.maximum_speed_kph,
                      adaptive_cruise.commanded_speed_kph,
