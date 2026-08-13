@@ -1,0 +1,53 @@
+#!/bin/sh
+
+set -eu
+
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+workspace_dir="${K230_WORKSPACE_DIR:-$(CDPATH= cd -- "${script_dir}/../.." && pwd)}"
+libusb_include="${K230_LIBUSB_INCLUDE_DIR:-${workspace_dir}/third-party/libusb/libusb}"
+board_lib_dir="${K230_BOARD_LIBS_DIR:-${workspace_dir}/third-party/board-libs}/usr/lib"
+
+args="$*"
+case "$args" in
+  *--version*)
+    printf '%s\n' '1.8.1'
+    ;;
+  *--atleast-pkgconfig-version*)
+    exit 0
+    ;;
+  *--exists*libusb-1.0*)
+    exit 0
+    ;;
+  *--modversion*libusb-1.0*)
+    printf '%s\n' '1.0.27'
+    ;;
+  *--variable=prefix*libusb-1.0*)
+    printf '%s\n' '/usr'
+    ;;
+  *--variable=includedir*libusb-1.0*)
+    printf '%s\n' '/usr/include'
+    ;;
+  *--variable=libdir*libusb-1.0*)
+    printf '%s\n' '/usr/lib'
+    ;;
+  *--cflags-only-other*)
+    ;;
+  *--cflags-only-I*|*--cflags*)
+    printf '%s\n' "-I${libusb_include}"
+    ;;
+  *--libs-only-l*)
+    printf '%s\n' '-lusb-1.0'
+    ;;
+  *--libs-only-L*)
+    printf '%s\n' "-L${board_lib_dir}"
+    ;;
+  *--libs-only-other*)
+    ;;
+  *--libs*)
+    printf '%s\n' "-L${board_lib_dir} -lusb-1.0"
+    ;;
+  *)
+    printf '%s\n' 'target-pkg-config: unsupported query' >&2
+    exit 1
+    ;;
+esac

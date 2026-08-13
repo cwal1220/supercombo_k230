@@ -15,7 +15,7 @@
 | --- | --- | --- | --- |
 | Kendryte K230 / 01Studio | KIA K7 YG HEV | openpilot supercombo | C++ split pipeline |
 
-**[Board setup](#board-setup) · [Build and deploy](#build-and-deploy) · [Runtime](#split-runtime) · [Model pipeline](#model-pipeline) · [Options](#runtime-options) · [Diagnostics](#diagnostics)**
+**[Board setup](#board-setup) · [Build and deploy](#build-and-deploy) · [macOS build environment](docs/macos-build-environment.md) · [Runtime](#split-runtime) · [Model pipeline](#model-pipeline) · [Options](#runtime-options) · [Diagnostics](#diagnostics)**
 
 > [!WARNING]
 > This is experimental vehicle-control software. Keep Panda safety enabled and
@@ -107,13 +107,32 @@ manager with `K230_ENABLE_CONTROL=0 K230_ENABLE_PANDA=0`.
 
 ### macOS SDK cross-build
 
+For the Homebrew-based macOS host setup used by this workspace, see
+[macOS K230 cross-build environment](docs/macos-build-environment.md). The
+short form is:
+
+```sh
+cd /path/to/k230/supercombo_k230
+./scripts/configure_k230_macos.sh
+cd build
+cmake ..
+make -j2
+```
+
+The macOS cross-build defaults to the real-vehicle pipeline, including
+`k230_pandad` and `k230_controlsd`. Set `SUPERCOMBO_BUILD_PANDA=OFF` only for
+camera/model/display-only builds.
+
+The Docker/Buildroot SDK flow below remains available when a Buildroot SDK is
+required for a different target image.
+
 The repository can also be cross-built from macOS using the Buildroot host
 tools produced by `k230_linux_sdk`. This is required to keep the target glibc
 ABI at or below the board's glibc 2.33. First fetch the nncase runtime deps and
 build the `k230_canmv_01studio_defconfig` SDK output:
 
 ```sh
-cd /Users/chan/Documents/supercombo_k230
+cd /path/to/k230/supercombo_k230
 ./scripts/fetch_nncase_runtime.sh
 ```
 

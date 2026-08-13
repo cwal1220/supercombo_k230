@@ -11,8 +11,6 @@ BIN_DIR="${K230_BIN_DIR:-${BUILD_DIR}/bin}"
 read -r -a SSH_CMD <<< "${K230_SSH:-ssh}"
 read -r -a SCP_CMD <<< "${K230_SCP:-scp}"
 SSH_OPTIONS=(
-  -o PubkeyAuthentication=no
-  -o PreferredAuthentications=password
   -o StrictHostKeyChecking=no
 )
 

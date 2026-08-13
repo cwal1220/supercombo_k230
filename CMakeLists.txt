@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 project(supercombo_k230 LANGUAGES C CXX)
 
 option(SUPERCOMBO_BUILD_BENCHMARKS "Build standalone benchmark/diagnostic utilities" OFF)
-option(SUPERCOMBO_BUILD_PANDA "Build optional panda USB/CAN bridge" OFF)
+option(SUPERCOMBO_BUILD_PANDA "Build optional panda USB/CAN bridge" ON)
 option(SUPERCOMBO_BUILD_RUNTIME "Build K230 runtime binaries" ON)
 
 set(CMAKE_CXX_STANDARD 17)
