@@ -111,7 +111,7 @@ OnlineCalibrator::UpdateResult OnlineCalibrator::update(const PoseObservation &p
 {
     UpdateResult result;
     result.snapshot = snapshot_;
-    old_rpy_weight_ = std::min(0.0f, old_rpy_weight_ - 1.0f / kSmoothCycles);
+    old_rpy_weight_ = std::max(0.0f, old_rpy_weight_ - 1.0f / kSmoothCycles);
 
     const bool valid_numbers = finite3(pose.trans) && finite3(pose.rot) &&
         finite3(pose.trans_std) && std::isfinite(v_ego);

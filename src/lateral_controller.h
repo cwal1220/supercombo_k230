@@ -30,6 +30,7 @@ struct K7LateralControlResult {
   bool left_lane = false;
   bool right_lane = false;
   float speed_kph = 0.0f;
+  float control_speed_kph = 0.0f;
   float desired_curvature = 0.0f;
   float actual_curvature = 0.0f;
   float curvature_error = 0.0f;

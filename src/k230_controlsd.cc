@@ -171,9 +171,9 @@ K230CanBatch make_send_batch(const std::vector<CanFrame> &frames) {
   return batch;
 }
 
-float vehicle_speed_mps(const K7VehicleCanState &vehicle) {
-  const float unit_scale = vehicle.speed_unit_mph ? 1.609344f : 1.0f;
-  return std::max(0.0f, vehicle.cluster_speed * unit_scale / 3.6f);
+float vehicle_speed_mps(const K7VehicleCanState &vehicle, double now_s,
+                        double timeout_s) {
+  return std::max(0.0f, k7_vehicle_speed_kph(vehicle, now_s, timeout_s) / 3.6f);
 }
 
 class LateralPlannerWorker {
@@ -455,7 +455,9 @@ int main() {
         model_seq = next_model_seq;
         model_updated = true;
         lateral_planner.submit(
-            model, vehicle, vehicle_speed_mps(vehicle),
+            model, vehicle, vehicle_speed_mps(
+                vehicle, now_s,
+                static_cast<double>(config.driving_params.vehicle_state_timeout_ms) / 1000.0),
             last_result.actual_curvature, last_result.active,
             last_result.normalized_output);
       }
