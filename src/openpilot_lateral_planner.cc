@@ -292,6 +292,9 @@ struct OpenpilotLateralPlanner::Impl {
 
   void update_params(const K7SteeringParams &steering) {
     lane_planner.update_offsets(steering.camera_offset_m, steering.path_offset_m);
+    // desire_helper의 torque_applied는 carstate.steeringPressed에서 나오므로
+    // 컨트롤러와 같은 임계값을 써야 한다.
+    steering_pressed_threshold = steering.steering_pressed_threshold;
     const double center_to_front = steering.center_to_front_m();
     constexpr double civic_mass = 1326.0 + 136.0;
     constexpr double civic_wheelbase = 2.70;
@@ -433,7 +436,8 @@ struct OpenpilotLateralPlanner::Impl {
       lane_change_state = 0;
       direction = 0;
     } else {
-      const bool steering_pressed = std::abs(vehicle.driver_torque) > 150;
+      const bool steering_pressed =
+          std::abs(vehicle.driver_torque) > steering_pressed_threshold;
       const bool torque_applied = steering_pressed &&
           ((vehicle.driver_torque > 0 && direction == -1) ||
            (vehicle.driver_torque < 0 && direction == 1));
@@ -483,6 +487,7 @@ struct OpenpilotLateralPlanner::Impl {
   std::array<double, LAT_NX> x0{};
   double factor1 = 0.0;
   double factor2 = 0.0;
+  int steering_pressed_threshold = 150;
   bool laneless_buffer = false;
   int invalid_count = 0;
   int lane_change_state = 0;

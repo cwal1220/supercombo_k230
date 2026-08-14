@@ -29,7 +29,6 @@ struct Sas11Values {
 struct Mdps12Values {
   int driver_torque = 0;
   int driver_torque_raw_signal = 0;
-  int panda_driver_torque = 0;
   bool toi_unavailable = false;
   bool toi_active = false;
   bool toi_fault = false;
@@ -154,7 +153,6 @@ struct K7VehicleCanState {
   float wheel_speed_rl_kph = 0.0f;
   float wheel_speed_rr_kph = 0.0f;
   int driver_torque = 0;
-  int panda_driver_torque = 0;
   bool mdps_toi_unavailable = false;
   bool mdps_hard_fault = false;
   int mdps_error_count = 0;
@@ -201,9 +199,6 @@ struct K7VehicleCanState {
   float radar_lead_distance_m = 0.0f;
   float radar_lead_relative_speed_mps = 0.0f;
 };
-
-// Panda safety의 MDPS12 driver torque scale과 같은 값을 계산한다.
-int panda_driver_torque_from_raw_signal(int raw_signal);
 
 // K7 SAS11 steering angle/rate를 해석한다.
 Sas11Values decode_sas11(const std::array<uint8_t, 8> &data);

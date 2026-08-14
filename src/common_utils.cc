@@ -24,10 +24,23 @@ bool K230LatestChannel::open(const char *name, size_t payload_capacity, bool cre
     if (fd_ < 0) return false;
 
     map_size_ = sizeof(K230IpcHeader) + payload_capacity;
-    if (create && ftruncate(fd_, static_cast<off_t>(map_size_)) != 0) {
-        std::perror("ftruncate ipc channel");
-        close();
-        return false;
+    if (create) {
+        if (ftruncate(fd_, static_cast<off_t>(map_size_)) != 0) {
+            std::perror("ftruncate ipc channel");
+            close();
+            return false;
+        }
+    } else {
+        // 생산자가 O_CREAT 직후 ftruncate 전이면 shm이 요청보다 작을 수 있다.
+        // 그대로 mmap하면 header를 읽는 순간 SIGBUS가 난다.
+        struct stat st {};
+        if (fstat(fd_, &st) != 0 || static_cast<size_t>(st.st_size) < map_size_) {
+            std::fprintf(stderr,
+                         "ipc channel size mismatch name=%s actual=%lld expected=%zu\n",
+                         name_.c_str(), static_cast<long long>(st.st_size), map_size_);
+            close();
+            return false;
+        }
     }
 
     void *map = mmap(nullptr, map_size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);

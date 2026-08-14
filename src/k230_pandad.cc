@@ -21,15 +21,6 @@ volatile sig_atomic_t g_stop = 0;
 constexpr uint64_t kCanPublishIntervalNs = 10000000ULL;
 constexpr uint64_t kMaxSendCanAgeNs = 100000000ULL;
 
-bool env_enabled(const char *name, bool default_value = false)
-{
-    const char *value = std::getenv(name);
-    if (!value) return default_value;
-    return std::strcmp(value, "0") != 0 &&
-           std::strcmp(value, "false") != 0 &&
-           std::strcmp(value, "FALSE") != 0;
-}
-
 uint16_t env_u16(const char *name, uint16_t default_value)
 {
     const char *value = std::getenv(name);
@@ -164,10 +155,10 @@ int main()
         can_log_pub.reset();
         sendcan_log_pub.reset();
 
-        const bool tx_enabled = env_enabled("K230_PANDA_TX", false) ||
-                                env_enabled("K230_PANDA_ENABLE_TX", false);
-        const bool heartbeat_engaged = env_enabled("K230_PANDA_ENGAGED", false);
-        const bool log_can = env_enabled("K230_PANDA_LOG_CAN", false);
+        const bool tx_enabled = env_flag("K230_PANDA_TX", false) ||
+                                env_flag("K230_PANDA_ENABLE_TX", false);
+        const bool heartbeat_engaged = env_flag("K230_PANDA_ENGAGED", false);
+        const bool log_can = env_flag("K230_PANDA_LOG_CAN", false);
         const char *serial_env = std::getenv("K230_PANDA_SERIAL");
         const std::string serial = serial_env ? serial_env : "";
         const uint16_t idle_us = env_u16("K230_PANDA_IDLE_US", 5000);

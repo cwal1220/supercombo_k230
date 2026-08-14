@@ -1,5 +1,7 @@
 #include "app_config.h"
 
+#include "common_utils.h"
+
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
@@ -15,19 +17,6 @@ std::string env_string(const char *name)
 }
 
 } // namespace
-
-bool env_enabled(const char *name)
-{
-    const char *value = std::getenv(name);
-    return value && value[0] != '\0' && std::strcmp(value, "0") != 0;
-}
-
-bool env_enabled_default(const char *name, bool default_value)
-{
-    const char *value = std::getenv(name);
-    if (!value) return default_value;
-    return value[0] != '\0' && std::strcmp(value, "0") != 0;
-}
 
 bool env_present(const char *name)
 {
@@ -98,12 +87,12 @@ AppConfig AppConfig::from_env_defaults()
     config.manual_calibration = env_present("SUPERCOMBO_CALIB_ROLL_DEG") ||
         env_present("SUPERCOMBO_CALIB_PITCH_DEG") ||
         env_present("SUPERCOMBO_CALIB_YAW_DEG");
-    config.calibration_auto = env_enabled_default("SUPERCOMBO_CALIB_AUTO", true);
+    config.calibration_auto = env_flag("SUPERCOMBO_CALIB_AUTO", true);
     config.manual_roll = deg_to_rad(env_float("SUPERCOMBO_CALIB_ROLL_DEG", 0.0f));
     config.manual_pitch = deg_to_rad(env_float("SUPERCOMBO_CALIB_PITCH_DEG", 0.0f));
     config.manual_yaw = deg_to_rad(env_float("SUPERCOMBO_CALIB_YAW_DEG", 0.0f));
-    config.log_calibration = env_enabled("SUPERCOMBO_LOG_CALIB");
-    config.profile = env_enabled("SUPERCOMBO_PROFILE");
+    config.log_calibration = env_flag("SUPERCOMBO_LOG_CALIB");
+    config.profile = env_flag("SUPERCOMBO_PROFILE");
 
     config.input_warp_fx = env_float("SUPERCOMBO_INPUT_WARP_FX", config.input_warp_fx);
     config.input_warp_fy = env_float("SUPERCOMBO_INPUT_WARP_FY", config.input_warp_fy);

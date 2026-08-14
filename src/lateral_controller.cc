@@ -44,11 +44,6 @@ float cluster_speed_kph(const K7VehicleCanState &vehicle_state) {
   return vehicle_state.cluster_speed * (vehicle_state.speed_unit_mph ? 1.609344f : 1.0f);
 }
 
-float model_t_idx(int i) {
-  const float ratio = static_cast<float>(i) / 32.0f;
-  return 10.0f * ratio * ratio;
-}
-
 float interp_lateral(float x, const float *values) {
   if (x <= 0.0f) return values[0];
   for (int i = 1; i < kLateralControlN; ++i) {
@@ -60,10 +55,6 @@ float interp_lateral(float x, const float *values) {
     }
   }
   return values[kLateralControlN - 1];
-}
-
-bool signal_fresh(double timestamp_s, double now_s, double timeout_s = 0.5) {
-  return timestamp_s >= 0.0 && now_s >= timestamp_s && now_s - timestamp_s <= timeout_s;
 }
 
 }  // namespace
@@ -183,7 +174,7 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
   control_params.steer_max = effective_limits.steer_max;
   control_params.steer_delta_up = effective_limits.steer_delta_up;
   control_params.steer_delta_down = effective_limits.steer_delta_down;
-  const bool yaw_rate_valid = signal_fresh(
+  const bool yaw_rate_valid = signal_time_fresh(
                                   vehicle_state.esp12_time_s, now_s,
                                   static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) /
                                       1000.0) &&
@@ -429,7 +420,7 @@ std::string K7LateralController::active_block_reason(
   if (vehicle_state.park_brake) return "park_brake";
   if (vehicle_state.brake_error) return "brake_error";
   if (!config_.steering_params.torque_use_angle) {
-    if (!signal_fresh(vehicle_state.esp12_time_s, now_s,
+    if (!signal_time_fresh(vehicle_state.esp12_time_s, now_s,
                       static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) /
                           1000.0)) {
       return "esp_stale";

@@ -2,11 +2,36 @@
 #define COMMON_UTILS_H
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <csignal>
+#include <cstring>
+#include <string>
 #include <sys/time.h>
 #include <time.h>
+
+/* 환경변수 불리언 공통 규약. 미설정이거나 빈 값이면 default_value,
+ * "0"/"false"/"no"/"off"/"n"(대소문자 무시)이면 false, 나머지는 true. */
+inline bool env_flag(const char *name, bool default_value = false)
+{
+    const char *value = std::getenv(name);
+    if (!value || value[0] == '\0') return default_value;
+    std::string lowered(value);
+    for (char &character : lowered)
+        character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+    return !(lowered == "0" || lowered == "false" || lowered == "no" ||
+             lowered == "off" || lowered == "n");
+}
+
+/* CAN 신호 freshness 공통 판정. 미수신(음수)과 미래 타임스탬프를 모두
+ * stale로 본다. */
+inline bool signal_time_fresh(double timestamp_s, double now_s, double timeout_s)
+{
+    return timestamp_s >= 0.0 && now_s >= timestamp_s &&
+           now_s - timestamp_s <= timeout_s;
+}
 
 inline float clamp_float(float value, float lo, float hi)
 {

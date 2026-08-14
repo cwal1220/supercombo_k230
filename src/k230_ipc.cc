@@ -10,38 +10,6 @@
 #include <cstdio>
 #include <cstring>
 
-static_assert(sizeof(K230IpcHeader) == 40, "K230IpcHeader layout is part of the Python manager ABI");
-static_assert(sizeof(K230ControlState) == 240,
-              "K230ControlState layout is shared by controlsd and overlay");
-static_assert(offsetof(K230ControlState, hud_flags) == 184,
-              "K230ControlState HUD flag offset is part of the shared ABI");
-static_assert(offsetof(K230ControlState, engage_event_id) == 188,
-              "K230ControlState engagement event offset is part of the shared ABI");
-static_assert(offsetof(K230ControlState, ego_speed_kph) == 232,
-              "K230ControlState ego speed offset is shared by runtime processes");
-
-namespace {
-
-float model_t_idx(int i)
-{
-    const double t = static_cast<double>(i) / static_cast<double>(kTrajectorySize - 1);
-    return static_cast<float>(10.0 * t * t);
-}
-
-double model_t_idx_double(int i)
-{
-    const double t = static_cast<double>(i) / static_cast<double>(kTrajectorySize - 1);
-    return 10.0 * t * t;
-}
-
-double model_x_idx_double(int i)
-{
-    const double t = static_cast<double>(i) / static_cast<double>(kTrajectorySize - 1);
-    return 192.0 * t * t;
-}
-
-} // namespace
-
 K230FrameRing::~K230FrameRing()
 {
     close();
