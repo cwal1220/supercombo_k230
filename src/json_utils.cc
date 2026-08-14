@@ -1,5 +1,7 @@
 #include "json_utils.h"
 
+#include "common_utils.h"
+
 #include <cerrno>
 #include <cmath>
 #include <cctype>
@@ -53,4 +55,24 @@ bool parse_json_float_value(const std::string &text, const std::string &key, flo
   }
   *out = parsed;
   return true;
+}
+
+void parse_json_optional_bool(const std::string &text, const std::string &key,
+                              bool *field) {
+  bool value = false;
+  if (parse_json_bool_value(text, key, &value)) *field = value;
+}
+
+void parse_json_optional_float(const std::string &text, const std::string &key,
+                               float minimum, float maximum, float *field) {
+  float value = 0.0f;
+  if (parse_json_float_value(text, key, &value))
+    *field = clamp_float(value, minimum, maximum);
+}
+
+void parse_json_optional_int(const std::string &text, const std::string &key,
+                             int minimum, int maximum, int *field) {
+  float value = 0.0f;
+  if (parse_json_float_value(text, key, &value))
+    *field = clamp_int(value, minimum, maximum);
 }

@@ -35,10 +35,11 @@ def now_ns() -> int:
 
 
 def env_enabled(name: str, default: bool = False) -> bool:
+    """common_utils.h의 env_flag와 같은 규약을 따른다."""
     value = os.environ.get(name)
-    if value is None:
+    if value is None or value == "":
         return default
-    return value not in ("0", "false", "False", "FALSE")
+    return value.lower() not in ("0", "false", "no", "off", "n")
 
 
 def default_kmodel_path() -> str:

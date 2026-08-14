@@ -6,6 +6,11 @@
 #include "model_output.h"
 #include "projection.h"
 
+/* engage 차단 사유 → HUD 라벨. HUD 상태줄과 engage 거부 토스트가 같은 표를
+ * 쓰도록 여기 한 벌만 둔다. 모르는 사유면 nullptr을 돌려주고, 표시 방식은
+ * 호출부가 정한다. */
+const char *engage_block_label(const char *block);
+
 struct OverlayHudState {
     bool panda_connected = false;
     bool panda_healthy = false;

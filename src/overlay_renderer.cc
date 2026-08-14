@@ -7,9 +7,40 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace {
+
+struct EngageBlockLabel {
+    const char *reason;
+    const char *label;
+};
+
+constexpr EngageBlockLabel kEngageBlockLabels[] = {
+    {"brake_error", "BRAKE ERROR"},
+    {"control_stale", "CONTROL STALE"},
+    {"controller_disabled", "CONTROL OFF"},
+    {"door_open", "DOOR OPEN"},
+    {"esp_disabled", "ESP OFF"},
+    {"esp_stale", "ESP STALE"},
+    {"gear_not_drive", "GEAR NOT D"},
+    {"lanechange_manual", "MANUAL TURN"},
+    {"lateral_plan_invalid", "PLAN INVALID"},
+    {"mdps_fault", "MDPS FAULT"},
+    {"no_smart_mdps_low_speed", "LOW SPEED"},
+    {"not_engaged", "STANDBY"},
+    {"panda_controls_off", "PANDA CTRL OFF"},
+    {"panda_not_ready", "PANDA NOT READY"},
+    {"park_brake", "PARK BRAKE"},
+    {"path_invalid", "PATH INVALID"},
+    {"seatbelt_unlatched", "SEATBELT"},
+    {"seeds_missing", "CAN SEEDS"},
+    {"speed_invalid", "SPEED INVALID"},
+    {"steering_angle_limit", "ANGLE LIMIT"},
+    {"vehicle_state_stale", "CAR STALE"},
+    {"yaw_rate_invalid", "YAW INVALID"},
+};
 
 constexpr float kRadarToCameraDistanceM = 1.52f;
 constexpr int kTrafficSpriteWidth = 270;
@@ -120,32 +151,11 @@ std::string active_block_text(const OverlayHudState &hud)
 
     const std::string block = hud.active_block;
     if (block.empty()) return hud.controller_engaged ? "READY" : "STANDBY";
-    if (block == "not_engaged") return "STANDBY";
-    if (block == "controller_disabled") return "CONTROL OFF";
-    if (block == "door_open") return "DOOR OPEN";
-    if (block == "esp_disabled") return "ESP OFF";
-    if (block == "esp_stale") return "ESP STALE";
-    if (block == "gear_not_drive") return "GEAR NOT D";
-    if (block == "lanechange_manual") return "MANUAL TURN";
-    if (block == "lateral_plan_invalid") return "PLAN INVALID";
-    if (block == "mdps_fault") return "MDPS FAULT";
-    if (block == "no_smart_mdps_low_speed") return "LOW SPEED";
-    if (block == "panda_controls_off") return "PANDA CTRL OFF";
-    if (block == "panda_not_ready") return "PANDA NOT READY";
-    if (block == "park_brake") return "PARK BRAKE";
-    if (block == "path_invalid") return "PATH INVALID";
-    if (block == "seatbelt_unlatched") return "SEATBELT";
-    if (block == "seeds_missing") return "CAN SEEDS";
-    if (block == "speed_invalid") return "SPEED INVALID";
-    if (block == "steering_angle_limit") return "ANGLE LIMIT";
-    if (block == "vehicle_state_stale") return "CAR STALE";
-    if (block == "yaw_rate_invalid") return "YAW INVALID";
-    if (block == "brake_error") return "BRAKE ERROR";
-    if (block == "control_stale") return "CONTROL STALE";
+    if (const char *label = engage_block_label(block.c_str())) return label;
 
-    std::string label = block;
-    std::replace(label.begin(), label.end(), '_', ' ');
-    return label;
+    std::string fallback = block;
+    std::replace(fallback.begin(), fallback.end(), '_', ' ');
+    return fallback;
 }
 
 class BitmapHud {
@@ -899,6 +909,15 @@ cv::Scalar openpilot_lane_color(float probability)
 }
 
 } // namespace
+
+const char *engage_block_label(const char *block)
+{
+    if (!block || block[0] == '\0') return nullptr;
+    for (const EngageBlockLabel &entry : kEngageBlockLabels) {
+        if (std::strcmp(block, entry.reason) == 0) return entry.label;
+    }
+    return nullptr;
+}
 
 void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &output,
                            const ProjectionState &projection,

@@ -52,6 +52,9 @@ struct K230IpcHeader {
     uint32_t reserved1 = 0;
 };
 
+static_assert(sizeof(K230IpcHeader) == 40,
+              "K230IpcHeader layout is part of the Python manager ABI");
+
 struct K230FrameRingHeader {
     uint32_t magic = kK230FrameRingMagic;
     uint32_t version = kK230FrameRingVersion;
@@ -291,6 +294,17 @@ struct K230ControlState {
     char engage_reject_block[32] = {};
     float ego_speed_kph = 0.0f;
 };
+
+/* controlsd가 발행하고 overlayd/recordd가 읽는 공유 레이아웃이다. 생산자를
+ * 포함한 모든 translation unit에서 검사되도록 헤더에 둔다. */
+static_assert(sizeof(K230ControlState) == 240,
+              "K230ControlState layout is shared by controlsd and overlay");
+static_assert(offsetof(K230ControlState, hud_flags) == 184,
+              "K230ControlState HUD flag offset is part of the shared ABI");
+static_assert(offsetof(K230ControlState, engage_event_id) == 188,
+              "K230ControlState engagement event offset is part of the shared ABI");
+static_assert(offsetof(K230ControlState, ego_speed_kph) == 232,
+              "K230ControlState ego speed offset is shared by runtime processes");
 
 class K230LatestChannel {
 public:

@@ -15,6 +15,15 @@ bool parse_json_bool_value(const std::string &text, const std::string &key, bool
 // 단순 JSON 텍스트에서 float 값을 읽는다.
 bool parse_json_float_value(const std::string &text, const std::string &key, float *out);
 
+/* 아래 세 헬퍼는 파라미터 로더 공통 규약이다. 키가 없으면 기존 값을 유지하고,
+ * 있으면 허용 범위로 clamp 해서 덮어쓴다. */
+void parse_json_optional_bool(const std::string &text, const std::string &key,
+                              bool *field);
+void parse_json_optional_float(const std::string &text, const std::string &key,
+                               float minimum, float maximum, float *field);
+void parse_json_optional_int(const std::string &text, const std::string &key,
+                             int minimum, int maximum, int *field);
+
 // 단순 JSON 텍스트에서 고정 길이 float 배열을 읽는다.
 template <size_t N>
 bool parse_json_float_array(const std::string &text, const std::string &key,
