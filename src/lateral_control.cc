@@ -10,12 +10,6 @@ bool finite_point(const ModelPoint &point)
     return std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z);
 }
 
-float model_t_idx(int i)
-{
-    const float t = static_cast<float>(i) / static_cast<float>(kTrajectorySize - 1);
-    return 10.0f * t * t;
-}
-
 float safe_dx(float dx)
 {
     if (std::fabs(dx) >= 0.001f) return dx;

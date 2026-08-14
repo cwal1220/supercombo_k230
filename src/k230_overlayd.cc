@@ -43,41 +43,12 @@ constexpr uint64_t kStateFreshNs = 2000000000ULL;
 // Leave margin below three 60 Hz display callbacks so redraws do not slip to 15 Hz.
 constexpr uint64_t kOverlayIntervalNs = 45000000ULL;
 
-struct EngageBlockLabel {
-    const char *reason;
-    const char *label;
-};
-
-constexpr EngageBlockLabel kEngageBlockLabels[] = {
-    {"controller_disabled", "CONTROL OFF"},
-    {"door_open", "DOOR OPEN"},
-    {"esp_disabled", "ESP OFF"},
-    {"esp_stale", "ESP STALE"},
-    {"gear_not_drive", "GEAR NOT D"},
-    {"lanechange_manual", "MANUAL STEER"},
-    {"lateral_plan_invalid", "PLAN INVALID"},
-    {"mdps_fault", "MDPS FAULT"},
-    {"no_smart_mdps_low_speed", "LOW SPEED"},
-    {"panda_controls_off", "PANDA CTRL OFF"},
-    {"panda_not_ready", "PANDA NOT READY"},
-    {"park_brake", "PARK BRAKE"},
-    {"path_invalid", "PATH INVALID"},
-    {"seatbelt_unlatched", "SEATBELT"},
-    {"seeds_missing", "CAN SEEDS"},
-    {"speed_invalid", "SPEED INVALID"},
-    {"steering_angle_limit", "ANGLE LIMIT"},
-    {"vehicle_state_stale", "CAR STALE"},
-    {"yaw_rate_invalid", "YAW INVALID"},
-    {"brake_error", "BRAKE ERROR"},
-};
-
+// 라벨 표는 overlay_renderer가 소유한다. 여기서는 토스트용 기본값만 얹는다.
 const char *engage_block_text(const char *block)
 {
     if (!block || block[0] == '\0') return "NOT READY";
-    for (const EngageBlockLabel &entry : kEngageBlockLabels) {
-        if (std::strcmp(block, entry.reason) == 0) return entry.label;
-    }
-    return block;
+    const char *label = engage_block_label(block);
+    return label ? label : block;
 }
 
 struct StageStats {

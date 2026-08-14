@@ -13,6 +13,23 @@ constexpr int kLeadTrajLen = 6;
 constexpr int kDesireLen = 8;
 constexpr float kModelHeight = 1.22f;
 
+/* openpilot T_IDXS / X_IDXS 격자. 같은 식이 여러 파일에 재정의되지 않도록
+ * 여기 한 벌만 둔다. */
+inline double model_t_idx_double(int i)
+{
+    const double t = static_cast<double>(i) / static_cast<double>(kTrajectorySize - 1);
+    return 10.0 * t * t;
+}
+
+inline double model_x_idx_double(int i)
+{
+    const double t = static_cast<double>(i) / static_cast<double>(kTrajectorySize - 1);
+    return 192.0 * t * t;
+}
+
+inline float model_t_idx(int i) { return static_cast<float>(model_t_idx_double(i)); }
+inline float model_x_idx(int i) { return static_cast<float>(model_x_idx_double(i)); }
+
 struct ModelPoint {
     float x = 0.0f;
     float y = 0.0f;
@@ -92,7 +109,6 @@ class ModelOutputParser {
 public:
     static ParsedModelOutput parse(const std::vector<float> &raw);
 
-    static float x_idx(int i);
     static float sigmoid(float x);
 };
 

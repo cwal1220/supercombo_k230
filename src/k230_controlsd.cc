@@ -112,13 +112,6 @@ bool load_runtime_params(const std::string &steering_path,
   return true;
 }
 
-bool env_enabled(const char *name, bool default_value = false) {
-  const char *value = std::getenv(name);
-  if (!value) return default_value;
-  return std::strcmp(value, "0") != 0 && std::strcmp(value, "false") != 0 &&
-         std::strcmp(value, "FALSE") != 0;
-}
-
 bool open_when_ready(K230LatestChannel *channel, const char *topic,
                      size_t size, bool create) {
   while (!g_stop) {
@@ -302,10 +295,10 @@ int main() {
     sendcan_pub.reset();
 
     K7LateralControllerConfig config;
-    config.enabled = env_enabled("K230_K7_CONTROL", true);
-    config.force_engaged = env_enabled("K230_K7_FORCE_ENGAGED", false);
+    config.enabled = env_flag("K230_K7_CONTROL", true);
+    config.force_engaged = env_flag("K230_K7_FORCE_ENGAGED", false);
     const bool adaptive_cruise_env_enabled =
-        env_enabled("K230_K7_ADAPTIVE_CRUISE", true);
+        env_flag("K230_K7_ADAPTIVE_CRUISE", true);
     K7AdaptiveCruiseConfig adaptive_cruise_config;
     const char *steering_override = std::getenv("K230_K7_STEERING_PARAMS");
     const char *driving_override = std::getenv("K230_K7_DRIVING_PARAMS");
@@ -806,7 +799,15 @@ int main() {
             send_queue_full = stale_can_batches = 0;
       }
 
-      if (next_tick > Clock::now()) std::this_thread::sleep_until(next_tick);
+      /* tick을 넘겼으면 밀린 만큼 따라잡지 않고 현재 시각으로 재동기화한다.
+       * next_tick을 과거에 둔 채로 두면 다음 몇 번의 반복이 sleep 없이 연속
+       * 실행되어 LKAS frame과 counter가 한꺼번에 몰려 나간다. */
+      const auto tick_end = Clock::now();
+      if (next_tick > tick_end) {
+        std::this_thread::sleep_until(next_tick);
+      } else {
+        next_tick = tick_end;
+      }
     }
     std::fprintf(stderr, "k230_controlsd: stopping\n");
     return 0;

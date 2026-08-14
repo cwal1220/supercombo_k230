@@ -81,8 +81,6 @@ struct AppConfig {
     bool replay_enabled() const { return !replay_nv12_path.empty(); }
 };
 
-bool env_enabled(const char *name);
-bool env_enabled_default(const char *name, bool default_value);
 bool env_present(const char *name);
 unsigned env_unsigned(const char *name, unsigned default_value);
 float env_float(const char *name, float default_value);

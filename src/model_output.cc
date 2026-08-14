@@ -23,7 +23,9 @@ constexpr int kStopLineOffset = kLeadProbOffset + kLeadMhpSelection;
 constexpr int kStopLineSize = kStopLineMhpN * kStopLinePredictionStride + 1;
 constexpr int kStopLineProbOffset = kStopLineOffset + kStopLineSize - 1;
 constexpr int kMetaOffset = kStopLineOffset + kStopLineSize;
-constexpr int kMinOverlayOutputFloats = kRoadEdgeOffset + kRoadEdgeMeanSize;
+// road edge는 mean 뒤에 std가 이어지므로 kRoadEdgeSize 전체가 있어야 한다.
+// mean까지만 요구하면 아래 std 읽기가 버퍼 밖으로 나간다.
+constexpr int kMinOverlayOutputFloats = kRoadEdgeOffset + kRoadEdgeSize;
 constexpr int kMinLeadOutputFloats = kLeadProbOffset + kLeadMhpSelection;
 constexpr int kMinStopLineOutputFloats = kStopLineOffset + kStopLineSize;
 constexpr int kMinMetaOutputFloats = kMetaOffset + kDesireLen;
@@ -35,12 +37,6 @@ constexpr int kMinPoseOutputFloats = kPoseOffset + 12;
 float ModelOutputParser::sigmoid(float x)
 {
     return 1.0f / (1.0f + std::exp(-x));
-}
-
-float ModelOutputParser::x_idx(int i)
-{
-    const double t = static_cast<double>(i) / static_cast<double>(kTrajectorySize - 1);
-    return static_cast<float>(192.0 * t * t);
 }
 
 bool ParsedLeads::primary(int time_idx, float min_probability, ParsedLeadPoint *lead, float *probability) const
@@ -133,7 +129,7 @@ ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
         const int base = kLaneOffset + lane * kTrajectorySize * 2;
         for (int i = 0; i < kTrajectorySize; ++i) {
             line.points[i] = {
-                x_idx(i),
+                model_x_idx(i),
                 raw[base + i * 2 + 0],
                 raw[base + i * 2 + 1],
             };
@@ -148,7 +144,7 @@ ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
         const int base = kRoadEdgeOffset + edge * kTrajectorySize * 2;
         for (int i = 0; i < kTrajectorySize; ++i) {
             road_edge.points[i] = {
-                x_idx(i),
+                model_x_idx(i),
                 raw[base + i * 2 + 0],
                 raw[base + i * 2 + 1],
             };

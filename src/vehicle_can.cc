@@ -55,11 +55,6 @@ int32_t sign_extend(uint32_t raw, int bits) {
   return static_cast<int32_t>(raw - (1U << bits));
 }
 
-// 특정 timestamp가 freshness timeout 안에 있는지 확인한다.
-bool fresh_time(double timestamp_s, double now_s, double timeout_s) {
-  return timestamp_s >= 0.0 && now_s >= timestamp_s && now_s - timestamp_s <= timeout_s;
-}
-
 float cluster_speed_to_kph(float speed, bool unit_mph) {
   return speed * (unit_mph ? kMphToKph : 1.0f);
 }
@@ -120,10 +115,6 @@ void update_fixed_cruise_estimate(K7VehicleCanState *state,
 
 }  // namespace
 
-int panda_driver_torque_from_raw_signal(int raw_signal) {
-  return static_cast<int>(static_cast<float>(raw_signal) * 0.79f - 808.0f);
-}
-
 Sas11Values decode_sas11(const std::array<uint8_t, 8> &data) {
   Sas11Values values;
   values.steering_angle_deg =
@@ -136,9 +127,8 @@ Sas11Values decode_sas11(const std::array<uint8_t, 8> &data) {
 Mdps12Values decode_mdps12(const std::array<uint8_t, 8> &data) {
   Mdps12Values values;
   values.driver_torque_raw_signal = static_cast<int>(get_signal_le(data.data(), 0, 11));
+  // openpilot CR_Mdps_StrColTq (factor 1, offset -1024)와 같은 스케일이다.
   values.driver_torque = values.driver_torque_raw_signal - 1024;
-  values.panda_driver_torque =
-      panda_driver_torque_from_raw_signal(values.driver_torque_raw_signal);
   values.toi_unavailable = get_signal_le(data.data(), 12, 1) != 0;
   values.toi_active = get_signal_le(data.data(), 13, 1) != 0;
   values.toi_fault = get_signal_le(data.data(), 14, 1) != 0;
@@ -308,7 +298,6 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     state->has_mdps12_seed = true;
     const Mdps12Values mdps = decode_mdps12(data);
     state->driver_torque = mdps.driver_torque;
-    state->panda_driver_torque = mdps.panda_driver_torque;
     state->mdps_toi_unavailable = mdps.toi_unavailable;
     state->mdps_error_count = mdps.toi_unavailable ? state->mdps_error_count + 1 : 0;
     state->mdps_hard_fault = mdps.toi_fault || mdps.fail_state || mdps.sensor_error;
@@ -390,16 +379,16 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
 
 bool k7_vehicle_state_fresh(const K7VehicleCanState &state, double now_s,
                             double timeout_s) {
-  return fresh_time(state.lkas11_time_s, now_s, timeout_s) &&
-         fresh_time(state.clu11_time_s, now_s, timeout_s) &&
-         fresh_time(state.sas11_time_s, now_s, timeout_s) &&
-         fresh_time(state.mdps12_time_s, now_s, timeout_s) &&
-         fresh_time(state.tcs13_time_s, now_s, timeout_s) &&
-         fresh_time(state.tcs15_time_s, now_s, timeout_s) &&
-         fresh_time(state.e_ems11_time_s, now_s, timeout_s) &&
-         fresh_time(state.elect_gear_time_s, now_s, timeout_s) &&
-         fresh_time(state.cgw1_time_s, now_s, timeout_s) &&
-         fresh_time(state.cgw2_time_s, now_s, timeout_s);
+  return signal_time_fresh(state.lkas11_time_s, now_s, timeout_s) &&
+         signal_time_fresh(state.clu11_time_s, now_s, timeout_s) &&
+         signal_time_fresh(state.sas11_time_s, now_s, timeout_s) &&
+         signal_time_fresh(state.mdps12_time_s, now_s, timeout_s) &&
+         signal_time_fresh(state.tcs13_time_s, now_s, timeout_s) &&
+         signal_time_fresh(state.tcs15_time_s, now_s, timeout_s) &&
+         signal_time_fresh(state.e_ems11_time_s, now_s, timeout_s) &&
+         signal_time_fresh(state.elect_gear_time_s, now_s, timeout_s) &&
+         signal_time_fresh(state.cgw1_time_s, now_s, timeout_s) &&
+         signal_time_fresh(state.cgw2_time_s, now_s, timeout_s);
 }
 
 bool k7_seed_frames_ready(const K7VehicleCanState &state) {
@@ -408,7 +397,7 @@ bool k7_seed_frames_ready(const K7VehicleCanState &state) {
 
 bool k7_tpms_state_fresh(const K7VehicleCanState &state, double now_s,
                          double timeout_s) {
-  return fresh_time(state.tpms11_time_s, now_s, timeout_s);
+  return signal_time_fresh(state.tpms11_time_s, now_s, timeout_s);
 }
 
 float k7_cruise_set_speed_kph(const K7VehicleCanState &state) {
@@ -423,7 +412,7 @@ float k7_cruise_set_speed_kph(const K7VehicleCanState &state) {
 float k7_vehicle_speed_kph(const K7VehicleCanState &state, double now_s,
                            double timeout_s) {
   const bool wheel_speed_fresh =
-      fresh_time(state.whl_spd11_time_s, now_s, timeout_s);
+      signal_time_fresh(state.whl_spd11_time_s, now_s, timeout_s);
   const float wheel_speeds[] = {
       state.wheel_speed_fl_kph,
       state.wheel_speed_fr_kph,
