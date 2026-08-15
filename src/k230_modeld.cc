@@ -2,7 +2,6 @@
 #include "calibration_service.h"
 #include "input_source.h"
 #include "k230_ipc.h"
-#include "lateral_control.h"
 #include "model_output.h"
 #include "supercombo_model.h"
 
@@ -28,7 +27,7 @@ uint64_t steady_ns()
 }
 
 bool publish_output(K230LatestChannel &model_pub, SupercomboModel &model, const ParsedModelOutput &parsed,
-                    CalibrationService &calibration, LateralControlDraft &lateral_control,
+                    CalibrationService &calibration,
                     uint64_t frame_id, uint64_t capture_timestamp_ns, float model_ms,
                     float v_ego)
 {
@@ -38,10 +37,9 @@ bool publish_output(K230LatestChannel &model_pub, SupercomboModel &model, const 
     model.set_input_calibration(input_rpy);
 
     const ProjectionState projection = calibration.projection();
-    const LateralTarget lateral = lateral_control.update(parsed.plan);
 
     K230ModelState state;
-    k230_fill_model_state(state, parsed, projection, calibration.snapshot(), lateral,
+    k230_fill_model_state(state, parsed, projection, calibration.snapshot(),
                           frame_id, capture_timestamp_ns, model_ms);
     return model_pub.publish(&state, sizeof(state));
 }
@@ -66,7 +64,6 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
 
     SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode, replay_config);
     CalibrationService calibration(config);
-    LateralControlDraft lateral_control;
     float initial_rpy[3] = {};
     calibration.input_rpy(initial_rpy);
     model.set_input_calibration(initial_rpy);
@@ -87,7 +84,7 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
         if (ok) {
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);
             const float model_ms = static_cast<float>((t1 - t0) / 1000000.0);
-            if (!publish_output(model_pub, model, parsed, calibration, lateral_control,
+            if (!publish_output(model_pub, model, parsed, calibration,
                                 processed, k230_now_ns(), model_ms, 0.0f)) {
                 std::fprintf(stderr, "\nmodeld: publish modelState failed\n");
                 ++errors;
@@ -137,7 +134,6 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
 
     SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode, config);
     CalibrationService calibration(config);
-    LateralControlDraft lateral_control;
     float initial_rpy[3] = {};
     calibration.input_rpy(initial_rpy);
     model.set_input_calibration(initial_rpy);
@@ -229,7 +225,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
         if (ok) {
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);
             const float model_ms = static_cast<float>((t1 - t0) / 1000000.0);
-            if (!publish_output(model_pub, model, parsed, calibration, lateral_control,
+            if (!publish_output(model_pub, model, parsed, calibration,
                                 meta.frame_id, meta.timestamp_ns, model_ms, v_ego)) {
                 std::fprintf(stderr, "\nmodeld: publish modelState failed\n");
                 ++errors;
