@@ -1,6 +1,7 @@
 #include "lateral_controller.h"
 
 #include "common_utils.h"
+#include "model_output.h"
 
 #include <algorithm>
 #include <cmath>

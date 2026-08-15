@@ -144,7 +144,6 @@ bool K230FrameRing::copy_slot(unsigned index, uint64_t frame_id,
 void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parsed,
                            const ProjectionState &projection,
                            const OnlineCalibrator::Snapshot &calibration,
-                           const LateralTarget &lateral_target,
                            uint64_t frame_id, uint64_t capture_timestamp_ns,
                            float model_execution_ms)
 {
@@ -250,22 +249,6 @@ void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parse
     state.calibration.yaw = projection.yaw;
     for (int i = 0; i < 3; ++i)
         state.calibration.spread[i] = calibration.spread[i];
-
-    state.lateral_target.valid = lateral_target.valid ? 1 : 0;
-    state.lateral_target.lookahead_x = lateral_target.lookahead_x;
-    state.lateral_target.target_y = lateral_target.target_y;
-    state.lateral_target.heading = lateral_target.heading;
-    state.lateral_target.curvature = lateral_target.curvature;
-
-    state.lateral_plan.valid = lateral_target.valid ? 1 : 0;
-    state.lateral_plan.mpc_solution_valid = lateral_target.mpc_solution_valid ? 1 : 0;
-    state.lateral_plan.output_scale = lateral_target.output_scale;
-    for (int i = 0; i < kLateralControlN; ++i) {
-        state.lateral_plan.psis[i] = lateral_target.psis[i];
-        state.lateral_plan.curvatures[i] = lateral_target.curvatures[i];
-        state.lateral_plan.curvature_rates[i] = lateral_target.curvature_rates[i];
-        state.lateral_plan.d_path_points[i] = lateral_target.d_path_points[i];
-    }
 }
 
 ParsedModelOutput k230_parsed_from_model_state(const K230ModelState &state)

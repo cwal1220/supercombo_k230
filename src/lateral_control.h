@@ -1,8 +1,8 @@
 #ifndef LATERAL_CONTROL_H
 #define LATERAL_CONTROL_H
 
-#include "model_output.h"
-#include "projection.h"
+/* OpenpilotLateralPlanner(acados MPC)가 만들고 K7LateralController가 소비하는
+ * 횡방향 계획. 생산자는 controlsd의 MPC 하나뿐이다. */
 
 constexpr int kLateralControlN = 17;
 
@@ -20,13 +20,6 @@ struct LateralTarget {
     float curvatures[kLateralControlN] = {};
     float curvature_rates[kLateralControlN] = {};
     float d_path_points[kLateralControlN] = {};
-};
-
-class LateralControlDraft {
-public:
-    LateralControlDraft() = default;
-
-    LateralTarget update(const ParsedPlan &plan);
 };
 
 #endif
