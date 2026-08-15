@@ -138,7 +138,6 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     src/input_source.cc
     src/json_utils.cc
     src/k230_ipc.cc
-    src/lateral_control.cc
     src/model_input_transform.cc
     src/online_calibrator.cc
     src/supercombo_model.cc
@@ -184,7 +183,6 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     src/common_utils.cc
     src/json_utils.cc
     src/k230_ipc.cc
-    src/lateral_control.cc
     src/model_output.cc
     src/mvx_v4l2_encoder.cc
     src/projection.cc
@@ -217,8 +215,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
       src/k230_ipc.cc
       src/model_output.cc
       src/projection.cc
-      src/lateral_control.cc
-    )
+      )
     configure_k230_target(k230_pandad ${LIBUSB_LIBRARIES})
 
     add_executable(k230_controlsd

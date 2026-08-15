@@ -3,7 +3,6 @@
 
 #include "app_config.h"
 #include "common_utils.h"
-#include "lateral_control.h"
 #include "model_output.h"
 #include "online_calibrator.h"
 #include "projection.h"
@@ -123,25 +122,6 @@ struct K230CalibrationState {
     float spread[3] = {};
 };
 
-struct K230LateralTargetState {
-    uint32_t valid = 0;
-    float lookahead_x = 0.0f;
-    float target_y = 0.0f;
-    float heading = 0.0f;
-    float curvature = 0.0f;
-};
-
-struct K230LateralPlanState {
-    uint32_t valid = 0;
-    uint32_t mpc_solution_valid = 0;
-    float psis[kLateralControlN] = {};
-    float curvatures[kLateralControlN] = {};
-    float curvature_rates[kLateralControlN] = {};
-    float d_path_points[kLateralControlN] = {};
-    float output_scale = 0.0f;
-    uint32_t reserved = 0;
-};
-
 struct K230ModelState {
     uint64_t frame_id = 0;
     uint64_t capture_timestamp_ns = 0;
@@ -165,8 +145,6 @@ struct K230ModelState {
     K230StopLineState stop_line;
     K230PoseState pose;
     K230CalibrationState calibration;
-    K230LateralTargetState lateral_target;
-    K230LateralPlanState lateral_plan;
 };
 
 struct K230ProcessState {
@@ -377,7 +355,6 @@ private:
 void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parsed,
                            const ProjectionState &projection,
                            const OnlineCalibrator::Snapshot &calibration,
-                           const LateralTarget &lateral_target,
                            uint64_t frame_id, uint64_t capture_timestamp_ns,
                            float model_execution_ms);
 ParsedModelOutput k230_parsed_from_model_state(const K230ModelState &state);

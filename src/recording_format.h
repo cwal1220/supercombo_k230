@@ -2,7 +2,9 @@
 
 #include <cstdint>
 
-constexpr uint32_t kK230RecordingVersion = 1;
+/* v2: K230ModelState에서 소비자가 없던 lateral_target/lateral_plan(308 B)을
+ * 제거해 페이로드가 4384 -> 4076 B로 줄었다. v1 녹화와 호환되지 않는다. */
+constexpr uint32_t kK230RecordingVersion = 2;
 
 enum class K230RecordType : uint16_t {
   CanRx = 1,

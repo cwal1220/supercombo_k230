@@ -722,7 +722,6 @@ void verify_panda_gate_and_handoff() {
 void verify_model_path_adapter() {
   K230ModelState state;
   state.valid = 1;
-  state.lateral_target.valid = 1;
   state.model_timestamp_ns = 1000000000ULL;
   state.plan_probability = 0.9f;
   state.lane_probabilities[1] = 0.8f;
