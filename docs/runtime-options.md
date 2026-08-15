@@ -181,7 +181,7 @@ python3 scripts/param_server.py --host 0.0.0.0 --port 8080
 
 ## Production defaults
 
-- AI capture defaults to `/dev/video2`, `NV12 640x360`, full sensor crop
+- AI capture defaults to `/dev/video2`, `NV12 1280x720`, full sensor crop
   `1920x1080+0+0`. `SUPERCOMBO_NV12_WIDTH/HEIGHT` and
   `SUPERCOMBO_NV12_CROP_X/Y/WIDTH/HEIGHT` provide diagnostic overrides.
 - Preview is fixed at `/dev/video1`; the manager waits for

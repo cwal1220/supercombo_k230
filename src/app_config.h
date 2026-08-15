@@ -5,8 +5,11 @@
 
 constexpr unsigned kDefaultSensorWidth = 1920;
 constexpr unsigned kDefaultSensorHeight = 1080;
-constexpr unsigned kDefaultAiWidth = 640;
-constexpr unsigned kDefaultAiHeight = 360;
+/* AI 캡처 기본 해상도. 720p는 supercombo 학습 카메라(17.9 px/°)를 넘는
+ * 각해상도(21 px/°)를 주고, 실측(2026-08-15)에서 20fps 유지 + modeld
+ * 처리시간 +2.2ms(5%)만 증가했다. SUPERCOMBO_NV12_WIDTH/HEIGHT로 오버라이드. */
+constexpr unsigned kDefaultAiWidth = 1280;
+constexpr unsigned kDefaultAiHeight = 720;
 constexpr unsigned kDefaultModelWidth = 512;
 constexpr unsigned kDefaultModelHeight = 256;
 constexpr float kDefaultModelFx = 910.0f;

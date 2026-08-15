@@ -2,7 +2,7 @@
 
 [← Documentation index](../README.md)
 
-The model path captures the AI stream as `NV12 640x360` through `/dev/video2`
+The model path captures the AI stream as `NV12 1280x720` through `/dev/video2`
 crop/resize, samples independent `512x256` medmodel and sbigmodel views from the
 same source frame, prepares both YUV6 recurrent inputs, runs nncase runtime
 directly, and publishes compact `modelState`. The overlay display process uses
@@ -23,8 +23,8 @@ created.
 ## Intrinsics
 
 The source intrinsics are scaled from the calibrated K230 camera matrix, so the
-default `640x360` path uses `fx=541.91`, `fy=528.66`, `cx=315.38`, and
-`cy=179.11`. `SUPERCOMBO_INPUT_WARP_FX/FY/CX/CY` can override these values for a
+default `1280x720` path uses `fx=1083.83`, `fy=1057.32`, `cx=630.76`, and
+`cy=358.23`. `SUPERCOMBO_INPUT_WARP_FX/FY/CX/CY` can override these values for a
 separately measured camera pipeline.
 
 The medmodel transform feeds the current and previous frames into `input_imgs`;

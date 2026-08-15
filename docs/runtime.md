@@ -63,7 +63,7 @@ minimal passive overlay subscriber.
 ### `k230_camerad`
 
 - starts after the manager sees `/tmp/k230_display_ready`
-- captures `/dev/video2` as `NV12 640x360`
+- captures `/dev/video2` as `NV12 1280x720`
 - copies frames into `/dev/shm/k230_road_ai`, an 8-slot shared NV12 ring
 - publishes only frame metadata as `roadAiFrame`
 
@@ -79,7 +79,7 @@ minimal passive overlay subscriber.
   sampling the camera stream
 - keeps `/dev/video0` MVX ready, but while recording is off performs only one
   warm-up encode and then leaves the VPU idle
-- records `NV12 640x360` as 5 Mbps HEVC at 20 FPS with 60-second, independently
+- records `NV12 1280x720` as 5 Mbps HEVC at 20 FPS with 60-second, independently
   decodable segments; `frames.bin` preserves each source frame ID and capture
   timestamp
 - records dedicated non-blocking CAN RX/TX copies plus model, control, and Panda
@@ -114,7 +114,7 @@ minimal passive overlay subscriber.
 
 Large AI frames are never sent through the small-message IPC. `k230_overlayd`
 does not consume the shared AI frame ring for display; preview stays on the K230
-`v4l2_drm` display path, while `k230_modeld` consumes the shared `640x360` AI
+`v4l2_drm` display path, while `k230_modeld` consumes the shared `1280x720` AI
 ring and publishes its selected frame metadata to `k230_recordd`. This keeps the
 split runtime close to openpilot's process boundaries without paying the cost of
 Cap'n Proto/cereal in v1.
