@@ -5,18 +5,21 @@
 #include <memory>
 
 struct K230ModelState;
+struct K7DrivingParams;
 struct K7SteeringParams;
 struct K7VehicleCanState;
 
 class OpenpilotLateralPlanner {
 public:
-  explicit OpenpilotLateralPlanner(const K7SteeringParams &params);
+  OpenpilotLateralPlanner(const K7SteeringParams &params,
+                          const K7DrivingParams &driving);
   ~OpenpilotLateralPlanner();
 
   OpenpilotLateralPlanner(const OpenpilotLateralPlanner &) = delete;
   OpenpilotLateralPlanner &operator=(const OpenpilotLateralPlanner &) = delete;
 
-  void update_params(const K7SteeringParams &params);
+  void update_params(const K7SteeringParams &params,
+                     const K7DrivingParams &driving);
 
   LateralTarget update(const K230ModelState &model,
                        const K7VehicleCanState &vehicle, float v_ego,

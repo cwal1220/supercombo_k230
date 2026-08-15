@@ -171,8 +171,10 @@ float vehicle_speed_mps(const K7VehicleCanState &vehicle, double now_s,
 
 class LateralPlannerWorker {
 public:
-  explicit LateralPlannerWorker(const K7SteeringParams &params)
-      : planner_(params), pending_params_(params),
+  LateralPlannerWorker(const K7SteeringParams &params,
+                       const K7DrivingParams &driving)
+      : planner_(params, driving), pending_steering_(params),
+        pending_driving_(driving),
         thread_(&LateralPlannerWorker::run, this) {}
 
   ~LateralPlannerWorker() {
@@ -200,10 +202,12 @@ public:
     condition_.notify_one();
   }
 
-  void update_params(const K7SteeringParams &params) {
+  void update_params(const K7SteeringParams &params,
+                     const K7DrivingParams &driving) {
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      pending_params_ = params;
+      pending_steering_ = params;
+      pending_driving_ = driving;
       params_pending_ = true;
     }
     condition_.notify_one();
@@ -227,7 +231,8 @@ private:
   void run() {
     while (true) {
       Request request;
-      K7SteeringParams params;
+      K7SteeringParams steering;
+      K7DrivingParams driving;
       bool has_request = false;
       bool apply_params = false;
       {
@@ -237,7 +242,8 @@ private:
         });
         if (stop_) return;
         if (params_pending_) {
-          params = pending_params_;
+          steering = pending_steering_;
+          driving = pending_driving_;
           params_pending_ = false;
           apply_params = true;
         }
@@ -247,7 +253,7 @@ private:
           has_request = true;
         }
       }
-      if (apply_params) planner_.update_params(params);
+      if (apply_params) planner_.update_params(steering, driving);
       if (!has_request) continue;
       const LateralTarget result = planner_.update(
           request.model, request.vehicle, request.v_ego,
@@ -263,7 +269,8 @@ private:
   mutable std::mutex mutex_;
   std::condition_variable condition_;
   Request request_;
-  K7SteeringParams pending_params_;
+  K7SteeringParams pending_steering_;
+  K7DrivingParams pending_driving_;
   LateralTarget latest_;
   bool pending_ = false;
   bool params_pending_ = false;
@@ -333,7 +340,8 @@ int main() {
     K7AdaptiveCruiseController adaptive_cruise_controller(
         adaptive_cruise_config);
     DepartureAlertDetector departure_alert_detector;
-    LateralPlannerWorker lateral_planner(config.steering_params);
+    LateralPlannerWorker lateral_planner(config.steering_params,
+                                         config.driving_params);
     K7VehicleCanState vehicle;
     K230ModelState model;
     K230PandaState panda_state;
@@ -406,7 +414,8 @@ int main() {
             config.driving_params = candidate.driving_params;
             adaptive_cruise_config = adaptive_cruise_candidate;
             controller.update_params(config.steering_params, config.driving_params);
-            lateral_planner.update_params(config.steering_params);
+            lateral_planner.update_params(config.steering_params,
+                                          config.driving_params);
             adaptive_cruise_controller.update_config(adaptive_cruise_config);
             ++param_generation;
             std::fprintf(stderr,
@@ -764,7 +773,8 @@ int main() {
                      "engaged=%u active=%u "
                      "panda=%u/%u plan=%u mpc=%u desire=%d "
                      "torque=%d/%d driver=%d angle=%.2f "
-                     "curve=%.6f/%.6f error=%.6f pathY=%.3f "
+                     "curve=%.6f/%.6f curveVm=%.6f curveYaw=%.6f "
+                     "error=%.6f pathY=%.3f "
                      "speed=%.1f cruise=%u max=%.1f cmd=%.1f target=%.1f "
                      "lead=%u/%.1f/%.1f button=%d pedal=%d/%d block=%s\n",
                      ticks / window_s, work_sum_us / std::max(1U, ticks), work_max_us,
@@ -781,6 +791,8 @@ int main() {
                      last_result.desired_torque, last_result.apply_torque,
                      vehicle.driver_torque, vehicle.steering_angle_deg,
                      last_result.desired_curvature, last_result.actual_curvature,
+                     last_result.actual_curvature_vm,
+                     last_result.actual_curvature_yaw,
                      last_result.curvature_error, lateral_target.target_y,
                      last_result.speed_kph,
                      adaptive_cruise.active ? 1U : 0U,

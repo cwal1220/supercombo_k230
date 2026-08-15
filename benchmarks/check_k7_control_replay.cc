@@ -76,7 +76,7 @@ K7VehicleCanState ready_vehicle(double timestamp_s = 1.0) {
 
 float original_lag_adjusted_curvature(const LateralTarget &target, float speed_mps,
                                       float delay) {
-  constexpr float desired_curvature_limit = 0.1f;
+  constexpr float desired_curvature_limit = 0.05f;
   constexpr float max_lateral_jerk = 5.0f;
   constexpr float max_lateral_accel = 3.0f;
   constexpr float max_curvature = 0.2f;

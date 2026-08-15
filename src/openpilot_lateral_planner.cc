@@ -1,5 +1,6 @@
 #include "openpilot_lateral_planner.h"
 
+#include "driving_params.h"
 #include "k230_ipc.h"
 #include "steering_params.h"
 #include "vehicle_can.h"
@@ -285,16 +286,18 @@ private:
 }  // namespace
 
 struct OpenpilotLateralPlanner::Impl {
-  explicit Impl(const K7SteeringParams &steering)
+  Impl(const K7SteeringParams &steering, const K7DrivingParams &driving)
       : lane_planner(steering.camera_offset_m, steering.path_offset_m) {
-    update_params(steering);
+    update_params(steering, driving);
   }
 
-  void update_params(const K7SteeringParams &steering) {
+  void update_params(const K7SteeringParams &steering,
+                     const K7DrivingParams &driving) {
     lane_planner.update_offsets(steering.camera_offset_m, steering.path_offset_m);
     // desire_helper의 torque_applied는 carstate.steeringPressed에서 나오므로
     // 컨트롤러와 같은 임계값을 써야 한다.
     steering_pressed_threshold = steering.steering_pressed_threshold;
+    lane_change_min_speed_mps = driving.lane_change_min_speed_kph / 3.6;
     const double center_to_front = steering.center_to_front_m();
     constexpr double civic_mass = 1326.0 + 136.0;
     constexpr double civic_wheelbase = 2.70;
@@ -390,6 +393,7 @@ struct OpenpilotLateralPlanner::Impl {
     invalid_count = (mpc.cost() > 20000.0 || has_nan) ? invalid_count + 1 : 0;
 
     target.valid = true;
+    target.capture_timestamp_ns = model.capture_timestamp_ns;
     target.mpc_solution_valid = invalid_count < 2;
     target.laneless_mode = use_model_path;
     target.lookahead_x = static_cast<float>(std::max(0.0f, v_ego) * path_t[1]);
@@ -411,7 +415,7 @@ struct OpenpilotLateralPlanner::Impl {
                           float measured_curvature, bool active,
                           float output_scale, double lane_change_prob) {
     const bool one_blinker = vehicle.left_blinker != vehicle.right_blinker;
-    const bool below_speed = v_ego < 30.0f / 3.6f;
+    const bool below_speed = v_ego < lane_change_min_speed_mps;
     int direction_now = direction;
     if (vehicle.left_blinker) direction_now = -1;
     if (vehicle.right_blinker) direction_now = 1;
@@ -488,6 +492,7 @@ struct OpenpilotLateralPlanner::Impl {
   double factor1 = 0.0;
   double factor2 = 0.0;
   int steering_pressed_threshold = 150;
+  double lane_change_min_speed_mps = 30.0 / 3.6;
   bool laneless_buffer = false;
   int invalid_count = 0;
   int lane_change_state = 0;
@@ -501,13 +506,15 @@ struct OpenpilotLateralPlanner::Impl {
   std::array<double, 2> model_road_edge_stds{};
 };
 
-OpenpilotLateralPlanner::OpenpilotLateralPlanner(const K7SteeringParams &params)
-    : impl_(std::make_unique<Impl>(params)) {}
+OpenpilotLateralPlanner::OpenpilotLateralPlanner(const K7SteeringParams &params,
+                                                 const K7DrivingParams &driving)
+    : impl_(std::make_unique<Impl>(params, driving)) {}
 
 OpenpilotLateralPlanner::~OpenpilotLateralPlanner() = default;
 
-void OpenpilotLateralPlanner::update_params(const K7SteeringParams &params) {
-  impl_->update_params(params);
+void OpenpilotLateralPlanner::update_params(const K7SteeringParams &params,
+                                            const K7DrivingParams &driving) {
+  impl_->update_params(params, driving);
 }
 
 LateralTarget OpenpilotLateralPlanner::update(const K230ModelState &model,

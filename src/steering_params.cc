@@ -198,8 +198,11 @@ int OpenpilotTorqueController::update(bool active,
   const float desired_lat_accel = desired_curvature * speed_sq;
   const float actual_lat_accel = actual_curvature * speed_sq;
   const float lat_accel_deadzone = curvature_deadzone * speed_sq;
-  const float low_speed_factor = interp(speed_mps, {0.0f, 10.0f, 20.0f},
-                                        {500.0f, 500.0f, 200.0f});
+  // openpilot LOW_SPEED_X/Y: 저속에서는 곡률 오차를 세게 반영하고 고속에서는
+  // 줄여서 사행을 막는다. (구 포크의 500/500/200 평탄 곡선을 대체)
+  const float low_speed_scale = interp(speed_mps, {0.0f, 10.0f, 20.0f, 30.0f},
+                                       {15.0f, 13.0f, 10.0f, 5.0f});
+  const float low_speed_factor = low_speed_scale * low_speed_scale;
   const float setpoint = desired_lat_accel + low_speed_factor * desired_curvature;
   const float measurement = actual_lat_accel + low_speed_factor * actual_curvature;
   const float error = setpoint - measurement;
@@ -226,17 +229,25 @@ float OpenpilotTorqueController::estimate_actual_curvature(float speed_mps,
                                                            const K7SteeringParams &params,
                                                            float yaw_rate_rad_s,
                                                            bool yaw_rate_valid) {
+  actual_curvature_vm_ = 0.0f;
+  actual_curvature_yaw_ = 0.0f;
   if (!std::isfinite(speed_mps) || speed_mps < params.min_steer_speed_mps) return 0.0f;
+  /* vm 경로의 부호 반전은 openpilot latcontrol_torque와 동일하다. */
   const float actual_curvature_vm = -vehicle_model_curvature(
       radians(steering_angle_deg - params.angle_offset_deg),
       speed_mps,
       params.roll_rad,
       params);
-  if (params.torque_use_angle) return actual_curvature_vm;
+  actual_curvature_vm_ = actual_curvature_vm;
   float actual_curvature_yaw = actual_curvature_vm;
   if (yaw_rate_valid && std::isfinite(yaw_rate_rad_s)) {
-    actual_curvature_yaw = yaw_rate_rad_s / std::max(speed_mps, 1e-3f);
+    /* K7 ESP12 YAW_RATE는 제어 관례와 부호가 반대라 반전한다. 2026-08-15
+     * 실차 수동 주행의 커브 53샘플에서 curveVm/curveYaw 부호가 96% 반대,
+     * 크기 비율 평균 1.15로 확인했다. */
+    actual_curvature_yaw = -yaw_rate_rad_s / std::max(speed_mps, 1e-3f);
   }
+  actual_curvature_yaw_ = actual_curvature_yaw;
+  if (params.torque_use_angle) return actual_curvature_vm;
   return interp(speed_mps, {2.0f, 5.0f}, {actual_curvature_vm, actual_curvature_yaw});
 }
 

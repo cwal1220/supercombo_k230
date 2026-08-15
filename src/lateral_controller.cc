@@ -13,7 +13,12 @@ constexpr int kButtonCancel = 4;
 constexpr int kGearDrive = 5;
 constexpr int kSteeringPressedMinCount = 5;
 constexpr float kSmoothSteerRecoverStep = 0.005f;
-constexpr float kDesiredCurvatureLimit = 0.1f;
+/* plan 곡률에서 벗어날 수 있는 lateral jerk 허용 창(초). openpilot DT_MDL과
+ * 같은 값이다. */
+constexpr float kCurvatureDeviationWindowS = 0.05f;
+/* lag 보상에 더하는 plan 나이의 상한. 이 이상 낡은 plan은 staleness gate가
+ * 별도로 차단한다. */
+constexpr float kMaxPlanAgeCompS = 0.25f;
 constexpr float kMaxCurvature = 0.3f;
 constexpr float kGravity = 9.8f;
 constexpr double kPandaEngageGraceS = 1.0;
@@ -112,11 +117,22 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
     update_manual_blinker_timers(vehicle_state, speed_mps);
   }
 
-  result.desired_curvature = lag_adjusted_desired_curvature(target, speed_mps);
+  /* plan 나이: 근거 프레임 캡처 시각부터 지금까지. lag 보상과 staleness
+   * gate가 함께 쓴다. 타임스탬프가 없으면(테스트, 초기값) 0으로 둔다. */
+  float plan_age_s = 0.0f;
+  if (target.valid && target.capture_timestamp_ns != 0) {
+    const uint64_t control_now_ns = k230_now_ns();
+    if (control_now_ns > target.capture_timestamp_ns) {
+      plan_age_s = static_cast<float>(
+          static_cast<double>(control_now_ns - target.capture_timestamp_ns) * 1e-9);
+    }
+  }
+  result.desired_curvature =
+      lag_adjusted_desired_curvature(target, speed_mps, plan_age_s);
   result.active_block = active_block_reason(path, target, vehicle_state, now_s,
                                             result.seeds_ready, result.vehicle_fresh,
                                             panda_ready, panda_controls_allowed,
-                                            result.control_speed_kph);
+                                            result.control_speed_kph, plan_age_s);
   if (logical_engaged && is_hard_disengage_block(result.active_block)) {
     panda_engage_pending_ = false;
     engaged_ = false;
@@ -192,6 +208,8 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
           std::lround(static_cast<float>(raw_torque) * driver_torque_scale()));
     }
     result.actual_curvature = torque_controller_.actual_curvature();
+    result.actual_curvature_vm = torque_controller_.actual_curvature_vm();
+    result.actual_curvature_yaw = torque_controller_.actual_curvature_yaw();
     result.curvature_error = result.desired_curvature - result.actual_curvature;
     result.normalized_output = torque_controller_.normalized_output();
     result.feedforward = torque_controller_.feedforward();
@@ -203,6 +221,8 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
                               false, steer_rate_limited_, control_params,
                               vehicle_state.yaw_rate_rad_s, yaw_rate_valid);
     result.actual_curvature = torque_controller_.actual_curvature();
+    result.actual_curvature_vm = torque_controller_.actual_curvature_vm();
+    result.actual_curvature_yaw = torque_controller_.actual_curvature_yaw();
     result.curvature_error = result.desired_curvature - result.actual_curvature;
     result.normalized_output = torque_controller_.normalized_output();
     result.feedforward = torque_controller_.feedforward();
@@ -406,13 +426,21 @@ std::string K7LateralController::active_block_reason(
     bool vehicle_fresh,
     bool panda_ready,
     bool panda_controls_allowed,
-    float speed_kph) const {
+    float speed_kph,
+    float plan_age_s) const {
   if (!config_.force_engaged && !engaged_) return "not_engaged";
   if (!config_.enabled || !config_.steering_params.enabled) return "controller_disabled";
   if (!panda_ready) return "panda_not_ready";
   if (!panda_controls_allowed) return "panda_controls_off";
   if (!path.usable_for_steering) return "path_invalid";
   if (!target.valid || !target.mpc_solution_valid) return "lateral_plan_invalid";
+  /* 모델 경로 gate는 모델 발행 시각만 본다. 플래너 스레드가 멈춰 target이
+   * 갱신되지 않는 경우까지 근거 프레임 캡처 시각으로 함께 막는다. */
+  if (target.capture_timestamp_ns != 0 &&
+      plan_age_s > static_cast<float>(config_.driving_params.model_timeout_ms) /
+                       1000.0f) {
+    return "lateral_plan_stale";
+  }
   if (!seeds_ready) return "seeds_missing";
   if (!vehicle_fresh) return "vehicle_state_stale";
   if (vehicle_state.door_open) return "door_open";
@@ -443,9 +471,13 @@ std::string K7LateralController::active_block_reason(
 }
 
 float K7LateralController::lag_adjusted_desired_curvature(
-    const LateralTarget &target, float speed_mps) const {
+    const LateralTarget &target, float speed_mps, float plan_age_s) const {
   if (!target.valid) return 0.0f;
-  const float delay = std::max(0.01f, config_.steering_params.steer_actuator_delay);
+  /* plan은 카메라 캡처 시점 기준이므로 소비 시점까지의 실측 나이를 actuator
+   * delay에 더해 보간한다. 부수 효과로 desired curvature가 20Hz 계단 대신
+   * 매 tick plan 위를 따라 전진한다. */
+  const float delay = std::max(0.01f, config_.steering_params.steer_actuator_delay) +
+      clamp_float(plan_age_s, 0.0f, kMaxPlanAgeCompS);
   const float current_curvature = target.curvatures[0];
   const float psi = interp_lateral(delay, target.psis);
   const float speed = std::max(speed_mps, 0.1f);
@@ -457,8 +489,8 @@ float K7LateralController::lag_adjusted_desired_curvature(
       (speed * speed);
   desired_curvature = clamp_float(
       desired_curvature,
-      current_curvature - max_curvature_rate * kDesiredCurvatureLimit,
-      current_curvature + max_curvature_rate * kDesiredCurvatureLimit);
+      current_curvature - max_curvature_rate * kCurvatureDeviationWindowS,
+      current_curvature + max_curvature_rate * kCurvatureDeviationWindowS);
 
   const float limit_speed = std::max(speed, 1.0f);
   const float roll_compensation = config_.steering_params.roll_rad * kGravity;

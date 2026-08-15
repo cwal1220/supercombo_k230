@@ -77,8 +77,6 @@ fi
   params/display.json \
   "$BOARD:$DEST/params.defaults/"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
-  "if test ! -e '$DEST/params/yg_adaptive_cruise.json' && test -e '$DEST/params/k7_yg_adaptive_cruise.json'; then cp '$DEST/params/k7_yg_adaptive_cruise.json' '$DEST/params/yg_adaptive_cruise.json'; fi; if test ! -e '$DEST/params/yg_steering.json' && test -e '$DEST/params/k7_yg_steering.json'; then cp '$DEST/params/k7_yg_steering.json' '$DEST/params/yg_steering.json'; fi; if test ! -e '$DEST/params/yg_driving.json' && test -e '$DEST/params/k7_yg_driving.json'; then cp '$DEST/params/k7_yg_driving.json' '$DEST/params/yg_driving.json'; fi"
-"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
   "for name in calibration.json yg_adaptive_cruise.json yg_steering.json yg_driving.json recording.json display.json; do test -e '$DEST/params/'\"\$name\" || cp '$DEST/params.defaults/'\"\$name\" '$DEST/params/'\"\$name\"; done"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "rm -rf '$DEST/.upload'; sync"
 echo "Uploaded runtime files to $BOARD:$DEST"

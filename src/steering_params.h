@@ -104,6 +104,10 @@ public:
   float error() const { return error_; }
   float feedforward() const { return feedforward_; }
   float actual_curvature() const { return actual_curvature_; }
+  // 조향각 차량 모델 기반 곡률과 ESP yaw rate 기반 곡률. 주행 로그에서 두
+  // 값의 부호/크기 일치를 확인해 torque_use_angle 설정을 검증하는 용도.
+  float actual_curvature_vm() const { return actual_curvature_vm_; }
+  float actual_curvature_yaw() const { return actual_curvature_yaw_; }
 
 private:
   // 차량 모델 slip factor를 파라미터에 맞춰 갱신한다.
@@ -136,6 +140,8 @@ private:
   float error_ = 0.0f;
   float feedforward_ = 0.0f;
   float actual_curvature_ = 0.0f;
+  float actual_curvature_vm_ = 0.0f;
+  float actual_curvature_yaw_ = 0.0f;
 };
 
 // steering_params.json을 읽어 K7SteeringParams에 반영한다.

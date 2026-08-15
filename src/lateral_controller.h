@@ -33,6 +33,9 @@ struct K7LateralControlResult {
   float control_speed_kph = 0.0f;
   float desired_curvature = 0.0f;
   float actual_curvature = 0.0f;
+  // 조향각 모델/ESP yaw 기반 실측 곡률. torque_use_angle 전환 검증용 로그 값.
+  float actual_curvature_vm = 0.0f;
+  float actual_curvature_yaw = 0.0f;
   float curvature_error = 0.0f;
   float normalized_output = 0.0f;
   float feedforward = 0.0f;
@@ -73,7 +76,8 @@ private:
                                   bool vehicle_fresh,
                                   bool panda_ready,
                                   bool panda_controls_allowed,
-                                  float speed_kph) const;
+                                  float speed_kph,
+                                  float plan_age_s) const;
 
   // 방향지시등 기반 수동 조향 차단 타이머를 갱신한다.
   void update_manual_blinker_timers(const K7VehicleCanState &vehicle_state,
@@ -113,9 +117,10 @@ private:
   // 제어 내부 상태를 초기값으로 되돌린다.
   void reset_control_state();
 
-  // lateral MPC 출력을 actuator delay와 횡가속도 한계에 맞춰 보정한다.
+  // lateral MPC 출력을 actuator delay + plan 나이와 횡가속도 한계에 맞춰 보정한다.
   float lag_adjusted_desired_curvature(const LateralTarget &target,
-                                       float speed_mps) const;
+                                       float speed_mps,
+                                       float plan_age_s) const;
 
   // LKAS HUD state 값을 lane availability와 active 상태에서 만든다.
   int lkas_sys_state(bool active, bool left_lane, bool right_lane) const;

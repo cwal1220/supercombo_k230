@@ -27,6 +27,7 @@ constexpr EngageBlockLabel kEngageBlockLabels[] = {
     {"gear_not_drive", "GEAR NOT D"},
     {"lanechange_manual", "MANUAL TURN"},
     {"lateral_plan_invalid", "PLAN INVALID"},
+    {"lateral_plan_stale", "PLAN STALE"},
     {"mdps_fault", "MDPS FAULT"},
     {"no_smart_mdps_low_speed", "LOW SPEED"},
     {"not_engaged", "STANDBY"},
