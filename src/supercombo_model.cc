@@ -92,8 +92,22 @@ SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const 
 {
     for (size_t i = 0; i < input_shapes_.size(); ++i)
         input_tensors_.push_back(get_input_tensor(i));
+    for (size_t i = 0; i < 2; ++i) {
+        const auto image_type = input_tensors_[i].datatype();
+        if (image_type != nncase::dt_float32 && image_type != nncase::dt_uint8)
+            throw std::runtime_error("unsupported image input datatype");
+    }
+    if (input_tensors_[0].datatype() != input_tensors_[1].datatype())
+        throw std::runtime_error("image input datatype mismatch");
+    std::fprintf(stderr, "Supercombo image input dtype=%s\n",
+                 input_tensors_[0].datatype() == nncase::dt_uint8 ? "uint8" : "float32");
     if (!clear_image_input(0) || !clear_image_input(1))
         throw std::runtime_error("initialize image input history failed");
+}
+
+size_t SupercomboModel::image_elem_bytes(size_t index) const
+{
+    return input_tensors_[index].datatype() == nncase::dt_uint8 ? 1 : sizeof(float);
 }
 
 void SupercomboModel::set_desire(int desire)
@@ -186,15 +200,21 @@ bool SupercomboModel::prepare_image_input(size_t index, ModelInputTransform &tra
     if (index >= input_tensors_.size() || shape_count(index) != kInputImageFloats)
         return false;
 
+    const size_t elem_bytes = image_elem_bytes(index);
     auto host_buffer = input_tensors_[index].impl()->to_host().unwrap()
                            ->buffer().as_host().unwrap();
     auto mapped = std::move(host_buffer.map(map_access_::map_read_write).unwrap());
     auto buffer = mapped.buffer();
-    if (buffer.size() < kInputImageFloats * sizeof(float))
+    if (buffer.size() < kInputImageFloats * elem_bytes)
         return false;
 
-    float *input = reinterpret_cast<float *>(buffer.data());
-    transform.nv12_to_yuv6_warped(nv12, src_w, src_h, input + kYuv6Floats);
+    if (elem_bytes == 1) {
+        uint8_t *input = reinterpret_cast<uint8_t *>(buffer.data());
+        transform.nv12_to_yuv6_warped(nv12, src_w, src_h, input + kYuv6Floats);
+    } else {
+        float *input = reinterpret_cast<float *>(buffer.data());
+        transform.nv12_to_yuv6_warped(nv12, src_w, src_h, input + kYuv6Floats);
+    }
     mapped.unmap().expect("unmap image input failed");
     return true;
 }
@@ -204,15 +224,16 @@ bool SupercomboModel::advance_image_history(size_t index)
     if (index >= input_tensors_.size() || shape_count(index) != kInputImageFloats)
         return false;
 
+    const size_t elem_bytes = image_elem_bytes(index);
     auto host_buffer = input_tensors_[index].impl()->to_host().unwrap()
                            ->buffer().as_host().unwrap();
     auto mapped = std::move(host_buffer.map(map_access_::map_read_write).unwrap());
     auto buffer = mapped.buffer();
-    if (buffer.size() < kInputImageFloats * sizeof(float))
+    if (buffer.size() < kInputImageFloats * elem_bytes)
         return false;
 
-    float *input = reinterpret_cast<float *>(buffer.data());
-    std::memcpy(input, input + kYuv6Floats, kYuv6Floats * sizeof(float));
+    uint8_t *input = reinterpret_cast<uint8_t *>(buffer.data());
+    std::memcpy(input, input + kYuv6Floats * elem_bytes, kYuv6Floats * elem_bytes);
     mapped.unmap().expect("unmap image history failed");
     return true;
 }
@@ -222,14 +243,15 @@ bool SupercomboModel::clear_image_input(size_t index)
     if (index >= input_tensors_.size() || shape_count(index) != kInputImageFloats)
         return false;
 
+    const size_t elem_bytes = image_elem_bytes(index);
     auto host_buffer = input_tensors_[index].impl()->to_host().unwrap()
                            ->buffer().as_host().unwrap();
     auto mapped = std::move(host_buffer.map(map_access_::map_write).unwrap());
     auto buffer = mapped.buffer();
-    if (buffer.size() < kInputImageFloats * sizeof(float))
+    if (buffer.size() < kInputImageFloats * elem_bytes)
         return false;
 
-    std::memset(buffer.data(), 0, kInputImageFloats * sizeof(float));
+    std::memset(buffer.data(), 0, kInputImageFloats * elem_bytes);
     mapped.unmap().expect("unmap cleared image input failed");
     hrt::sync(input_tensors_[index], sync_op_t::sync_write_back, true)
         .expect("sync cleared image input failed");

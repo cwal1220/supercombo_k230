@@ -204,5 +204,37 @@ int main(int argc, char **argv)
                 med_scalar_ms, med_rvv_ms, med_scalar_ms / med_rvv_ms);
     std::printf("sbig_scalar_ms=%.3f sbig_rvv_ms=%.3f speedup=%.2fx\n",
                 sbig_scalar_ms, sbig_rvv_ms, sbig_scalar_ms / sbig_rvv_ms);
-    return med_exact && sbig_exact ? 0 : 1;
+
+    /* uint8 출력 경로: float 워프의 반올림 값과 모든 픽셀이 일치해야 하고
+     * (scalar/RVV 모두), float 대비 얼마나 빠른지도 함께 잰다. */
+    std::vector<uint8_t> med_u8_scalar(kYuv6Floats, 0);
+    std::vector<uint8_t> med_u8_rvv(kYuv6Floats, 0);
+    std::vector<uint8_t> sbig_u8_rvv(kYuv6Floats, 0);
+    med.nv12_to_yuv6_warped_scalar(
+        source_nv12.data(), kSourceW, kSourceH, med_u8_scalar.data());
+    med.nv12_to_yuv6_warped_rvv(
+        source_nv12.data(), kSourceW, kSourceH, med_u8_rvv.data());
+    sbig.nv12_to_yuv6_warped_rvv(
+        source_nv12.data(), kSourceW, kSourceH, sbig_u8_rvv.data());
+    auto u8_matches_float = [](const std::vector<uint8_t> &u8,
+                               const std::vector<float> &f32) {
+        for (size_t i = 0; i < u8.size(); ++i) {
+            if (static_cast<float>(u8[i]) != f32[i]) return false;
+        }
+        return true;
+    };
+    const bool med_u8_scalar_exact = u8_matches_float(med_u8_scalar, med_scalar);
+    const bool med_u8_rvv_exact = u8_matches_float(med_u8_rvv, med_rvv);
+    const bool sbig_u8_rvv_exact = u8_matches_float(sbig_u8_rvv, sbig_rvv);
+    const double med_u8_rvv_ms = bench_ms(runs, [&] {
+        med.nv12_to_yuv6_warped_rvv(
+            source_nv12.data(), kSourceW, kSourceH, med_u8_rvv.data());
+    });
+    std::printf("u8_scalar_exact=%d u8_rvv_exact=%d/%d med_u8_rvv_ms=%.3f vs_float=%.2fx\n",
+                med_u8_scalar_exact ? 1 : 0, med_u8_rvv_exact ? 1 : 0,
+                sbig_u8_rvv_exact ? 1 : 0, med_u8_rvv_ms, med_rvv_ms / med_u8_rvv_ms);
+
+    const bool all_exact = med_exact && sbig_exact && med_u8_scalar_exact &&
+        med_u8_rvv_exact && sbig_u8_rvv_exact;
+    return all_exact ? 0 : 1;
 }

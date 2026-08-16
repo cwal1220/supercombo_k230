@@ -24,6 +24,11 @@ public:
     void nv12_to_yuv6_warped(const uint8_t *nv12, int src_w, int src_h, float *out);
     void nv12_to_yuv6_warped_scalar(const uint8_t *nv12, int src_w, int src_h, float *out);
     void nv12_to_yuv6_warped_rvv(const uint8_t *nv12, int src_w, int src_h, float *out);
+    /* uint8 입력 kmodel용 경로. 같은 고정소수점 보간의 반올림 값을 float 변환
+     * 없이 그대로 쓰므로 float 경로와 비트 동일한 픽셀 값을 만든다. */
+    void nv12_to_yuv6_warped(const uint8_t *nv12, int src_w, int src_h, uint8_t *out);
+    void nv12_to_yuv6_warped_scalar(const uint8_t *nv12, int src_w, int src_h, uint8_t *out);
+    void nv12_to_yuv6_warped_rvv(const uint8_t *nv12, int src_w, int src_h, uint8_t *out);
     static bool rvv_available();
 
 private:
@@ -51,8 +56,10 @@ private:
                           int dst_x_offset, int dst_y_offset, SampleMap &map) const;
     static uint8_t sample(const uint8_t *base, const SampleMap &map,
                           size_t index, int channel);
-    void warp_scalar(const uint8_t *nv12, int src_w, int src_h, float *out) const;
-    void warp_rvv(const uint8_t *nv12, int src_w, int src_h, float *out) const;
+    template <typename OutT>
+    void warp_scalar(const uint8_t *nv12, int src_w, int src_h, OutT *out) const;
+    template <typename OutT>
+    void warp_rvv(const uint8_t *nv12, int src_w, int src_h, OutT *out) const;
 
     bool map_valid_ = false;
     int map_src_w_ = 0;

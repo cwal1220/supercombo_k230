@@ -37,6 +37,8 @@ private:
     bool clear_image_input(size_t index);
     bool write_input(size_t index, const float *data, size_t count);
     size_t shape_count(size_t index) const;
+    // image 입력 텐서의 원소 크기. float32 kmodel은 4, uint8 kmodel은 1이다.
+    size_t image_elem_bytes(size_t index) const;
 
     std::vector<runtime_tensor> input_tensors_;
     ModelInputTransform input_transform_;

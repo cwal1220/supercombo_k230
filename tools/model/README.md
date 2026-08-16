@@ -19,12 +19,6 @@ the current no-GRU, full dual-image-input K230 model.
     identity depthwise Conv before `Elu_223`.
   - The current final model intentionally omits `--gru-update`.
 
-- `remove_supercombo_big_input.py`
-  - Folds the zero `big_input_imgs` tower contribution into the summarizer Gemm
-    bias and prunes the unreachable big-image tower.
-  - Use `--keep-big-input` for compatibility with the existing 5-input K230
-    runtime.
-
 - `make_supercombo_calibration.py`
   - Builds PTQ NPZ data from local driving logs.
   - Supports an ordered `--segment-list`, metadata output, and `--warp-mode`.
@@ -38,13 +32,13 @@ the current no-GRU, full dual-image-input K230 model.
 ## Current final model summary
 
 - Final ONNX:
-  - `../../models/onnx/supercombo_gemm_split3_iddwelu223_nogru_splitplan_delta.onnx`
+  - `../../models/onnx/supercombo_base.onnx`
 - Final kmodel:
   - `../../models/supercombo.kmodel`
 - PTQ data:
-  - `../../models/ptq/supercombo_balanced80_calib.npz`
+  - `../../models/ptq/supercombo_calib.npz`
 - Quantization:
-  - INT16 activations, UINT8 weights, `NoClip`, 80 balanced samples.
+  - INT16 activations, UINT8 weights, `NoClip`, 77 balanced samples (3 degenerate frames removed).
 - Runtime compatibility:
   - Keeps `input_imgs`, `big_input_imgs`, `desire`, `traffic_convention`, and
     `initial_state` inputs, with both image towers active.
