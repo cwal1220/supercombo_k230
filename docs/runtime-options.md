@@ -56,6 +56,10 @@ true.
   - overrides the route output directory. The default is `recordings/` under the
     runtime working directory. Recording is toggled live through the web UI or
     `params/recording.json`; at least 5 GiB and 10% free space is kept.
+- `K230_RECORD_STAGING=/path/to/staging`
+  - overrides the tmpfs staging directory for the active route (default
+    `/tmp/record_staging`). Closed files are moved to `K230_RECORD_ROOT`
+    sequentially by a background thread.
 - `K230_RECORD_CODEC=/dev/video0`
   - overrides the MVX hardware codec device used by `k230_recordd`.
 - `SUPERCOMBO_REPLAY_NV12=/path/to/replay.scnv12`

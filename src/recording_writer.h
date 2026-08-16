@@ -35,6 +35,7 @@ public:
   bool blocked_for_space() const { return blocked_for_space_.load(); }
   uint64_t video_frames() const { return total_video_frames_.load(); }
   uint64_t queue_drops() const { return queue_drops_.load(); }
+  uint64_t pending_moves() const { return pending_moves_.load(); }
 
 private:
   struct PendingWrite {
@@ -77,7 +78,29 @@ private:
                           uint32_t payload_size);
   static FILE *open_buffered(const std::string &path);
 
+  /* tmpfs 스테이징 → SD 이동자. 활성 세그먼트는 램(tmpfs)에 써서 SD 지연
+   * 스파이크(세그먼트 로테이션 flush, writeback 쓰로틀링)가 기록 경로를
+   * 막지 못하게 하고, 닫힌 파일만 큰 순차 복사로 SD에 옮긴다. */
+  struct MoveJob {
+    bool tree = false;  // true면 디렉토리 전체 이동
+    std::string from;
+    std::string to;
+  };
+  void mover_loop();
+  void enqueue_move(MoveJob &&job);
+  void move_file(const std::string &from, const std::string &to);
+  void move_tree(const std::string &from, const std::string &to);
+
   std::string root_;
+  std::string staging_root_;
+  std::string final_route_path_;
+  std::string segment_relative_;
+  std::mutex move_mutex_;
+  std::condition_variable move_cv_;
+  std::deque<MoveJob> move_queue_;
+  std::thread mover_;
+  bool mover_stop_ = false;
+  std::atomic<uint64_t> pending_moves_{0};
   std::string params_directory_;
   std::string route_path_;
   unsigned width_ = 0;

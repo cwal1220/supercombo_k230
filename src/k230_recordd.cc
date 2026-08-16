@@ -222,7 +222,7 @@ int main() {
         std::fprintf(stderr,
                      "recordd: enabled=%u active=%u warmed=%u selected=%llu "
                      "submitted=%llu encoded=%llu dropped=%llu stale=%llu sync=%llu queues=%llu/%llu "
-                     "frames=%llu write_queue_drops=%llu%s\n",
+                     "frames=%llu write_queue_drops=%llu moves=%llu%s\n",
                      writer.requested_enabled() ? 1 : 0, writer.active() ? 1 : 0,
                      warmed ? 1 : 0,
                      static_cast<unsigned long long>(selected_frames),
@@ -235,6 +235,7 @@ int main() {
                      static_cast<unsigned long long>(sendcan_log_sub.depth()),
                      static_cast<unsigned long long>(writer.video_frames()),
                      static_cast<unsigned long long>(writer.queue_drops()),
+                     static_cast<unsigned long long>(writer.pending_moves()),
                      writer.blocked_for_space() ? " storage-blocked" : "");
       }
     }

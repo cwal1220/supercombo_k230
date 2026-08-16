@@ -82,6 +82,9 @@ minimal passive overlay subscriber.
 - records `NV12 1280x720` as 5 Mbps HEVC at 20 FPS with 60-second, independently
   decodable segments; `frames.bin` preserves each source frame ID and capture
   timestamp
+- writes the active route to a tmpfs staging directory (`K230_RECORD_STAGING`,
+  default `/tmp/record_staging`) and a mover thread copies closed files to the
+  SD card sequentially, so SD latency spikes never stall the record path
 - records dedicated non-blocking CAN RX/TX copies plus model, control, and Panda
   state in `events.bin`, and snapshots all runtime JSON parameters
 - runs at nice level 15 so logging cannot take priority over model or control

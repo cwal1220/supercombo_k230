@@ -2,12 +2,14 @@
 
 #include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <sys/statvfs.h>
 
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <ctime>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -70,7 +72,26 @@ RecordingWriter::RecordingWriter(std::string root, std::string params_directory,
                                  unsigned bitrate)
     : root_(std::move(root)), params_directory_(std::move(params_directory)),
       width_(width), height_(height), fps_(fps), bitrate_(bitrate),
-      worker_(&RecordingWriter::worker_loop, this) {}
+      worker_(&RecordingWriter::worker_loop, this) {
+  const char *staging = std::getenv("K230_RECORD_STAGING");
+  staging_root_ = staging && staging[0] != '\0' ? staging : "/tmp/record_staging";
+  mover_ = std::thread(&RecordingWriter::mover_loop, this);
+  /* 이전 세션이 route 도중 죽었으면 스테이징 잔여가 tmpfs(램)를 계속
+   * 점유한다. 시작할 때 남아 있는 route를 SD로 회수한다. */
+  if (DIR *stale = opendir(staging_root_.c_str())) {
+    while (dirent *entry = readdir(stale)) {
+      const std::string name = entry->d_name;
+      if (name == "." || name == "..") continue;
+      MoveJob job;
+      job.tree = true;
+      job.from = staging_root_ + "/" + name;
+      job.to = root_ + "/" + name;
+      std::fprintf(stderr, "recordd: recovering staged route %s\n", name.c_str());
+      enqueue_move(std::move(job));
+    }
+    closedir(stale);
+  }
+}
 
 RecordingWriter::~RecordingWriter() {
   close();
@@ -173,7 +194,10 @@ bool RecordingWriter::start_route(uint64_t now_ns) {
     active_.store(false);
     return false;
   }
-  route_path_ = root_ + "/" + route_name();
+  /* 활성 route는 tmpfs에 쓰고 mover가 닫힌 파일을 SD로 옮긴다. */
+  const std::string name = route_name();
+  route_path_ = staging_root_ + "/" + name;
+  final_route_path_ = root_ + "/" + name;
   if (!make_directories(route_path_ + "/segments")) {
     std::fprintf(stderr, "recordd: create route failed path=%s error=%s\n",
                  route_path_.c_str(), std::strerror(errno));
@@ -197,7 +221,8 @@ bool RecordingWriter::start_route(uint64_t now_ns) {
   write_manifest(false);
   next_storage_check_ns_ = now_ns + kStorageCheckIntervalNs;
   active_.store(true);
-  std::fprintf(stderr, "recordd: recording started route=%s\n", route_path_.c_str());
+  std::fprintf(stderr, "recordd: recording started route=%s staging=%s\n",
+               final_route_path_.c_str(), route_path_.c_str());
   return true;
 }
 
@@ -212,7 +237,8 @@ void RecordingWriter::set_codec_config(const uint8_t *data, size_t size) {
 bool RecordingWriter::open_segment(const K230RoadAiFrame &frame) {
   std::ostringstream number;
   number << std::setw(3) << std::setfill('0') << segment_index_;
-  const std::string directory = route_path_ + "/segments/" + number.str();
+  segment_relative_ = "segments/" + number.str();
+  const std::string directory = route_path_ + "/" + segment_relative_;
   if (!make_directories(directory)) return false;
   video_file_ = open_buffered(directory + "/road.hevc");
   index_file_ = open_buffered(directory + "/frames.bin");
@@ -357,12 +383,22 @@ void RecordingWriter::write_state_impl(K230RecordType type, uint64_t timestamp_n
 }
 
 void RecordingWriter::close_segment() {
+  const bool had_files = video_file_ != nullptr || index_file_ != nullptr;
   if (video_file_) std::fclose(video_file_);
   if (index_file_) std::fclose(index_file_);
   video_file_ = nullptr;
   index_file_ = nullptr;
   segment_start_ns_ = 0;
   video_offset_ = 0;
+  if (had_files && !segment_relative_.empty()) {
+    for (const char *file : {"/road.hevc", "/frames.bin"}) {
+      MoveJob job;
+      job.from = route_path_ + "/" + segment_relative_ + file;
+      job.to = final_route_path_ + "/" + segment_relative_ + file;
+      enqueue_move(std::move(job));
+    }
+  }
+  segment_relative_.clear();
 }
 
 void RecordingWriter::write_manifest(bool complete) const {
@@ -404,11 +440,20 @@ void RecordingWriter::close_route(bool complete) {
   if (!route_path_.empty()) {
     std::fprintf(stderr,
                  "recordd: recording stopped route=%s frames=%llu events=%llu\n",
-                 route_path_.c_str(),
+                 final_route_path_.c_str(),
                  static_cast<unsigned long long>(total_video_frames_.load()),
                  static_cast<unsigned long long>(event_records_));
+    /* 남은 route 파일(events.bin, manifest, params, 마지막 세그먼트)을
+     * 전부 SD로 옮긴다. mover는 순서대로 처리하므로 앞선 파일 이동이
+     * 끝난 뒤 잔여만 쓸어 담는다. */
+    MoveJob sweep;
+    sweep.tree = true;
+    sweep.from = route_path_;
+    sweep.to = final_route_path_;
+    enqueue_move(std::move(sweep));
   }
   route_path_.clear();
+  final_route_path_.clear();
   segment_index_ = 0;
   active_.store(false);
 }
@@ -420,4 +465,71 @@ void RecordingWriter::close() {
   write.kind = PendingWrite::Kind::Stop;
   enqueue(std::move(write), true);
   if (worker_.joinable()) worker_.join();
+  {
+    std::lock_guard<std::mutex> lock(move_mutex_);
+    mover_stop_ = true;
+  }
+  move_cv_.notify_one();
+  if (mover_.joinable()) mover_.join();
+}
+
+void RecordingWriter::enqueue_move(MoveJob &&job) {
+  {
+    std::lock_guard<std::mutex> lock(move_mutex_);
+    move_queue_.push_back(std::move(job));
+    pending_moves_.store(move_queue_.size());
+  }
+  move_cv_.notify_one();
+}
+
+void RecordingWriter::mover_loop() {
+  while (true) {
+    MoveJob job;
+    {
+      std::unique_lock<std::mutex> lock(move_mutex_);
+      move_cv_.wait(lock, [this] { return mover_stop_ || !move_queue_.empty(); });
+      if (move_queue_.empty()) {
+        if (mover_stop_) return;
+        continue;
+      }
+      job = std::move(move_queue_.front());
+      move_queue_.pop_front();
+      pending_moves_.store(move_queue_.size());
+    }
+    if (job.tree) {
+      move_tree(job.from, job.to);
+    } else {
+      move_file(job.from, job.to);
+    }
+  }
+}
+
+void RecordingWriter::move_file(const std::string &from, const std::string &to) {
+  const size_t slash = to.rfind('/');
+  if (slash != std::string::npos) make_directories(to.substr(0, slash));
+  if (!copy_file(from, to)) {
+    std::fprintf(stderr, "recordd: move failed %s -> %s: %s\n",
+                 from.c_str(), to.c_str(), std::strerror(errno));
+    return;
+  }
+  unlink(from.c_str());
+}
+
+void RecordingWriter::move_tree(const std::string &from, const std::string &to) {
+  DIR *directory = opendir(from.c_str());
+  if (!directory) return;
+  while (dirent *entry = readdir(directory)) {
+    const std::string name = entry->d_name;
+    if (name == "." || name == "..") continue;
+    const std::string source = from + "/" + name;
+    struct stat info = {};
+    if (stat(source.c_str(), &info) != 0) continue;
+    if (S_ISDIR(info.st_mode)) {
+      move_tree(source, to + "/" + name);
+    } else {
+      move_file(source, to + "/" + name);
+    }
+  }
+  closedir(directory);
+  rmdir(from.c_str());
 }
