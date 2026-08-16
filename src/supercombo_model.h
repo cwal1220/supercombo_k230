@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 class SupercomboModel : public AIBase
@@ -19,6 +20,8 @@ public:
                                std::vector<float> &raw_output);
     void set_input_calibration(const float rpy[3]);
     void set_desire(int desire);
+    /* NPU 제출 직렬화용. LD 모델과 공유해 두 모델의 run()이 겹치지 않게 한다. */
+    void set_npu_mutex(std::mutex *mutex) { npu_mutex_ = mutex; }
 
 private:
     static constexpr int kModelW = 512;
@@ -48,6 +51,7 @@ private:
     std::vector<float> prev_desire_;
     std::vector<float> traffic_convention_;
     std::vector<float> recurrent_state_;
+    std::mutex *npu_mutex_ = nullptr;
 };
 
 #endif

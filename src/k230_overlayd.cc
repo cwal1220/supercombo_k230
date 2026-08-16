@@ -317,6 +317,19 @@ private:
             latest_control_seq_ = seq;
         }
 
+        /* laneMeta는 LD 모델이 있을 때만 발행되므로 지연 개방한다. */
+        if (!lane_meta_sub_open_) {
+            lane_meta_sub_open_ =
+                lane_meta_sub_.open(kK230LaneMetaTopic, sizeof(K230LaneMetaState), false);
+        }
+        if (lane_meta_sub_open_) {
+            seq = latest_lane_meta_seq_;
+            if (lane_meta_sub_.read(&latest_lane_meta_, sizeof(latest_lane_meta_), &seq) &&
+                seq != latest_lane_meta_seq_) {
+                latest_lane_meta_seq_ = seq;
+            }
+        }
+
         seq = latest_manager_seq_;
         if (manager_state_sub_.read(&latest_manager_state_, sizeof(latest_manager_state_), &seq) &&
             seq != latest_manager_seq_) {
@@ -552,6 +565,7 @@ private:
         std::snprintf(hud_.active_block, sizeof(hud_.active_block), "%s",
                       control_fresh ? latest_control_state_.active_block : "control_stale");
 
+        hud_.ld_promoted = model_fresh && latest_model_state_.ld_promoted != 0;
         hud_.calibration_available = model_fresh;
         hud_.calibration_status = latest_model_state_.calibration.status;
         hud_.calibration_valid_blocks = latest_model_state_.calibration.valid_blocks;
@@ -576,7 +590,8 @@ private:
         const uint64_t draw_start = profile_ ? k230_now_ns() : 0;
         overlay_.draw(overlay_buffer_,
                       have_model_state_ ? latest_output_ : ParsedModelOutput{},
-                      have_model_state_ ? latest_projection_ : default_projection_, hud_, true);
+                      have_model_state_ ? latest_projection_ : default_projection_, hud_, true,
+                      lane_meta_sub_open_ ? &latest_lane_meta_ : nullptr);
         if (profile_) overlay_stats_.add(k230_now_ns() - draw_start);
 
         const uint64_t present_start = profile_ ? k230_now_ns() : 0;
@@ -605,6 +620,8 @@ private:
     K230LatestChannel model_state_sub_;
     K230LatestChannel panda_state_sub_;
     K230LatestChannel control_state_sub_;
+    K230LatestChannel lane_meta_sub_;
+    bool lane_meta_sub_open_ = false;
     K230LatestChannel manager_state_sub_;
 
     display *display_ = nullptr;
@@ -618,9 +635,11 @@ private:
     uint64_t latest_model_seq_ = 0;
     uint64_t latest_panda_seq_ = 0;
     uint64_t latest_control_seq_ = 0;
+    uint64_t latest_lane_meta_seq_ = 0;
     uint64_t latest_manager_seq_ = 0;
     K230ModelState latest_model_state_ {};
     K230PandaState latest_panda_state_ {};
+    K230LaneMetaState latest_lane_meta_ {};
     K230ControlState latest_control_state_ {};
     K230ManagerState latest_manager_state_ {};
     ParsedModelOutput latest_output_ {};

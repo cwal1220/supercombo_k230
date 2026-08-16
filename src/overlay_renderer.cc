@@ -1,5 +1,8 @@
 #include "overlay_renderer.h"
 
+#include "common_utils.h"
+#include "k230_ipc.h"
+
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -920,10 +923,70 @@ const char *engage_block_label(const char *block)
     return nullptr;
 }
 
+namespace {
+
+/* LD(차선 검출) 라인 하나를 그린다. 좌표는 전체 센서 프레임 정규화 값이라
+ * 논리 화면 크기로 곱한 뒤 모델 오버레이와 같은 180도 회전을 적용한다. */
+void draw_ld_line(cv::Mat &frame, const K230LaneMetaLine &line, bool boundary,
+                  bool host, int logical_width, int logical_height,
+                  bool rotate_landscape)
+{
+    if (!line.valid || line.point_count < 2) return;
+
+    cv::Scalar color = bgra(240, 240, 240, 230);
+    if (boundary) {
+        color = bgra(60, 60, 230, 190);
+    } else if (line.color == 1) {
+        color = bgra(0, 215, 255, 230);
+    } else if (line.color == 2) {
+        color = bgra(255, 150, 60, 230);
+    }
+    const int thickness = boundary ? 1 : (host ? 3 : 2);
+    const bool dashed = !boundary && line.pattern == 1;
+    const bool dots = !boundary && line.pattern == 2;
+
+    /* LD 좌표는 AI 프레임(화면과 같은 방향) 정규화 값이라 모델 투영 경로의
+     * 180도 보정 없이 그대로 화면 좌표로 만든다. */
+    std::vector<cv::Point> points;
+    points.reserve(line.point_count);
+    for (uint32_t i = 0; i < line.point_count; ++i) {
+        const int px = static_cast<int>(line.x[i] * static_cast<float>(logical_width - 1));
+        const int py = static_cast<int>(line.y[i] * static_cast<float>(logical_height - 1));
+        points.push_back(display_point(px, py, logical_height, rotate_landscape));
+    }
+
+    if (dots) {
+        for (const cv::Point &point : points) {
+            cv::circle(frame, point, thickness + 1, color, cv::FILLED, cv::LINE_8);
+        }
+        return;
+    }
+    for (size_t i = 1; i < points.size(); ++i) {
+        if (dashed && (i % 2) == 0) continue;
+        cv::line(frame, points[i - 1], points[i], color, thickness, cv::LINE_8);
+    }
+}
+
+// 패턴/색상 분류를 HUD 라벨 문자열로 만든다.
+std::string ld_lane_label(const K230LaneMetaLine &line)
+{
+    if (!line.valid) return "--";
+    static const char *patterns[] = {"SOLID", "DASH", "DOTS", "?"};
+    static const char *colors[] = {"W", "Y", "B", "?"};
+    const int pattern = line.pattern >= 0 && line.pattern <= 3 ? line.pattern : 3;
+    const int color = line.color >= 0 && line.color <= 3 ? line.color : 3;
+    std::string label = std::string(patterns[pattern]) + "." + colors[color];
+    if (line.double_shape >= 1 && line.double_shape <= 3) label += "2";
+    return label;
+}
+
+} // namespace
+
 void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &output,
                            const ProjectionState &projection,
                            const OverlayHudState &hud,
-                           bool rotate_landscape) const
+                           bool rotate_landscape,
+                           const K230LaneMetaState *lane_meta) const
 {
     constexpr float kLeadProbabilityThreshold = 0.5f;
     constexpr int kLeadTimeIndex = 0;
@@ -991,6 +1054,31 @@ void OverlayRenderer::draw(display_buffer *buffer, const ParsedModelOutput &outp
                                       lead_probability, logical_width, logical_height,
                                       rotate_landscape);
             }
+        }
+    }
+
+    /* LD 차선 의미론 오버레이: 최신 발행(600ms 이내)일 때만 그린다. */
+    if (lane_meta && lane_meta->timestamp_ns != 0) {
+        const uint64_t lane_meta_now = k230_now_ns();
+        if (lane_meta_now >= lane_meta->timestamp_ns &&
+            lane_meta_now - lane_meta->timestamp_ns <= 600000000ULL) {
+            for (uint32_t i = 0; i < kK230LaneMetaBoundarySlots; ++i) {
+                draw_ld_line(frame, lane_meta->boundaries[i], true, false,
+                             logical_width, logical_height, rotate_landscape);
+            }
+            for (uint32_t i = 0; i < kK230LaneMetaLaneSlots; ++i) {
+                draw_ld_line(frame, lane_meta->lanes[i], false, i < 2,
+                             logical_width, logical_height, rotate_landscape);
+            }
+            BitmapHud ld_ui(frame, logical_width, logical_height, rotate_landscape);
+            const std::string ld_label =
+                std::string(hud.ld_promoted ? "[LD>LANE] " : "") +
+                "LD L " + ld_lane_label(lane_meta->lanes[0]) +
+                "  R " + ld_lane_label(lane_meta->lanes[1]);
+            /* 승격 중이면 주황색으로 강조해 실차에서 바로 식별되게 한다. */
+            ld_ui.hud_text_left(8, logical_height - 18, ld_label, 1,
+                                hud.ld_promoted ? argb(255, 255, 170, 40)
+                                                : argb(220, 240, 240, 240), 360);
         }
     }
 

@@ -12,6 +12,7 @@
 const char *engage_block_label(const char *block);
 
 struct OverlayHudState {
+    bool ld_promoted = false;  // 이 프레임 차선이 LD 승격으로 대체됨
     bool panda_connected = false;
     bool panda_healthy = false;
     bool panda_tx_enabled = false;
@@ -73,6 +74,8 @@ struct OverlayHudState {
     char network_ipv4[16] = {};
 };
 
+struct K230LaneMetaState;
+
 class OverlayRenderer {
 public:
     OverlayRenderer() = default;
@@ -80,7 +83,8 @@ public:
     void draw(display_buffer *buffer, const ParsedModelOutput &output,
               const ProjectionState &projection,
               const OverlayHudState &hud = OverlayHudState{},
-              bool rotate_landscape = false) const;
+              bool rotate_landscape = false,
+              const K230LaneMetaState *lane_meta = nullptr) const;
 
 private:
     mutable bool previous_left_blinker_ = false;

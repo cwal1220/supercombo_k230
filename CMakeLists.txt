@@ -139,7 +139,11 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     src/input_source.cc
     src/json_utils.cc
     src/k230_ipc.cc
+    src/lane_decode.cc
+    src/ld_fusion.cc
+    src/ld_model.cc
     src/model_input_transform.cc
+    src/nv12_rgb_converter.cc
     src/online_calibrator.cc
     src/supercombo_model.cc
   )
@@ -320,6 +324,15 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
 
     add_executable(sequence_runner benchmarks/sequence_runner.cc)
     configure_k230_target(sequence_runner ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
+
+    add_executable(ld_dump_runner
+      benchmarks/ld_dump_runner.cc
+      src/lane_decode.cc
+      src/ld_model.cc
+      src/nv12_rgb_converter.cc
+      ${COMMON_SOURCES}
+    )
+    configure_k230_target(ld_dump_runner ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
 
     add_executable(probe_drm_planes benchmarks/probe_drm_planes.cc)
     configure_k230_target(probe_drm_planes mmz ${K230_SHARED_LIBS})

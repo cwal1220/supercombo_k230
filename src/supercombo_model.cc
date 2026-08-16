@@ -163,7 +163,12 @@ bool SupercomboModel::run_frame_nv12_impl(const uint8_t *nv12, int src_w, int sr
     if (!write_input(4, recurrent_state_.data(), recurrent_state_.size())) return false;
     const uint64_t t3 = profile ? now_ns() : 0;
 
-    run();
+    if (npu_mutex_) {
+        std::lock_guard<std::mutex> npu_lock(*npu_mutex_);
+        run();
+    } else {
+        run();
+    }
     const uint64_t t4 = profile ? now_ns() : 0;
     if (!advance_image_history(0) || !advance_image_history(1)) return false;
     const uint64_t t5 = profile ? now_ns() : 0;

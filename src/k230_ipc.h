@@ -33,6 +33,7 @@ constexpr char kK230CanLogTopic[] = "/k230_can_log";
 constexpr char kK230SendCanLogTopic[] = "/k230_sendcan_log";
 constexpr char kK230PandaStateTopic[] = "/k230_panda_state";
 constexpr char kK230ControlStateTopic[] = "/k230_control_state";
+constexpr char kK230LaneMetaTopic[] = "/k230_lane_meta";
 
 constexpr uint32_t kK230HudFlagLaneless = 1U << 0;
 constexpr uint32_t kK230HudFlagBrakeHold = 1U << 1;
@@ -145,7 +146,43 @@ struct K230ModelState {
     K230StopLineState stop_line;
     K230PoseState pose;
     K230CalibrationState calibration;
+    /* LD 승격 활성: 이 프레임의 lanes[1]/[2]가 LD 투영으로 대체됐음 */
+    uint32_t ld_promoted = 0;
 };
+
+/* LD(차선 검출) 모델의 차선 의미론. modeld가 supercombo 발행 직후 저주기로
+ * 발행하고 overlayd가 HUD 표시에 쓴다. 좌표는 전체 센서 프레임 정규화(0..1). */
+constexpr uint32_t kK230LaneMetaLaneSlots = 6;
+constexpr uint32_t kK230LaneMetaBoundarySlots = 4;
+constexpr uint32_t kK230LaneMetaMaxPoints = 24;
+
+struct K230LaneMetaLine {
+    uint32_t valid = 0;
+    float validity = 0.0f;      // 모델의 라인 존재 확률(시그모이드)
+    float confidence = 0.0f;    // 행 앵커 신뢰도 평균
+    int32_t pattern = 3;        // LaneMarkerPattern (3 = Unknown)
+    int32_t color = 3;          // LaneMarkerColor (3 = Unknown)
+    int32_t double_shape = 4;   // LaneDoubleShape (4 = Unknown)
+    int32_t boundary_type = 0;  // BoundaryType (경계 슬롯만 의미)
+    uint32_t point_count = 0;
+    float x[kK230LaneMetaMaxPoints] = {};
+    float y[kK230LaneMetaMaxPoints] = {};
+};
+
+static_assert(sizeof(K230LaneMetaLine) == 224,
+              "K230LaneMetaLine layout is shared across processes");
+
+struct K230LaneMetaState {
+    uint64_t timestamp_ns = 0;
+    uint64_t frame_id = 0;
+    float total_ms = 0.0f;
+    float infer_ms = 0.0f;
+    K230LaneMetaLine lanes[kK230LaneMetaLaneSlots];
+    K230LaneMetaLine boundaries[kK230LaneMetaBoundarySlots];
+};
+
+static_assert(sizeof(K230LaneMetaState) == 24 + 10 * sizeof(K230LaneMetaLine),
+              "K230LaneMetaState layout is shared across processes");
 
 struct K230ProcessState {
     char name[16] = {};

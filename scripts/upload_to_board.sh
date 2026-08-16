@@ -68,6 +68,10 @@ if [ -x "${BIN_DIR}/k230_controlsd" ]; then
 fi
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "$model" "$BOARD:$DEST/.upload/supercombo.kmodel"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mv '$DEST/.upload/supercombo.kmodel' '$DEST/model/supercombo.kmodel'"
+if [ -f "models/lane_detect.kmodel" ]; then
+  "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" models/lane_detect.kmodel "$BOARD:$DEST/.upload/lane_detect.kmodel"
+  "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mv '$DEST/.upload/lane_detect.kmodel' '$DEST/model/lane_detect.kmodel'"
+fi
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \
   params/calibration.json \
   params/adaptive_cruise.json \
