@@ -62,6 +62,7 @@ private:
   int fd_ = -1;
   unsigned width_ = 0;
   unsigned height_ = 0;
+  unsigned coded_height_ = 0;
   unsigned fps_ = 0;
   unsigned bitrate_ = 0;
   unsigned raw_plane_count_ = 0;

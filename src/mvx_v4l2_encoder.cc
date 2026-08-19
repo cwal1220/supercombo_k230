@@ -13,6 +13,9 @@
 namespace {
 
 constexpr unsigned kBufferCount = 8;
+/* 코딩 높이는 CTU(32행) 정렬만 유지한다. 정렬 패딩 행은 할당 시
+ * 중립값으로 채워 둔다. */
+constexpr unsigned kTailGuardRows = 0;
 constexpr uint32_t kMvxCodecConfigFlag = 0xc1000000U;
 constexpr uint32_t kMvxVendorFlagMask = 0xfff00000U;
 constexpr uint32_t kMvxFrameRateControl = V4L2_CTRL_CLASS_MPEG + 0x2000;
@@ -77,6 +80,7 @@ bool MvxV4l2Encoder::open(const char *device, unsigned width, unsigned height,
   close();
   width_ = width;
   height_ = height;
+  coded_height_ = (height + kTailGuardRows + 31u) & ~31u;
   fps_ = fps;
   bitrate_ = bitrate;
   fd_ = ::open(device, O_RDWR | O_NONBLOCK | O_CLOEXEC);
@@ -107,34 +111,43 @@ bool MvxV4l2Encoder::open(const char *device, unsigned width, unsigned height,
 }
 
 bool MvxV4l2Encoder::set_formats() {
+  /* 소스와 같은 NV12(단일 연속 플레인)를 그대로 쓴다. 3-plane YUV420M
+   * 경로는 이 보드의 MVX 드라이버가 720p에서 소스 높이를 잘못 프로그래밍해
+   * (384행 이후 가장자리 복제) 하단이 깨지고, U/V 분리 복사 비용도 있었다.
+   * 드라이버는 NV12M(2-plane)은 지원하지 않는다. */
   v4l2_format raw{};
   raw.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
   raw.fmt.pix_mp.width = width_;
-  raw.fmt.pix_mp.height = height_;
-  raw.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_YUV420M;
+  raw.fmt.pix_mp.height = coded_height_;
+  raw.fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12;
   raw.fmt.pix_mp.field = V4L2_FIELD_NONE;
-  raw.fmt.pix_mp.num_planes = 3;
+  raw.fmt.pix_mp.num_planes = 1;
   if (xioctl(fd_, VIDIOC_S_FMT, &raw) != 0) {
-    fail("set YUV420 input format");
+    fail("set NV12 input format");
     return false;
   }
+  if (raw.fmt.pix_mp.pixelformat != V4L2_PIX_FMT_NV12) {
+    std::fprintf(stderr, "recordd: MVX rejected NV12, driver picked %08x\n",
+                 raw.fmt.pix_mp.pixelformat);
+    return false;
+  }
+  /* 이 드라이버는 NV12 fourcc에 메모리 플레인 2개(Y, UV)를 쓴다. 1개
+   * (연속)와 2개 모두 지원한다. */
   raw_plane_count_ = raw.fmt.pix_mp.num_planes;
-  if (raw_plane_count_ != 3) {
-    std::fprintf(stderr, "recordd: MVX expected 3 YUV420 planes, got %u\n",
+  if (raw_plane_count_ != 1 && raw_plane_count_ != 2) {
+    std::fprintf(stderr, "recordd: MVX expected 1-2 NV12 planes, got %u\n",
                  raw_plane_count_);
     return false;
   }
-  raw_stride_[0] = raw.fmt.pix_mp.plane_fmt[0].bytesperline;
-  raw_stride_[1] = raw.fmt.pix_mp.plane_fmt[1].bytesperline;
-  raw_stride_[2] = raw.fmt.pix_mp.plane_fmt[2].bytesperline;
-  if (raw_stride_[0] < width_) raw_stride_[0] = width_;
-  if (raw_stride_[1] < width_ / 2) raw_stride_[1] = width_ / 2;
-  if (raw_stride_[2] < width_ / 2) raw_stride_[2] = width_ / 2;
+  for (unsigned plane = 0; plane < raw_plane_count_; ++plane) {
+    raw_stride_[plane] = raw.fmt.pix_mp.plane_fmt[plane].bytesperline;
+    if (raw_stride_[plane] < width_) raw_stride_[plane] = width_;
+  }
 
   v4l2_format encoded{};
   encoded.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   encoded.fmt.pix.width = width_;
-  encoded.fmt.pix.height = height_;
+  encoded.fmt.pix.height = coded_height_;
   encoded.fmt.pix.pixelformat = V4L2_PIX_FMT_HEVC;
   encoded.fmt.pix.field = V4L2_FIELD_NONE;
   encoded.fmt.pix.sizeimage = 1024 * 1024;
@@ -167,20 +180,20 @@ bool MvxV4l2Encoder::set_controls() {
 }
 
 bool MvxV4l2Encoder::allocate_buffers() {
-  v4l2_requestbuffers request{};
-  request.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
-  request.memory = V4L2_MEMORY_MMAP;
-  request.count = kBufferCount;
-  if (xioctl(fd_, VIDIOC_REQBUFS, &request) != 0 || request.count == 0) {
+  v4l2_requestbuffers output_request{};
+  output_request.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+  output_request.memory = V4L2_MEMORY_MMAP;
+  output_request.count = kBufferCount;
+  if (xioctl(fd_, VIDIOC_REQBUFS, &output_request) != 0 || output_request.count == 0) {
     fail("request YUV420 buffers");
     return false;
   }
-  raw_buffers_.resize(request.count);
-  for (unsigned index = 0; index < request.count; ++index) {
+  raw_buffers_.resize(output_request.count);
+  for (unsigned index = 0; index < output_request.count; ++index) {
     v4l2_plane planes[VIDEO_MAX_PLANES]{};
     v4l2_buffer buffer{};
-    buffer.type = request.type;
-    buffer.memory = request.memory;
+    buffer.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+    buffer.memory = V4L2_MEMORY_MMAP;
     buffer.index = index;
     buffer.length = VIDEO_MAX_PLANES;
     buffer.m.planes = planes;
@@ -205,11 +218,15 @@ bool MvxV4l2Encoder::allocate_buffers() {
         fail("map YUV420 buffer");
         return false;
       }
+      /* VPU는 코딩 높이를 32로 정렬해 우리가 채우지 않는 버퍼 꼬리까지
+       * 읽고, 인루프 필터가 그 내용을 가시 영역 하단으로 번지게 한다.
+       * 패딩을 중립값(Y=16, U/V=128)으로 한 번 초기화해 둔다. */
+      std::memset(mapped.address, plane == 0 ? 0x10 : 0x80, mapped.length);
     }
     free_raw_.push_back(index);
   }
 
-  request = {};
+  v4l2_requestbuffers request{};
   request.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   request.memory = V4L2_MEMORY_MMAP;
   request.count = kBufferCount;
@@ -337,33 +354,49 @@ void MvxV4l2Encoder::drain(const PacketHandler &handler) {
 bool MvxV4l2Encoder::submit_frame(const uint8_t *nv12, size_t size,
                                   const K230RoadAiFrame &frame,
                                   const PacketHandler &handler) {
-  if (!valid() || !nv12 || size < static_cast<size_t>(width_) * height_ * 3 / 2 ||
-      frame.width != width_ || frame.height != height_) {
+  /* 소스가 인코딩 높이보다 커도 된다(하단 crop). 소스 UV 플레인 위치는
+   * 소스 높이 기준이므로 frame.height로 계산한다. */
+  if (!valid() || !nv12 || frame.width != width_ || frame.height < height_ ||
+      size < static_cast<size_t>(width_) * frame.height * 3 / 2) {
     return false;
   }
   drain(handler);
   if (free_raw_.empty()) return false;
 
-  const unsigned index = free_raw_.back();
-  free_raw_.pop_back();
+  /* 방금 반환된 버퍼를 즉시 재사용(LIFO)하면, 드라이버가 VPU 판독 완료
+   * 전에 버퍼를 조기 반환하는 경우 다음 프레임 쓰기가 VPU가 아직 읽는
+   * 꼬리를 덮어쓴다(래스터 끝 오염, 크기 가변). FIFO 순환으로 재사용
+   * 간격을 벌린다. */
+  const unsigned index = free_raw_.front();
+  free_raw_.erase(free_raw_.begin());
   RawBuffer &raw = raw_buffers_[index];
-  const size_t y_size = static_cast<size_t>(width_) * height_;
-  const uint8_t *source_uv = nv12 + y_size;
-  const unsigned rows[3] = {height_, height_ / 2, height_ / 2};
-  for (unsigned plane = 0; plane < 3; ++plane) {
-    uint8_t *destination = static_cast<uint8_t *>(raw.planes[plane].address);
-    for (unsigned row = 0; row < rows[plane]; ++row) {
-      uint8_t *dst = destination + static_cast<size_t>(row) * raw_stride_[plane];
-      if (plane == 0) {
-        std::memcpy(dst, nv12 + static_cast<size_t>(row) * width_, width_);
-      } else {
-        const uint8_t *src = source_uv + static_cast<size_t>(row) * width_;
-        for (unsigned column = 0; column < width_ / 2; ++column) {
-          dst[column] = src[column * 2 + (plane - 1)];
-        }
+  /* NV12: 1플레인이면 luma+chroma 연속, 2플레인이면 Y/UV 분리. 소스와 같은
+   * 레이아웃이라 행 복사만 하면 된다. crop 시 luma는 연속 복사가 안 되므로
+   * 플레인 단위로 나눈다. */
+  const uint8_t *sources[2] = {nv12,
+                               nv12 + static_cast<size_t>(width_) * frame.height};
+  const unsigned source_rows[2] = {height_, height_ / 2};
+  for (unsigned source_plane = 0; source_plane < 2; ++source_plane) {
+    const unsigned buffer_plane = raw_plane_count_ == 1 ? 0 : source_plane;
+    uint8_t *destination =
+        static_cast<uint8_t *>(raw.planes[buffer_plane].address) +
+        (raw_plane_count_ == 1 && source_plane == 1
+             ? static_cast<size_t>(raw_stride_[0]) * coded_height_ : 0);
+    if (raw_stride_[buffer_plane] == width_) {
+      std::memcpy(destination, sources[source_plane],
+                  static_cast<size_t>(width_) * source_rows[source_plane]);
+    } else {
+      for (unsigned row = 0; row < source_rows[source_plane]; ++row) {
+        std::memcpy(
+            destination + static_cast<size_t>(row) * raw_stride_[buffer_plane],
+            sources[source_plane] + static_cast<size_t>(row) * width_, width_);
       }
     }
   }
+  const unsigned plane_rows[2] = {
+      raw_plane_count_ == 1 ? coded_height_ + coded_height_ / 2 : coded_height_,
+      coded_height_ / 2,
+  };
 
   v4l2_plane planes[VIDEO_MAX_PLANES]{};
   v4l2_buffer buffer{};
@@ -375,7 +408,7 @@ bool MvxV4l2Encoder::submit_frame(const uint8_t *nv12, size_t size,
   for (unsigned plane = 0; plane < raw_plane_count_; ++plane) {
     planes[plane].length = raw.planes[plane].length;
     planes[plane].m.mem_offset = raw.planes[plane].offset;
-    planes[plane].bytesused = raw_stride_[plane] * rows[plane];
+    planes[plane].bytesused = raw_stride_[plane] * plane_rows[plane];
   }
   if (xioctl(fd_, VIDIOC_QBUF, &buffer) != 0) {
     fail("queue YUV420 frame");

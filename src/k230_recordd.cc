@@ -22,13 +22,21 @@ namespace {
 
 volatile sig_atomic_t g_stop = 0;
 constexpr unsigned kRecordingFps = 20;
-constexpr unsigned kRecordingBitrate = 5000000;
+/* 프레임이 비트 예산을 넘치면 VPU가 래스터 마지막 블록들을 깨뜨리므로
+ * 720p에는 여유 있는 값이 필요하다. K230_RECORD_BITRATE로 조정 가능. */
+constexpr unsigned kRecordingBitrate = 12000000;
 constexpr uint64_t kConfigPollIntervalNs = 250000000ULL;
 constexpr uint64_t kMaximumFrameAgeNs = 100000000ULL;
 
 std::string env_string(const char *name, const char *fallback) {
   const char *value = std::getenv(name);
   return value && value[0] ? value : fallback;
+}
+
+unsigned env_uint(const char *name, unsigned fallback) {
+  const char *value = std::getenv(name);
+  if (!value || !value[0]) return fallback;
+  return static_cast<unsigned>(std::strtoul(value, nullptr, 10));
 }
 
 bool read_recording_enabled(const std::string &path, bool fallback) {
@@ -72,6 +80,8 @@ int main() {
         "K230_RECORDING_PARAMS", (params_directory + "/recording.json").c_str());
     const std::string recording_root = env_string("K230_RECORD_ROOT", "recordings");
     const std::string codec_device = env_string("K230_RECORD_CODEC", "/dev/video0");
+    const unsigned recording_bitrate =
+        env_uint("K230_RECORD_BITRATE", kRecordingBitrate);
 
     K230FrameRing frame_ring;
     while (!g_stop && !frame_ring.open(false)) {
@@ -91,13 +101,16 @@ int main() {
       throw std::runtime_error("open CAN recording queues failed");
     }
 
+    /* 인코더가 VPU의 DMA 꼬리 결함을 피하려고 코딩 높이에 패딩 행을
+     * 붙인다(736행). 스트림 하단 16행은 중립 패딩이므로 시청 변환 시
+     * 실높이(720)로 crop한다. */
     MvxV4l2Encoder encoder;
     if (!encoder.open(codec_device.c_str(), frame_ring.width(), frame_ring.height(),
-                      kRecordingFps, kRecordingBitrate)) {
+                      kRecordingFps, recording_bitrate)) {
       throw std::runtime_error("open MVX hardware encoder failed");
     }
     RecordingWriter writer(recording_root, params_directory, frame_ring.width(),
-                           frame_ring.height(), kRecordingFps, kRecordingBitrate);
+                           frame_ring.height(), kRecordingFps, recording_bitrate);
 
     auto packet_handler = [&writer](const MvxV4l2Encoder::Packet &packet) {
       if (packet.codec_config) {
