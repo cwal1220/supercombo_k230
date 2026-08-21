@@ -206,14 +206,13 @@ bool RecordingWriter::start_route(uint64_t now_ns) {
   segment_index_ = 0;
   total_video_frames_.store(0);
   event_records_ = 0;
-  event_file_ = open_buffered(route_path_ + "/events.bin");
-  if (!event_file_) {
+  route_start_ns_ = now_ns;
+  event_chunk_index_ = 0;
+  /* 이벤트 로그는 route 단위 단일 파일이 아니라 60초 청크다. CAN 로깅만으로
+   * ~0.5 MB/s가 쌓이므로 route 단위 파일은 긴 주행에서 tmpfs 스테이징을
+   * 가득 채운다(988 MB / 30분). 닫힌 청크는 세그먼트처럼 mover가 옮긴다. */
+  if (!make_directories(route_path_ + "/events") || !open_event_chunk(now_ns)) {
     std::fprintf(stderr, "recordd: open event log failed: %s\n", std::strerror(errno));
-    return false;
-  }
-  K230EventFileHeader header;
-  header.route_start_ns = now_ns;
-  if (std::fwrite(&header, sizeof(header), 1, event_file_) != 1) {
     close_route(false);
     return false;
   }
@@ -319,9 +318,47 @@ void RecordingWriter::write_encoded_frame_impl(const K230RoadAiFrame &frame,
   total_video_frames_.fetch_add(1);
 }
 
+bool RecordingWriter::open_event_chunk(uint64_t now_ns) {
+  std::ostringstream number;
+  number << std::setw(3) << std::setfill('0') << event_chunk_index_;
+  event_file_ = open_buffered(route_path_ + "/events/" + number.str() + ".bin");
+  if (!event_file_) return false;
+  event_chunk_start_ns_ = now_ns;
+  K230EventFileHeader header;
+  header.route_start_ns = route_start_ns_;
+  if (std::fwrite(&header, sizeof(header), 1, event_file_) != 1) {
+    std::fclose(event_file_);
+    event_file_ = nullptr;
+    return false;
+  }
+  return true;
+}
+
+void RecordingWriter::close_event_chunk() {
+  if (!event_file_) return;
+  std::fclose(event_file_);
+  event_file_ = nullptr;
+  std::ostringstream number;
+  number << std::setw(3) << std::setfill('0') << event_chunk_index_;
+  MoveJob job;
+  job.from = route_path_ + "/events/" + number.str() + ".bin";
+  job.to = final_route_path_ + "/events/" + number.str() + ".bin";
+  enqueue_move(std::move(job));
+}
+
 bool RecordingWriter::write_event_header(K230RecordType type, uint64_t timestamp_ns,
                                           uint32_t payload_size) {
   if (!event_file_) return false;
+  if (timestamp_ns >= event_chunk_start_ns_ &&
+      timestamp_ns - event_chunk_start_ns_ >= kSegmentDurationNs) {
+    close_event_chunk();
+    ++event_chunk_index_;
+    if (!open_event_chunk(timestamp_ns)) {
+      std::fprintf(stderr, "recordd: open event chunk failed: %s\n",
+                   std::strerror(errno));
+      return false;
+    }
+  }
   K230EventRecordHeader header;
   header.timestamp_ns = timestamp_ns;
   header.type = static_cast<uint16_t>(type);
@@ -434,8 +471,7 @@ void RecordingWriter::snapshot_params() const {
 void RecordingWriter::close_route(bool complete) {
   if (!event_file_ && route_path_.empty()) return;
   close_segment();
-  if (event_file_) std::fclose(event_file_);
-  event_file_ = nullptr;
+  close_event_chunk();
   write_manifest(complete);
   if (!route_path_.empty()) {
     std::fprintf(stderr,

@@ -32,8 +32,9 @@ SUPERCOMBO_REPLAY_NV12=/root/supercombo_k230/replay_120.scnv12 \
 
 ## Recording format
 
-`k230_recordd` writes `events.bin` per route with an 8-byte `K230LOG1` magic, a
-version word, and fixed 16-byte record headers. The current version is `2`.
+`k230_recordd` writes the event log as 60 s chunks in `events/NNN.bin`, each
+starting with an 8-byte `K230LOG1` magic, a version word, and fixed 16-byte
+record headers. The current version is `3`.
 
 | Record type | Payload |
 | --- | ---: |
@@ -43,7 +44,10 @@ version word, and fixed 16-byte record headers. The current version is `2`.
 | `PandaState` | 96 B |
 
 Version 1 recordings are not compatible: `ModelState` was 4384 B before the
-unused lateral draft fields were removed.
+unused lateral draft fields were removed. Version 2 kept a single route-level
+`events.bin`; CAN logging alone (~0.5 MB/s) filled the 988 MB tmpfs staging in
+about 30 minutes on long drives and silently killed the rest of the recording,
+which is why version 3 rotates event chunks alongside video segments.
 
 ## Related documents
 

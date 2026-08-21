@@ -3,8 +3,12 @@
 #include <cstdint>
 
 /* v2: K230ModelState에서 소비자가 없던 lateral_target/lateral_plan(308 B)을
- * 제거해 페이로드가 4384 -> 4076 B로 줄었다. v1 녹화와 호환되지 않는다. */
-constexpr uint32_t kK230RecordingVersion = 2;
+ * 제거해 페이로드가 4384 -> 4076 B로 줄었다. v1 녹화와 호환되지 않는다.
+ * v3: 이벤트 로그를 route 단위 events.bin 하나에서 60초 청크 events/NNN.bin
+ * 으로 분할했다. route 단위 파일은 CAN 로깅(~0.5 MB/s)만으로 30분이면 988 MB
+ * tmpfs 스테이징을 가득 채워 남은 주행의 기록을 전부 죽였다. 레코드/헤더
+ * 레이아웃은 v2와 동일하고 각 청크가 K230EventFileHeader로 시작한다. */
+constexpr uint32_t kK230RecordingVersion = 3;
 
 enum class K230RecordType : uint16_t {
   CanRx = 1,

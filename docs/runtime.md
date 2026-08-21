@@ -89,7 +89,8 @@ minimal passive overlay subscriber.
   crop to 1280x720 when converting for playback, e.g.
   `-vf crop=1280:720:0:0`
 - records dedicated non-blocking CAN RX/TX copies plus model, control, and Panda
-  state in `events.bin`, and snapshots all runtime JSON parameters
+  state in 60 s `events/NNN.bin` chunks, and snapshots all runtime JSON
+  parameters
 - runs at nice level 15 so logging cannot take priority over model or control
 
 ### `k230_pandad` (optional)

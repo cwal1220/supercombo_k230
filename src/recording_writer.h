@@ -70,6 +70,8 @@ private:
   bool start_route(uint64_t now_ns);
   bool open_segment(const K230RoadAiFrame &frame);
   void close_segment();
+  bool open_event_chunk(uint64_t now_ns);
+  void close_event_chunk();
   void close_route(bool complete);
   void write_manifest(bool complete) const;
   void snapshot_params() const;
@@ -121,9 +123,12 @@ private:
   FILE *video_file_ = nullptr;
   FILE *index_file_ = nullptr;
   std::vector<uint8_t> codec_config_;
+  uint64_t route_start_ns_ = 0;
   uint64_t segment_start_ns_ = 0;
+  uint64_t event_chunk_start_ns_ = 0;
   uint64_t next_storage_check_ns_ = 0;
   uint64_t video_offset_ = 0;
   uint64_t event_records_ = 0;
   uint32_t segment_index_ = 0;
+  uint32_t event_chunk_index_ = 0;
 };
