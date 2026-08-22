@@ -16,10 +16,10 @@ constexpr float kDefaultModelFx = 910.0f;
 constexpr float kDefaultModelFy = 910.0f;
 constexpr float kDefaultModelCx = 256.0f;
 constexpr float kDefaultModelCy = 47.6f;
-constexpr float kK230CameraFx = 1625.7416788144435f;
-constexpr float kK230CameraFy = 1585.9830269782024f;
-constexpr float kK230CameraCx = 946.13450988811394f;
-constexpr float kK230CameraCy = 537.34063862123787f;
+constexpr float kK230CameraFx = 1583.3981f;
+constexpr float kK230CameraFy = 1583.7622f;
+constexpr float kK230CameraCx = 954.9441f;
+constexpr float kK230CameraCy = 545.1774f;
 constexpr float default_input_warp_fx(unsigned source_width)
 {
     return kK230CameraFx * static_cast<float>(source_width) /

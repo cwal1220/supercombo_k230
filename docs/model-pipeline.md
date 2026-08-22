@@ -22,10 +22,19 @@ created.
 
 ## Intrinsics
 
-The source intrinsics are scaled from the calibrated K230 camera matrix, so the
-default `1280x720` path uses `fx=1083.83`, `fy=1057.32`, `cx=630.76`, and
-`cy=358.23`. `SUPERCOMBO_INPUT_WARP_FX/FY/CX/CY` can override these values for a
-separately measured camera pipeline.
+The source intrinsics are scaled from the measured `1920x1080` K230 camera
+matrix in `assets/calibration/intrinsics_20260822.json`, so the default
+`1280x720` path uses `fx=1055.60`, `fy=1055.84`, `cx=636.63`, and `cy=363.45`.
+`SUPERCOMBO_INPUT_WARP_FX/FY/CX/CY` can override these values for a separately
+measured camera pipeline.
+
+That matrix comes from a 23-view checkerboard solve (0.36 px reprojection RMS,
+bootstrap sigma 4.4 px on `fx`). It replaces an earlier matrix whose `fx/fy`
+ratio was 1.025; this sensor has square pixels, so the 2.5% anisotropy was
+measurement error rather than a real focal difference, and it was almost all in
+`fx` (-2.60%, against -0.14% for `fy`). The warp is a pinhole homography like
+openpilot's, so the measured lens distortion coefficients are recorded in the
+JSON but not applied.
 
 The medmodel transform feeds the current and previous frames into `input_imgs`;
 the wider C2 sbigmodel transform independently feeds its current and previous
