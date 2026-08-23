@@ -158,6 +158,15 @@ public:
   }
 
   double mean_near_probability() const { return (left_prob_ + right_prob_) * 0.5; }
+  // 로그/분석용 관측값 노출. lane_path()가 쓰는 확률은 지역 사본이라 원값이다.
+  double near_left_y() const { return left_y_[0]; }
+  double near_right_y() const { return right_y_[0]; }
+  double lane_width() const { return lane_width_; }
+  double left_prob() const { return left_prob_; }
+  double right_prob() const { return right_prob_; }
+  double left_std() const { return left_std_; }
+  double right_std() const { return right_std_; }
+  double d_prob() const { return d_prob_; }
   void scale_near_probability(double scale) {
     left_prob_ *= scale;
     right_prob_ *= scale;
@@ -396,6 +405,15 @@ struct OpenpilotLateralPlanner::Impl {
     target.capture_timestamp_ns = model.capture_timestamp_ns;
     target.mpc_solution_valid = invalid_count < 2;
     target.laneless_mode = use_model_path;
+    target.lane_valid = true;
+    target.lane_left_y = static_cast<float>(lane_planner.near_left_y());
+    target.lane_right_y = static_cast<float>(lane_planner.near_right_y());
+    target.lane_width = static_cast<float>(lane_planner.lane_width());
+    target.lane_left_prob = static_cast<float>(lane_planner.left_prob());
+    target.lane_right_prob = static_cast<float>(lane_planner.right_prob());
+    target.lane_left_std = static_cast<float>(lane_planner.left_std());
+    target.lane_right_std = static_cast<float>(lane_planner.right_std());
+    target.lane_d_prob = static_cast<float>(lane_planner.d_prob());
     target.lookahead_x = static_cast<float>(std::max(0.0f, v_ego) * path_t[1]);
     target.target_y = static_cast<float>(y_pts[1]);
     target.heading = static_cast<float>(mpc.states()[0][2]);

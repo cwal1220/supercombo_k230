@@ -775,6 +775,8 @@ int main() {
                      "torque=%d/%d driver=%d angle=%.2f "
                      "curve=%.6f/%.6f curveVm=%.6f curveYaw=%.6f "
                      "error=%.6f pathY=%.3f "
+                     "laneC=%.3f laneW=%.2f lane=%.2f/%.2f "
+                     "lprob=%.2f/%.2f/%.2f lstd=%.2f/%.2f "
                      "speed=%.1f cruise=%u max=%.1f cmd=%.1f target=%.1f "
                      "lead=%u/%.1f/%.1f button=%d pedal=%d/%d block=%s\n",
                      ticks / window_s, work_sum_us / std::max(1U, ticks), work_max_us,
@@ -794,6 +796,16 @@ int main() {
                      last_result.actual_curvature_vm,
                      last_result.actual_curvature_yaw,
                      last_result.curvature_error, lateral_target.target_y,
+                     0.5 * (lateral_target.lane_left_y +
+                            lateral_target.lane_right_y),
+                     lateral_target.lane_width,
+                     lateral_target.lane_left_y,
+                     lateral_target.lane_right_y,
+                     lateral_target.lane_left_prob,
+                     lateral_target.lane_right_prob,
+                     lateral_target.lane_d_prob,
+                     lateral_target.lane_left_std,
+                     lateral_target.lane_right_std,
                      last_result.speed_kph,
                      adaptive_cruise.active ? 1U : 0U,
                      adaptive_cruise.maximum_speed_kph,

@@ -26,6 +26,18 @@ struct LateralTarget {
     float curvatures[kLateralControlN] = {};
     float curvature_rates[kLateralControlN] = {};
     float d_path_points[kLateralControlN] = {};
+    /* 차선 관측값. 제어에 쓰지 않고 로그/분석 전용이다. 차가 차선 중앙에서
+     * 얼마나 벗어났는지는 pathY로 알 수 없어 이 값이 필요하다. 모델 좌표계
+     * (+y = 오른쪽), camera_offset 적용 후. */
+    bool lane_valid = false;
+    float lane_left_y = 0.0f;
+    float lane_right_y = 0.0f;
+    float lane_width = 0.0f;
+    float lane_left_prob = 0.0f;
+    float lane_right_prob = 0.0f;
+    float lane_left_std = 0.0f;
+    float lane_right_std = 0.0f;
+    float lane_d_prob = 0.0f;
 };
 
 #endif
