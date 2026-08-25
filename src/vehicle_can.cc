@@ -21,10 +21,10 @@ constexpr float kMinimumCruiseSpeedKph = 30.0f;
 constexpr float kMinimumCruiseSpeedMph = 20.0f;
 
 // openpilot K7 parser와 같은 bus에서 온 frame만 차량 상태에 반영한다.
-bool expected_openpilot_k7_bus(uint32_t address, uint8_t bus) {
+bool expected_openpilot_bus(uint32_t address, uint8_t bus) {
   switch (address) {
     case kHyundaiLkas11Address:
-      return bus == kK7CameraBus;
+      return bus == kCameraBus;
     case kHyundaiClu11Address:
     case kHyundaiEsp12Address:
     case kHyundaiWhlSpd11Address:
@@ -38,11 +38,11 @@ bool expected_openpilot_k7_bus(uint32_t address, uint8_t bus) {
     case kHyundaiCgw2Address:
     case kHyundaiLca11Address:
     case kHyundaiTpms11Address:
-      return bus == kK7PowertrainBus;
+      return bus == kPowertrainBus;
     case kHyundaiMdps12Address:
-      return bus == kK7MdpsBus;
+      return bus == kMdpsBus;
     case kHyundaiSas11Address:
-      return bus == kK7PowertrainBus || bus == kK7MdpsBus;
+      return bus == kPowertrainBus || bus == kMdpsBus;
     default:
       return true;
   }
@@ -66,7 +66,7 @@ float current_cluster_speed_kph(const HyundaiClu11Values &clu) {
 
 // K7 HEV에는 유효한 SCC/LVR 목표 속도가 없고 E_EMS11 후보는 엔진 회전수와
 // 비트가 겹치므로 CLU11 버튼과 클러스터 속도로 고정형 크루즈 상태를 추정한다.
-void update_fixed_cruise_estimate(K7VehicleCanState *state,
+void update_fixed_cruise_estimate(VehicleCanState *state,
                                   const HyundaiClu11Values &clu) {
   const bool main_pressed =
       clu.cruise_sw_main != 0 && state->clu_main_button == 0;
@@ -167,7 +167,7 @@ WhlSpd11Values decode_whl_spd11(const std::array<uint8_t, 8> &data) {
 Scc11Values decode_scc11(const std::array<uint8_t, 8> &data) {
   Scc11Values values;
   values.main_mode = get_signal_le(data.data(), 0, 1) != 0;
-  values.set_speed = static_cast<float>(get_signal_le(data.data(), 8, 8));
+  values.set_speed_raw = static_cast<float>(get_signal_le(data.data(), 8, 8));
   values.object_valid = get_signal_le(data.data(), 22, 2) != 0;
   values.object_distance_m =
       static_cast<float>(get_signal_le(data.data(), 33, 11)) * 0.1f;
@@ -255,12 +255,12 @@ Tpms11Values decode_tpms11(const std::array<uint8_t, 8> &data) {
   return values;
 }
 
-void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
-                                 const std::array<uint8_t, 8> &data,
-                                 uint8_t length, uint8_t bus,
-                                 double now_s) {
+void update_vehicle_can_state(VehicleCanState *state, uint32_t address,
+                              const std::array<uint8_t, 8> &data,
+                              uint8_t length, uint8_t bus,
+                              double now_s) {
   if (!state) return;
-  if (!expected_openpilot_k7_bus(address, bus)) return;
+  if (!expected_openpilot_bus(address, bus)) return;
 
   if (address == kHyundaiLkas11Address && length >= 8) {
     state->lkas11_seed = data;
@@ -271,7 +271,7 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
     state->has_clu11_seed = true;
     const HyundaiClu11Values clu = decode_clu11(state->clu11_seed);
     update_fixed_cruise_estimate(state, clu);
-    state->cluster_speed = clu.speed + clu.speed_decimal;
+    state->cluster_speed_raw = clu.speed + clu.speed_decimal;
     state->speed_unit_mph = clu.speed_unit_mph;
     state->clu_alive_count = clu.alive_count;
     state->clu11_time_s = now_s;
@@ -306,7 +306,7 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
   } else if (address == kHyundaiScc11Address && length >= 8) {
     const Scc11Values scc = decode_scc11(data);
     state->cruise_main = scc.main_mode;
-    state->cruise_set_speed = scc.set_speed;
+    state->cruise_set_speed_raw = scc.set_speed_raw;
     state->radar_lead_valid = scc.object_valid;
     state->radar_lead_distance_m = scc.object_distance_m;
     state->radar_lead_relative_speed_mps = scc.object_relative_speed_mps;
@@ -377,8 +377,8 @@ void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
   }
 }
 
-bool k7_vehicle_state_fresh(const K7VehicleCanState &state, double now_s,
-                            double timeout_s) {
+bool vehicle_state_fresh(const VehicleCanState &state, double now_s,
+                         double timeout_s) {
   return signal_time_fresh(state.lkas11_time_s, now_s, timeout_s) &&
          signal_time_fresh(state.clu11_time_s, now_s, timeout_s) &&
          signal_time_fresh(state.sas11_time_s, now_s, timeout_s) &&
@@ -391,26 +391,26 @@ bool k7_vehicle_state_fresh(const K7VehicleCanState &state, double now_s,
          signal_time_fresh(state.cgw2_time_s, now_s, timeout_s);
 }
 
-bool k7_seed_frames_ready(const K7VehicleCanState &state) {
+bool seed_frames_ready(const VehicleCanState &state) {
   return state.has_lkas11_seed && state.has_clu11_seed && state.has_mdps12_seed;
 }
 
-bool k7_tpms_state_fresh(const K7VehicleCanState &state, double now_s,
-                         double timeout_s) {
+bool tpms_state_fresh(const VehicleCanState &state, double now_s,
+                      double timeout_s) {
   return signal_time_fresh(state.tpms11_time_s, now_s, timeout_s);
 }
 
-float k7_cruise_set_speed_kph(const K7VehicleCanState &state) {
-  if (state.cruise_set_speed > 0.0f && state.cruise_set_speed < 255.0f) {
-    return cluster_speed_to_kph(state.cruise_set_speed, state.speed_unit_mph);
+float cruise_set_speed_kph(const VehicleCanState &state) {
+  if (state.cruise_set_speed_raw > 0.0f && state.cruise_set_speed_raw < 255.0f) {
+    return cluster_speed_to_kph(state.cruise_set_speed_raw, state.speed_unit_mph);
   }
   return state.estimated_cruise_set_speed_valid
       ? state.estimated_cruise_set_speed_kph
       : 0.0f;
 }
 
-float k7_vehicle_speed_kph(const K7VehicleCanState &state, double now_s,
-                           double timeout_s) {
+float vehicle_speed_kph(const VehicleCanState &state, double now_s,
+                        double timeout_s) {
   const bool wheel_speed_fresh =
       signal_time_fresh(state.whl_spd11_time_s, now_s, timeout_s);
   const float wheel_speeds[] = {
@@ -431,7 +431,7 @@ float k7_vehicle_speed_kph(const K7VehicleCanState &state, double now_s,
   }
 
   const float unit_scale = state.speed_unit_mph ? kMphToKph : 1.0f;
-  if (!std::isfinite(state.cluster_speed) || state.cluster_speed < 0.0f)
+  if (!std::isfinite(state.cluster_speed_raw) || state.cluster_speed_raw < 0.0f)
     return 0.0f;
-  return state.cluster_speed * unit_scale;
+  return state.cluster_speed_raw * unit_scale;
 }

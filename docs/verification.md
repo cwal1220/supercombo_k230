@@ -50,7 +50,7 @@ The same benchmark build produces self-checking binaries that need no board:
 
 | Target | Covers |
 | --- | --- |
-| `check_k7_control_replay` | K7 engage gates, torque limits, CAN frame build |
+| `check_control_replay` | K7 engage gates, torque limits, CAN frame build |
 | `check_departure_alert` | departure alert state machine |
 | `check_adaptive_cruise` | vision cruise button pacing and limits |
 | `check_model_output_parser` | supercombo raw-output layout |

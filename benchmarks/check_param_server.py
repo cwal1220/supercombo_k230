@@ -151,9 +151,9 @@ class ParamStoreTest(unittest.TestCase):
     def test_repository_params_have_complete_ui_metadata(self):
         root = Path(__file__).resolve().parents[1]
         for group, filename in (
-            ("steering", "yg_steering.json"),
-            ("driving", "yg_driving.json"),
-            ("adaptive_cruise", "yg_adaptive_cruise.json"),
+            ("steering", "steering.json"),
+            ("driving", "driving.json"),
+            ("adaptive_cruise", "adaptive_cruise.json"),
             ("recording", "recording.json"),
             ("display", "display.json"),
         ):

@@ -45,7 +45,7 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 결과는 inversed polarity의 duty cycle로 변환하며, 설정은 웹의 `디스플레이`
 메뉴에서 즉시 적용되고 재부팅 후에도 복원된다.
 
-## yg_driving.json
+## driving.json
 
 ### 상태와 CAN
 
@@ -68,12 +68,10 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 
 | 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
 |---|---:|---|---|
-| `max_lateral_jerk` | 5.0 | m/s^3 / 0.1~20 | 목표 곡률의 프레임 간 변화량을 속도에 맞춰 제한한다. 작게 설정하면 조향 변화가 부드러워지지만 추종이 느려질 수 있다. |
-| `max_lateral_accel` | 3.3 | m/s^2 / 0.5~5 | 속도별 최대 목표 곡률을 횡가속도 기준으로 제한한다. |
 
 최종 목표 곡률의 절대 상한은 K7 고정값 `0.3 1/m`로 적용되며 설정 항목으로 노출하지 않는다.
 
-## yg_adaptive_cruise.json
+## adaptive_cruise.json
 
 이 기능은 비전 모델의 선행차 거리와 상대속도를 이용해 순정 고정형 크루즈의
 `SET-`와 `RES+` 버튼만 대신 누른다. 스로틀이나 브레이크를 직접 제어하지 않으므로
@@ -94,7 +92,7 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 | `command_interval_s` | 1.0 | s / 0.5~5.0 | 연속 버튼 펄스를 시작할 수 있는 최소 간격이다. |
 | `button_pulse_frames` | 5 | 100Hz frame / 1~10 | 한 번의 버튼 조작을 차량에 전달하는 연속 CLU11 프레임 수다. K7 검증 전에는 기본값을 유지한다. |
 
-## yg_steering.json
+## steering.json
 
 ### 기본 토크 제한
 
@@ -113,11 +111,6 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 
 | 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
 |---|---:|---|---|
-| `variable_steer_max` | false | bool | `true`면 30~100 km/h 구간에서 `steer_max`에서 `steer_max_base`로 보간한다. 현재는 base 값을 고정 사용한다. |
-| `variable_steer_delta` | false | bool | `true`면 속도에 따라 delta 값을 primary 값에서 base 값으로 보간한다. |
-| `steer_max_base` | 384 | CAN torque / 0~384 | 일반 주행에서 실제 사용하는 최대 토크다. |
-| `steer_delta_up_base` | 3 | CAN torque/frame / 0~20 | 일반 주행의 프레임당 토크 증가 한도다. 100Hz 기준으로 적용된다. |
-| `steer_delta_down_base` | 7 | CAN torque/frame / 0~30 | 일반 주행의 프레임당 토크 감소 한도다. 100Hz 기준으로 적용된다. |
 
 ### OpenPilot 토크 컨트롤러
 
@@ -134,7 +127,6 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 | `torque_ki_raw` | 1 | raw / 0~100 | 횡가속도 오차의 적분 이득이다. |
 | `torque_friction_raw` | 100 | 0.001 m/s^2 / 0~300 | 조향계 마찰을 넘기 위한 feed-forward 보상값이다. RK K7과 같은 0.1이다. |
 | `torque_use_angle` | true | bool | `true`면 조향각 기반 실제 곡률을 사용한다. `false`면 유효한 ESP yaw-rate가 필요하며 두 값을 속도에 따라 혼합한다. |
-| `torque_angle_deadzone_raw` | 0 | 0.1 degree / 0~50 | 조향각 기반 오차 deadzone이다. RK K7 기본값과 같이 비활성화했다. `torque_use_angle=true`일 때 적용된다. |
 | `torque_output_sign` | -1 | 부호 / -1 또는 1 | 토크 출력 방향이다. K7 YG HEV에서는 -1을 사용한다. 잘못 바꾸면 반대 방향으로 조향할 수 있다. |
 
 ### Smooth steer
@@ -159,13 +151,13 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 | `steer_actuator_delay` | 0.46 | second / 0.01~1.0 | 현재 시점의 목표 곡률을 계산할 때 보상하는 조향 액추에이터 지연이다. 값을 키우면 MPC 경로를 조금 더 앞에서 읽어 커브 진입을 선행하지만, 과도하면 조향이 빨라지거나 오버슈트할 수 있다. |
 | `angle_offset_deg` | 0.0 | degree / -10~10 | 조향각 센서의 직진 오프셋이다. 실제 곡률 추정 전에 센서 각도에서 뺀다. |
 | `roll_rad` | 0.0 | radian / -0.2~0.2 | 도로 또는 차량 roll에 의한 횡가속도와 곡률 보정값이다. |
+| `torque_lat_accel_offset` | 0.0 | m/s^2 / -1.0~1.0 | 장착 롤 오차 등이 만드는 상수 횡가속 편향을 feed-forward에서 뺀다(openpilot latAccelOffset). 값은 `tools/control/fit_lateral_params.py fit`으로 주행 로그에서 실측한다. 양수 = 차가 오른쪽으로 쏠릴 때 키우는 방향(+y=오른쪽 관례, openpilot 문서와 반대 어휘). fit 출력을 그대로 넣는다. |
 | `mass_kg` | 1816.0 | kg / 1000~2600 | 차량 모델과 타이어 횡강성 계산에 사용하는 차량 질량이다. |
 | `wheelbase_m` | 2.855 | m / 2.0~3.5 | 차량 축거다. |
 | `center_to_front_ratio` | 0.4 | wheelbase ratio / 0.2~0.7 | 무게중심에서 전축까지 거리의 축거 대비 비율이다. |
 | `steer_ratio_rear` | 0.0 | ratio / -0.5~0.5 | 후륜 조향 보정 계수다. K7은 후륜 조향이 없으므로 0을 사용한다. |
 | `camera_offset_m` | 0.0 | m / -1~1 | 차량 중심에 대한 카메라 위치를 lane line에 보정한다. 양수는 목표 차선 중심을 우측, 음수는 좌측으로 이동한다. 현재는 최종 경로 오프셋만 사용하므로 0을 유지한다. |
 | `path_offset_m` | 0.09 | m / -1~1 | 차선/랜리스 선택이 끝난 최종 주행 경로 전체에 적용하는 사용자 횡방향 보정이다. 양수는 목표 주행 위치를 우측, 음수는 좌측으로 이동한다. 현재 K7 실차 기준값은 `+0.09 m`다. |
-| `invert_steer` | false | bool | 목표 곡률 부호를 반전한다. K7에서는 사용하지 않는다. |
 | `min_steer_speed_mps` | 0.3 | m/s / 0~5 | 이 속도 미만에서는 토크 컨트롤러 출력을 0으로 만든다. |
 
 ### 조향각 및 LKAS fault 보호
@@ -176,10 +168,8 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 | `avoid_lkas_fault_enabled` | true | bool | 큰 조향각이 지속될 때 토크는 유지하고 steer request만 잠시 끊는 RK openpilot 방식의 fault 회피 로직을 사용한다. |
 | `avoid_lkas_fault_max_angle_deg` | 85.0 | degree / 1~180 | fault 회피 카운터를 증가시키는 절대 조향각 기준이다. |
 | `avoid_lkas_fault_max_frames` | 89 | frame / 0~300 | 85도 이상 조향각이 지속될 때 허용하는 프레임 수다. 이후 2프레임 동안 request를 끊고 다시 허용한다. |
-| `avoid_lkas_fault_beyond` | false | bool | fault 회피가 켜진 저속·큰 조향각 조건에서 primary 토크 제한을 사용하는 확장 옵션이다. |
 | `no_smart_mdps` | false | bool | `true`면 `min_steer_speed_mps` 미만에서 제어 자체를 차단한다. |
 | `turn_steering_disable` | false | bool | `true`면 `lane_change_min_speed_kph` 미만에서 한쪽 방향지시등을 켰을 때 지정 프레임 동안 조향을 차단한다. |
-| `ldws_car_fix` | false | bool | LKAS11 생성 시 차량별 LDWS 보정 플래그를 적용한다. |
 
 ## calibration.json
 

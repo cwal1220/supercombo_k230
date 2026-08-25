@@ -2,7 +2,8 @@
 #include "hyundai_can.h"
 #include "k230_ipc.h"
 #include "lateral_controller.h"
-#include "path.h"
+#include "lateral_path.h"
+#include "openpilot_torque_controller.h"
 #include "vehicle_can.h"
 
 #include <algorithm>
@@ -54,8 +55,8 @@ LateralTarget replay_target() {
   return target;
 }
 
-K7VehicleCanState ready_vehicle(double timestamp_s = 1.0) {
-  K7VehicleCanState vehicle;
+VehicleCanState ready_vehicle(double timestamp_s = 1.0) {
+  VehicleCanState vehicle;
   vehicle.has_lkas11_seed = true;
   vehicle.has_clu11_seed = true;
   vehicle.has_mdps12_seed = true;
@@ -116,7 +117,7 @@ void verify_mdps_speed_spoof() {
   clu.speed_decimal = 0.375f;
   HyundaiLkasCommand command;
   command.steer_req = true;
-  const auto frames = build_k7_hev_lateral_can_frames(
+  const auto frames = build_lateral_can_frames(
       lkas, clu, command, config, true, 20.0f, false, 1);
   require(frames.size() == 3, "low-speed frame schedule");
   std::array<uint8_t, 4> bytes = {};
@@ -130,7 +131,7 @@ void verify_mdps_speed_spoof() {
           "MDPS CLU11 decimal preservation");
 
   config.mdps_speed_spoof_kph = 72.0f;
-  const auto custom_frames = build_k7_hev_lateral_can_frames(
+  const auto custom_frames = build_lateral_can_frames(
       lkas, clu, command, config, true, 20.0f, false, 1);
   std::copy_n(custom_frames[2].data.begin(), bytes.size(), bytes.begin());
   require(std::fabs(decode_clu11(bytes).speed - 72.0f) < 0.001f,
@@ -145,23 +146,23 @@ void verify_lca11() {
   require(decoded.left_blindspot && decoded.right_blindspot,
           "LCA11 blind-spot decoding");
 
-  K7VehicleCanState vehicle;
-  update_k7_vehicle_can_state(&vehicle, kHyundaiLca11Address, bytes,
-                              bytes.size(), kK7PowertrainBus, 1.0);
+  VehicleCanState vehicle;
+  update_vehicle_can_state(&vehicle, kHyundaiLca11Address, bytes,
+                           bytes.size(), kPowertrainBus, 1.0);
   require(vehicle.left_blindspot && vehicle.right_blindspot,
           "LCA11 vehicle-state update");
 }
 
 void verify_whl_spd11() {
   std::array<uint8_t, 8> bytes{};
-  const auto set_speed = [&bytes](int start_bit, float speed_kph) {
+  const auto set_speed_raw = [&bytes](int start_bit, float speed_kph) {
     set_signal_le(&bytes, start_bit, 14,
                   static_cast<uint32_t>(std::lround(speed_kph / 0.03125f)));
   };
-  set_speed(0, 40.0f);
-  set_speed(16, 41.0f);
-  set_speed(32, 39.0f);
-  set_speed(48, 40.5f);
+  set_speed_raw(0, 40.0f);
+  set_speed_raw(16, 41.0f);
+  set_speed_raw(32, 39.0f);
+  set_speed_raw(48, 40.5f);
 
   const WhlSpd11Values decoded = decode_whl_spd11(bytes);
   require(std::fabs(decoded.speed_fl_kph - 40.0f) < 0.001f &&
@@ -170,14 +171,14 @@ void verify_whl_spd11() {
               std::fabs(decoded.speed_rr_kph - 40.5f) < 0.001f,
           "WHL_SPD11 wheel speed decoding");
 
-  K7VehicleCanState vehicle;
-  vehicle.cluster_speed = 72.0f;
-  update_k7_vehicle_can_state(&vehicle, kHyundaiWhlSpd11Address, bytes,
-                              bytes.size(), kK7PowertrainBus, 1.0);
+  VehicleCanState vehicle;
+  vehicle.cluster_speed_raw = 72.0f;
+  update_vehicle_can_state(&vehicle, kHyundaiWhlSpd11Address, bytes,
+                           bytes.size(), kPowertrainBus, 1.0);
   require(vehicle.whl_spd11_time_s == 1.0 &&
-              std::fabs(k7_vehicle_speed_kph(vehicle, 1.2) - 40.125f) < 0.001f,
+              std::fabs(vehicle_speed_kph(vehicle, 1.2) - 40.125f) < 0.001f,
           "WHL_SPD11 vehicle speed average");
-  require(std::fabs(k7_vehicle_speed_kph(vehicle, 1.6) - 72.0f) < 0.001f,
+  require(std::fabs(vehicle_speed_kph(vehicle, 1.6) - 72.0f) < 0.001f,
           "stale WHL_SPD11 falls back to CLU speed");
 }
 
@@ -198,18 +199,18 @@ void verify_tpms11() {
           "TPMS11 pressure decoding");
 
   bytes[0] |= 1U << 4;
-  K7VehicleCanState vehicle;
-  update_k7_vehicle_can_state(&vehicle, kHyundaiTpms11Address, bytes, 6,
-                              kK7PowertrainBus, 1.0);
-  require(k7_tpms_state_fresh(vehicle, 2.0) && vehicle.tpms_warning,
+  VehicleCanState vehicle;
+  update_vehicle_can_state(&vehicle, kHyundaiTpms11Address, bytes, 6,
+                           kPowertrainBus, 1.0);
+  require(tpms_state_fresh(vehicle, 2.0) && vehicle.tpms_warning,
           "TPMS11 vehicle-state update");
-  require(!k7_tpms_state_fresh(vehicle, 7.0),
+  require(!tpms_state_fresh(vehicle, 7.0),
           "TPMS11 freshness timeout");
 
   bytes[2] = 0xff;
-  update_k7_vehicle_can_state(&vehicle, kHyundaiTpms11Address, bytes, 6,
-                              kK7PowertrainBus, 8.0);
-  require(k7_tpms_state_fresh(vehicle, 8.0) &&
+  update_vehicle_can_state(&vehicle, kHyundaiTpms11Address, bytes, 6,
+                           kPowertrainBus, 8.0);
+  require(tpms_state_fresh(vehicle, 8.0) &&
               vehicle.tpms_pressure_fl == 0.0f &&
               vehicle.tpms_pressure_fr > 0.0f,
           "TPMS11 unavailable wheel pressure");
@@ -222,15 +223,15 @@ void verify_tcs15() {
   require(decoded.brake_hold && !decoded.esp_disabled,
           "TCS15 active Auto Hold decoding");
 
-  K7VehicleCanState vehicle;
-  update_k7_vehicle_can_state(&vehicle, kHyundaiTcs15Address, bytes,
-                              bytes.size(), kK7PowertrainBus, 1.0);
+  VehicleCanState vehicle;
+  update_vehicle_can_state(&vehicle, kHyundaiTcs15Address, bytes,
+                           bytes.size(), kPowertrainBus, 1.0);
   require(vehicle.brake_hold && vehicle.tcs15_time_s == 1.0,
           "TCS15 Auto Hold vehicle-state update");
 
   set_signal_le(&bytes, 29, 3, 3);
-  update_k7_vehicle_can_state(&vehicle, kHyundaiTcs15Address, bytes,
-                              bytes.size(), kK7PowertrainBus, 1.1);
+  update_vehicle_can_state(&vehicle, kHyundaiTcs15Address, bytes,
+                           bytes.size(), kPowertrainBus, 1.1);
   require(!vehicle.brake_hold, "TCS15 ready state is not active Auto Hold");
 }
 
@@ -241,9 +242,9 @@ void verify_tcs13_driver_override() {
   require(decoded.driver_override == 2,
           "TCS13 driver accelerator override decoding");
 
-  K7VehicleCanState vehicle;
-  update_k7_vehicle_can_state(&vehicle, kHyundaiTcs13Address, bytes,
-                              bytes.size(), kK7PowertrainBus, 1.0);
+  VehicleCanState vehicle;
+  update_vehicle_can_state(&vehicle, kHyundaiTcs13Address, bytes,
+                           bytes.size(), kPowertrainBus, 1.0);
   require(vehicle.driver_override == 2,
           "TCS13 driver accelerator override vehicle-state update");
 }
@@ -256,140 +257,140 @@ void verify_scc11() {
   set_signal_le(&bytes, 33, 11, 54);
   set_signal_le(&bytes, 44, 12, 1715);
   const Scc11Values decoded = decode_scc11(bytes);
-  require(decoded.main_mode && std::fabs(decoded.set_speed - 88.0f) < 0.001f &&
+  require(decoded.main_mode && std::fabs(decoded.set_speed_raw - 88.0f) < 0.001f &&
               decoded.object_valid &&
               std::fabs(decoded.object_distance_m - 5.4f) < 0.001f &&
               std::fabs(decoded.object_relative_speed_mps - 1.5f) < 0.001f,
           "SCC11 cruise state decoding");
 
-  K7VehicleCanState vehicle;
-  update_k7_vehicle_can_state(&vehicle, kHyundaiScc11Address, bytes,
-                              bytes.size(), kK7PowertrainBus, 1.0);
+  VehicleCanState vehicle;
+  update_vehicle_can_state(&vehicle, kHyundaiScc11Address, bytes,
+                           bytes.size(), kPowertrainBus, 1.0);
   require(vehicle.cruise_main &&
-              std::fabs(vehicle.cruise_set_speed - 88.0f) < 0.001f &&
+              std::fabs(vehicle.cruise_set_speed_raw - 88.0f) < 0.001f &&
               vehicle.radar_lead_valid &&
               std::fabs(vehicle.radar_lead_distance_m - 5.4f) < 0.001f &&
               std::fabs(vehicle.radar_lead_relative_speed_mps - 1.5f) < 0.001f,
           "SCC11 vehicle-state update");
-  require(std::fabs(k7_cruise_set_speed_kph(vehicle) - 88.0f) < 0.001f,
+  require(std::fabs(cruise_set_speed_kph(vehicle) - 88.0f) < 0.001f,
           "SCC11 metric set speed");
   vehicle.speed_unit_mph = true;
-  require(std::fabs(k7_cruise_set_speed_kph(vehicle) - 141.622272f) < 0.001f,
+  require(std::fabs(cruise_set_speed_kph(vehicle) - 141.622272f) < 0.001f,
           "SCC11 imperial set speed conversion");
 }
 
-void update_clu11(K7VehicleCanState *vehicle, float speed, int button,
+void update_clu11(VehicleCanState *vehicle, float speed, int button,
                   bool unit_mph, double now_s) {
   std::array<uint8_t, 8> bytes{};
   set_signal_le(&bytes, 0, 3, static_cast<uint32_t>(button));
   set_signal_le(&bytes, 8, 9,
                 static_cast<uint32_t>(std::lround(speed * 2.0f)));
   set_signal_le(&bytes, 17, 1, unit_mph ? 1U : 0U);
-  update_k7_vehicle_can_state(vehicle, kHyundaiClu11Address, bytes, 4,
-                              kK7PowertrainBus, now_s);
+  update_vehicle_can_state(vehicle, kHyundaiClu11Address, bytes, 4,
+                           kPowertrainBus, now_s);
 }
 
-void release_cruise_button(K7VehicleCanState *vehicle, float speed,
+void release_cruise_button(VehicleCanState *vehicle, float speed,
                            bool unit_mph, double now_s) {
   update_clu11(vehicle, speed, 0, unit_mph, now_s);
 }
 
 void verify_fixed_cruise_speed_estimate() {
-  K7VehicleCanState vehicle;
+  VehicleCanState vehicle;
   update_clu11(&vehicle, 64.0f, 2, false, 1.0);
   require(vehicle.cruise_active &&
-              std::fabs(k7_cruise_set_speed_kph(vehicle) - 64.0f) < 0.001f,
+              std::fabs(cruise_set_speed_kph(vehicle) - 64.0f) < 0.001f,
           "fixed cruise SET must latch cluster speed");
 
   release_cruise_button(&vehicle, 64.0f, false, 1.1);
   update_clu11(&vehicle, 64.0f, 1, false, 1.2);
-  require(std::fabs(k7_cruise_set_speed_kph(vehicle) - 66.0f) < 0.001f,
+  require(std::fabs(cruise_set_speed_kph(vehicle) - 66.0f) < 0.001f,
           "fixed cruise RES must increment active target");
   update_clu11(&vehicle, 64.0f, 1, false, 1.3);
-  require(std::fabs(k7_cruise_set_speed_kph(vehicle) - 66.0f) < 0.001f,
+  require(std::fabs(cruise_set_speed_kph(vehicle) - 66.0f) < 0.001f,
           "held cruise button must not repeat without release");
 
   release_cruise_button(&vehicle, 64.0f, false, 1.4);
   update_clu11(&vehicle, 64.0f, 2, false, 1.5);
-  require(std::fabs(k7_cruise_set_speed_kph(vehicle) - 64.0f) < 0.001f,
+  require(std::fabs(cruise_set_speed_kph(vehicle) - 64.0f) < 0.001f,
           "fixed cruise SET must decrement active target");
   release_cruise_button(&vehicle, 64.0f, false, 1.6);
   update_clu11(&vehicle, 64.0f, 4, false, 1.7);
   require(!vehicle.cruise_active &&
-              std::fabs(k7_cruise_set_speed_kph(vehicle) - 64.0f) < 0.001f,
+              std::fabs(cruise_set_speed_kph(vehicle) - 64.0f) < 0.001f,
           "fixed cruise CANCEL must preserve target");
   release_cruise_button(&vehicle, 70.0f, false, 1.8);
   update_clu11(&vehicle, 70.0f, 2, false, 1.9);
   require(vehicle.cruise_active &&
-              std::fabs(k7_cruise_set_speed_kph(vehicle) - 70.0f) < 0.001f,
+              std::fabs(cruise_set_speed_kph(vehicle) - 70.0f) < 0.001f,
           "fixed cruise SET after cancel must latch current speed");
 
   std::array<uint8_t, 8> tcs13{};
   set_signal_le(&tcs13, 55, 1, 1);
-  update_k7_vehicle_can_state(&vehicle, kHyundaiTcs13Address, tcs13,
-                              tcs13.size(), kK7PowertrainBus, 2.0);
+  update_vehicle_can_state(&vehicle, kHyundaiTcs13Address, tcs13,
+                           tcs13.size(), kPowertrainBus, 2.0);
   require(!vehicle.cruise_active, "brake must cancel estimated cruise activity");
   set_signal_le(&tcs13, 55, 1, 0);
-  update_k7_vehicle_can_state(&vehicle, kHyundaiTcs13Address, tcs13,
-                              tcs13.size(), kK7PowertrainBus, 2.1);
+  update_vehicle_can_state(&vehicle, kHyundaiTcs13Address, tcs13,
+                           tcs13.size(), kPowertrainBus, 2.1);
   release_cruise_button(&vehicle, 60.0f, false, 2.2);
   update_clu11(&vehicle, 60.0f, 1, false, 2.3);
   require(vehicle.cruise_active &&
-              std::fabs(k7_cruise_set_speed_kph(vehicle) - 70.0f) < 0.001f,
+              std::fabs(cruise_set_speed_kph(vehicle) - 70.0f) < 0.001f,
           "RES after brake must restore estimated target");
 
   release_cruise_button(&vehicle, 70.0f, false, 2.4);
   std::array<uint8_t, 8> clu_main{};
   set_signal_le(&clu_main, 3, 1, 1);
   set_signal_le(&clu_main, 8, 9, 140);
-  update_k7_vehicle_can_state(&vehicle, kHyundaiClu11Address, clu_main, 4,
-                              kK7PowertrainBus, 2.5);
+  update_vehicle_can_state(&vehicle, kHyundaiClu11Address, clu_main, 4,
+                           kPowertrainBus, 2.5);
   require(!vehicle.cruise_active &&
-              std::fabs(k7_cruise_set_speed_kph(vehicle) - 70.0f) < 0.001f,
+              std::fabs(cruise_set_speed_kph(vehicle) - 70.0f) < 0.001f,
           "cruise MAIN press must deactivate and preserve target");
 
-  K7VehicleCanState imperial;
+  VehicleCanState imperial;
   update_clu11(&imperial, 40.0f, 2, true, 1.0);
-  require(std::fabs(k7_cruise_set_speed_kph(imperial) - 64.37376f) < 0.001f,
+  require(std::fabs(cruise_set_speed_kph(imperial) - 64.37376f) < 0.001f,
           "fixed cruise imperial SET conversion");
   release_cruise_button(&imperial, 40.0f, true, 1.1);
   update_clu11(&imperial, 40.0f, 1, true, 1.2);
-  require(std::fabs(k7_cruise_set_speed_kph(imperial) - 67.592448f) < 0.001f,
+  require(std::fabs(cruise_set_speed_kph(imperial) - 67.592448f) < 0.001f,
           "fixed cruise imperial increment");
 
   std::array<uint8_t, 8> scc11{};
   scc11[1] = 88;
-  update_k7_vehicle_can_state(&imperial, kHyundaiScc11Address, scc11,
-                              scc11.size(), kK7PowertrainBus, 1.3);
-  require(std::fabs(k7_cruise_set_speed_kph(imperial) - 141.622272f) < 0.001f,
+  update_vehicle_can_state(&imperial, kHyundaiScc11Address, scc11,
+                           scc11.size(), kPowertrainBus, 1.3);
+  require(std::fabs(cruise_set_speed_kph(imperial) - 141.622272f) < 0.001f,
           "valid SCC set speed must override fixed cruise estimate");
 }
 
 void verify_mdps_fault_filter() {
-  K7VehicleCanState vehicle;
+  VehicleCanState vehicle;
   std::array<uint8_t, 8> bytes{};
   bytes[1] = (1U << 6) | (1U << 7);
-  update_k7_vehicle_can_state(&vehicle, kHyundaiMdps12Address, bytes,
-                              bytes.size(), kK7MdpsBus, 1.0);
+  update_vehicle_can_state(&vehicle, kHyundaiMdps12Address, bytes,
+                           bytes.size(), kMdpsBus, 1.0);
   require(vehicle.mdps_hard_fault && !vehicle.steering_fault,
           "transient MDPS ToiFlt/FailStat must match openpilot filtering");
 
   bytes[1] = 1U << 4;
   for (int frame = 0; frame < 100; ++frame) {
-    update_k7_vehicle_can_state(&vehicle, kHyundaiMdps12Address, bytes,
-                                bytes.size(), kK7MdpsBus, 1.0 + frame * 0.02);
+    update_vehicle_can_state(&vehicle, kHyundaiMdps12Address, bytes,
+                             bytes.size(), kMdpsBus, 1.0 + frame * 0.02);
   }
   require(!vehicle.steering_fault, "MDPS unavailable debounce threshold");
-  update_k7_vehicle_can_state(&vehicle, kHyundaiMdps12Address, bytes,
-                              bytes.size(), kK7MdpsBus, 3.0);
+  update_vehicle_can_state(&vehicle, kHyundaiMdps12Address, bytes,
+                           bytes.size(), kMdpsBus, 3.0);
   require(vehicle.steering_fault, "sustained MDPS unavailable fault");
 }
 
 void verify_braking_does_not_disengage() {
-  K7LateralControllerConfig config;
+  LateralControllerConfig config;
   config.force_engaged = true;
-  K7LateralController controller(config);
-  K7VehicleCanState vehicle;
+  LateralController controller(config);
+  VehicleCanState vehicle;
   vehicle.has_lkas11_seed = true;
   vehicle.has_clu11_seed = true;
   vehicle.has_mdps12_seed = true;
@@ -420,11 +421,11 @@ void verify_braking_does_not_disengage() {
 }
 
 void verify_large_angle_fault_avoidance() {
-  K7LateralControllerConfig config;
+  LateralControllerConfig config;
   config.force_engaged = true;
   config.driving_params.vehicle_state_timeout_ms = 2000;
-  K7LateralController controller(config);
-  K7VehicleCanState vehicle;
+  LateralController controller(config);
+  VehicleCanState vehicle;
   vehicle.has_lkas11_seed = true;
   vehicle.has_clu11_seed = true;
   vehicle.has_mdps12_seed = true;
@@ -440,7 +441,7 @@ void verify_large_angle_fault_avoidance() {
   vehicle.cgw1_time_s = 1.0;
   vehicle.cgw2_time_s = 1.0;
   vehicle.gear = 5;
-  vehicle.cluster_speed = 72.0f;
+  vehicle.cluster_speed_raw = 72.0f;
   vehicle.steering_angle_deg = 85.0f;
 
   for (int frame = 0; frame < 89; ++frame) {
@@ -475,14 +476,14 @@ void verify_large_angle_fault_avoidance() {
 }
 
 void verify_configured_steering_angle_limit() {
-  K7LateralControllerConfig config;
+  LateralControllerConfig config;
   config.force_engaged = true;
   config.driving_params.vehicle_state_timeout_ms = 2000;
   config.steering_params.avoid_lkas_fault_enabled = false;
   config.steering_params.max_steering_angle_deg = 80.0f;
-  K7LateralController controller(config);
-  K7VehicleCanState vehicle = ready_vehicle();
-  vehicle.cluster_speed = 72.0f;
+  LateralController controller(config);
+  VehicleCanState vehicle = ready_vehicle();
+  vehicle.cluster_speed_raw = 72.0f;
 
   vehicle.steering_angle_deg = 79.9f;
   const auto below_limit =
@@ -497,12 +498,12 @@ void verify_configured_steering_angle_limit() {
 }
 
 void verify_fixed_max_curvature() {
-  K7LateralControllerConfig config;
+  LateralControllerConfig config;
   config.force_engaged = true;
   config.driving_params.vehicle_state_timeout_ms = 2000;
-  K7LateralController controller(config);
-  K7VehicleCanState vehicle = ready_vehicle();
-  vehicle.cluster_speed = 3.6f;
+  LateralController controller(config);
+  VehicleCanState vehicle = ready_vehicle();
+  vehicle.cluster_speed_raw = 3.6f;
 
   LateralTarget target = replay_target();
   for (int i = 0; i < kLateralControlN; ++i) {
@@ -514,11 +515,78 @@ void verify_fixed_max_curvature() {
           "K7 maximum curvature must remain fixed at 0.3 1/m");
 }
 
+/* v0.11식 지연 보정: 요청 스텝 직후 delay 동안은 P가 과거 요청(0)과 현재
+ * 측정(0)을 비교해 오차가 없어야 하고, 토크는 FF만으로 나와야 한다. */
+void verify_delay_compensated_error() {
+  OpenpilotTorqueController torque;
+  SteeringParams params;
+  params.enabled = true;
+  params.steer_actuator_delay = 0.30f;
+  params.torque_use_angle = true;
+  const float v = 20.0f;
+
+  // 요청 0으로 버퍼를 채운다
+  for (int i = 0; i < 120; ++i)
+    torque.update(true, v, 0.0f, 0.0f, false, false, params);
+  require(std::fabs(torque.error()) < 1e-6f, "steady zero request has no error");
+
+  // 곡률 스텝. 조향각은 아직 0(차가 반응 전).
+  torque.update(true, v, 0.01f, 0.0f, false, false, params);
+  require(std::fabs(torque.error()) < 1e-4f,
+          "error must stay ~0 right after a step (delay compensation)");
+  require(torque.feedforward() > 1.0f,
+          "feedforward must carry the step immediately");
+
+  // delay(31프레임)를 넘겨도 차가 반응하지 않으면 그때 오차가 나타난다
+  for (int i = 0; i < 40; ++i)
+    torque.update(true, v, 0.01f, 0.0f, false, false, params);
+  require(torque.error() > 1.0f,
+          "unmet request must surface as error after the delay");
+}
+
+// inactive 동안에도 요청 버퍼가 갱신되어야 재engage 때 낡은 요청과 비교되지 않는다.
+void verify_reengage_has_no_stale_buffer_spike() {
+  OpenpilotTorqueController torque;
+  SteeringParams params;
+  params.enabled = true;
+  params.steer_actuator_delay = 0.30f;
+  params.torque_use_angle = true;
+  const float v = 20.0f;
+
+  // 커브 요청으로 버퍼를 채운 뒤 disengage
+  for (int i = 0; i < 120; ++i)
+    torque.update(true, v, 0.01f, 0.0f, false, false, params);
+  // inactive 동안 요청은 0으로 돌아간다 (직선 수동 주행)
+  for (int i = 0; i < 120; ++i)
+    torque.update(false, v, 0.0f, 0.0f, false, false, params);
+  // 직선에서 re-engage: 버퍼가 신선하면 오차 ~0, 얼었다면 큰 스파이크
+  torque.update(true, v, 0.0f, 0.0f, false, false, params);
+  require(std::fabs(torque.error()) < 1e-4f,
+          "re-engage must not compare against stale pre-disengage requests");
+}
+
+// latAccelOffset: 상수 편향이 FF에서 그대로 빠져야 한다.
+void verify_lat_accel_offset_shifts_feedforward() {
+  OpenpilotTorqueController a, b;
+  SteeringParams params;
+  params.enabled = true;
+  params.torque_use_angle = true;
+  SteeringParams offset_params = params;
+  offset_params.torque_lat_accel_offset = 0.25f;
+  for (int i = 0; i < 120; ++i) {
+    a.update(true, 20.0f, 0.002f, 1.0f, false, false, params);
+    b.update(true, 20.0f, 0.002f, 1.0f, false, false, offset_params);
+  }
+  const float diff = a.feedforward() - b.feedforward();
+  require(std::fabs(diff - 0.25f) < 1e-3f,
+          "lat_accel_offset must subtract from feedforward exactly");
+}
+
 void verify_runtime_params_apply_immediately() {
-  K7LateralControllerConfig config;
+  LateralControllerConfig config;
   config.force_engaged = true;
-  K7LateralController controller(config);
-  K7VehicleCanState vehicle;
+  LateralController controller(config);
+  VehicleCanState vehicle;
   vehicle.has_lkas11_seed = true;
   vehicle.has_clu11_seed = true;
   vehicle.has_mdps12_seed = true;
@@ -534,13 +602,13 @@ void verify_runtime_params_apply_immediately() {
   vehicle.cgw1_time_s = 1.0;
   vehicle.cgw2_time_s = 1.0;
   vehicle.gear = 5;
-  vehicle.cluster_speed = 72.0f;
+  vehicle.cluster_speed_raw = 72.0f;
 
   const auto active =
       controller.update(replay_path(), replay_target(), vehicle, 1.0, 0);
   require(active.active, "runtime parameter test must start active");
 
-  K7SteeringParams steering = config.steering_params;
+  SteeringParams steering = config.steering_params;
   steering.enabled = false;
   controller.update_params(steering, config.driving_params);
   const auto disabled =
@@ -557,10 +625,10 @@ void verify_runtime_params_apply_immediately() {
 }
 
 void verify_lkas_hud_state_stability() {
-  K7LateralControllerConfig config;
+  LateralControllerConfig config;
   config.force_engaged = true;
-  K7LateralController controller(config);
-  K7VehicleCanState vehicle;
+  LateralController controller(config);
+  VehicleCanState vehicle;
   vehicle.has_lkas11_seed = true;
   vehicle.has_clu11_seed = true;
   vehicle.has_mdps12_seed = true;
@@ -596,9 +664,9 @@ void verify_lkas_hud_state_stability() {
 }
 
 void verify_panda_gate_and_handoff() {
-  K7LateralControllerConfig config;
-  K7LateralController controller(config);
-  K7VehicleCanState vehicle;
+  LateralControllerConfig config;
+  LateralController controller(config);
+  VehicleCanState vehicle;
   vehicle.has_lkas11_seed = true;
   vehicle.has_clu11_seed = true;
   vehicle.has_mdps12_seed = true;
@@ -635,8 +703,8 @@ void verify_panda_gate_and_handoff() {
   require(zero_lkas.steer_torque == 0 && !zero_lkas.steer_req,
           "Panda controls off must generate zero LKAS");
 
-  K7LateralController panda_timeout_controller(config);
-  K7VehicleCanState timeout_vehicle = vehicle;
+  LateralController panda_timeout_controller(config);
+  VehicleCanState timeout_vehicle = vehicle;
   timeout_vehicle.clu_button = 2;
   panda_timeout_controller.update(replay_path(), replay_target(), timeout_vehicle,
                                   10.0, 0, true, true);
@@ -651,8 +719,8 @@ void verify_panda_gate_and_handoff() {
               panda_timeout.active_block == "panda_controls_off",
           "persistent Panda mismatch must eventually reject engage");
 
-  K7LateralController deferred_static_controller(config);
-  K7VehicleCanState deferred_vehicle = vehicle;
+  LateralController deferred_static_controller(config);
+  VehicleCanState deferred_vehicle = vehicle;
   deferred_vehicle.clu_button = 2;
   deferred_static_controller.update(replay_path(), replay_target(), deferred_vehicle,
                                     12.0, 0, true, true);
@@ -704,8 +772,8 @@ void verify_panda_gate_and_handoff() {
   require(decode_lkas11(reengaged.frames.front().data).msg_count == 10,
           "re-engage must seed LKAS counter from stock camera");
 
-  K7LateralController rejected_controller(config);
-  K7VehicleCanState rejected_vehicle = ready_vehicle();
+  LateralController rejected_controller(config);
+  VehicleCanState rejected_vehicle = ready_vehicle();
   rejected_vehicle.clu_button = 2;
   rejected_controller.update(replay_path(), replay_target(), rejected_vehicle,
                               1.0, 0, true, true);
@@ -732,7 +800,7 @@ void verify_model_path_adapter() {
     state.plan[i].y = -0.0004f * x * x;
   }
   const LateralPath path =
-      k7_path_from_model_state(state, 1100000000ULL, 250000000ULL);
+      path_from_model_state(state, 1100000000ULL, 250000000ULL);
   float lateral_20m = 0.0f;
   require(path.usable_for_steering && path.left_valid && path.right_valid,
           "model path adapter validity");
@@ -759,31 +827,34 @@ int main(int argc, char **argv) {
     verify_large_angle_fault_avoidance();
     verify_configured_steering_angle_limit();
     verify_fixed_max_curvature();
+    verify_delay_compensated_error();
+    verify_reengage_has_no_stale_buffer_spike();
+    verify_lat_accel_offset_shifts_feedforward();
     verify_runtime_params_apply_immediately();
     verify_lkas_hud_state_stability();
     verify_panda_gate_and_handoff();
     verify_model_path_adapter();
     if (argc == 1) {
-      std::puts("K7_CONTROL_SELF_TEST_OK");
+      std::puts("CONTROL_SELF_TEST_OK");
       return 0;
     }
-    if (argc != 2) throw std::runtime_error("usage: check_k7_control_replay [fixture.k230can]");
+    if (argc != 2) throw std::runtime_error("usage: check_control_replay [fixture.k230can]");
 
     CanReplaySource replay;
     replay.open(argv[1]);
-    K7LateralControllerConfig config;
+    LateralControllerConfig config;
     config.force_engaged = true;
     std::string error;
-    require(load_k7_steering_params_json("params/yg_steering.json",
+    require(load_steering_params_json("params/steering.json",
                                          &config.steering_params, &error),
             "load steering params");
-    require(load_k7_driving_params_json("params/yg_driving.json",
+    require(load_driving_params_json("params/driving.json",
                                         &config.driving_params, &error),
             "load driving params");
     require(std::fabs(config.driving_params.mdps_speed_spoof_kph - 60.0f) < 1e-6f,
             "driving params MDPS speed");
-    K7LateralController controller(config);
-    K7VehicleCanState vehicle;
+    LateralController controller(config);
+    VehicleCanState vehicle;
     const LateralPath path = replay_path();
     const LateralTarget target = replay_target();
     size_t rx_frames = 0;
@@ -805,11 +876,11 @@ int main(int argc, char **argv) {
       replay.poll(now_s, &frames);
       rx_frames += frames.size();
       for (const CanFrame &frame : frames) {
-        update_k7_vehicle_can_state(&vehicle, frame.address, frame.data,
-                                    frame.length, frame.bus, now_s);
+        update_vehicle_can_state(&vehicle, frame.address, frame.data,
+                                 frame.length, frame.bus, now_s);
       }
       const auto result = controller.update(path, target, vehicle, now_s, tick);
-      const float speed_kph = vehicle.cluster_speed *
+      const float speed_kph = vehicle.cluster_speed_raw *
           (vehicle.speed_unit_mph ? 1.609344f : 1.0f);
       const float expected_curvature = original_lag_adjusted_curvature(
           target, std::max(0.0f, speed_kph / 3.6f),
@@ -846,14 +917,14 @@ int main(int argc, char **argv) {
             "lag-adjusted curvature differs from openpilot reference");
 
     std::printf(
-        "K7_REPLAY_OK records=%zu duration_s=%.3f ticks=%d active=%zu "
+        "REPLAY_OK records=%zu duration_s=%.3f ticks=%d active=%zu "
         "generated=%zu lkas0=%zu lkas1=%zu clu1=%zu mdps2=%zu "
         "max_torque=%d curvature_err=%.8f compute_ms=%.3f\n",
         rx_frames, replay.duration_s(), ticks, active_ticks, generated_frames,
         lkas0, lkas1, clu1, mdps2, max_torque, max_curvature_error, elapsed_ms);
     return 0;
   } catch (const std::exception &error) {
-    std::fprintf(stderr, "check_k7_control_replay: %s\n", error.what());
+    std::fprintf(stderr, "check_control_replay: %s\n", error.what());
     return 1;
   }
 }

@@ -1,4 +1,4 @@
-#include "path.h"
+#include "lateral_path.h"
 
 #include "k230_ipc.h"
 
@@ -31,9 +31,9 @@ float path_curvature_at(const LateralPath &path, float forward_m, float span_m) 
 
 }  // namespace
 
-LateralPath k7_path_from_model_state(const K230ModelState &state,
-                                     unsigned long long now_ns,
-                                     unsigned long long timeout_ns) {
+LateralPath path_from_model_state(const K230ModelState &state,
+                                  unsigned long long now_ns,
+                                  unsigned long long timeout_ns) {
   LateralPath path;
   if (!state.valid) {
     path.invalid_reason = "model_invalid";

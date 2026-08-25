@@ -109,8 +109,10 @@ public:
     }
     left_prob *= width_mod;
     right_prob *= width_mod;
+    // 막 나타난 차선은 std가 높다. 컷오프를 0.3에서 0.4로 완화해
+    // 재획득 직후에도 가중치가 일찍 차오르게 한다.
     const auto std_mod = [](double value) {
-      return value <= 0.15 ? 1.0 : value >= 0.3 ? 0.0 : (0.3 - value) / 0.15;
+      return value <= 0.15 ? 1.0 : value >= 0.4 ? 0.0 : (0.4 - value) / 0.25;
     };
     left_prob *= std_mod(left_std_);
     right_prob *= std_mod(right_std_);
@@ -295,13 +297,13 @@ private:
 }  // namespace
 
 struct OpenpilotLateralPlanner::Impl {
-  Impl(const K7SteeringParams &steering, const K7DrivingParams &driving)
+  Impl(const SteeringParams &steering, const DrivingParams &driving)
       : lane_planner(steering.camera_offset_m, steering.path_offset_m) {
     update_params(steering, driving);
   }
 
-  void update_params(const K7SteeringParams &steering,
-                     const K7DrivingParams &driving) {
+  void update_params(const SteeringParams &steering,
+                     const DrivingParams &driving) {
     lane_planner.update_offsets(steering.camera_offset_m, steering.path_offset_m);
     // desire_helper의 torque_applied는 carstate.steeringPressed에서 나오므로
     // 컨트롤러와 같은 임계값을 써야 한다.
@@ -321,7 +323,7 @@ struct OpenpilotLateralPlanner::Impl {
   }
 
   LateralTarget update(const K230ModelState &model,
-                       const K7VehicleCanState &vehicle, float v_ego,
+                       const VehicleCanState &vehicle, float v_ego,
                        float measured_curvature, bool active,
                        float output_scale) {
     LateralTarget target;
@@ -350,7 +352,9 @@ struct OpenpilotLateralPlanner::Impl {
     if (lane_probability < 0.3 && lane_change_off) {
       use_model_path = true;
       laneless_buffer = true;
-    } else if (lane_probability > 0.5 && laneless_buffer && lane_change_off) {
+    // 복귀 문턱을 openpilot의 0.5에서 0.4로 내렸다. 교차로 후 차선
+    // 재획득이 빨라지고, 진입(0.3)과의 밴드가 남아 채터링은 없다.
+    } else if (lane_probability > 0.4 && laneless_buffer && lane_change_off) {
       laneless_buffer = false;
     } else if (laneless_buffer && lane_change_off) {
       use_model_path = true;
@@ -406,17 +410,17 @@ struct OpenpilotLateralPlanner::Impl {
     target.mpc_solution_valid = invalid_count < 2;
     target.laneless_mode = use_model_path;
     target.lane_valid = true;
-    target.lane_left_y = static_cast<float>(lane_planner.near_left_y());
-    target.lane_right_y = static_cast<float>(lane_planner.near_right_y());
-    target.lane_width = static_cast<float>(lane_planner.lane_width());
+    target.lane_left_y_m = static_cast<float>(lane_planner.near_left_y());
+    target.lane_right_y_m = static_cast<float>(lane_planner.near_right_y());
+    target.lane_width_m = static_cast<float>(lane_planner.lane_width());
     target.lane_left_prob = static_cast<float>(lane_planner.left_prob());
     target.lane_right_prob = static_cast<float>(lane_planner.right_prob());
     target.lane_left_std = static_cast<float>(lane_planner.left_std());
     target.lane_right_std = static_cast<float>(lane_planner.right_std());
     target.lane_d_prob = static_cast<float>(lane_planner.d_prob());
-    target.lookahead_x = static_cast<float>(std::max(0.0f, v_ego) * path_t[1]);
-    target.target_y = static_cast<float>(y_pts[1]);
-    target.heading = static_cast<float>(mpc.states()[0][2]);
+    target.lookahead_x_m = static_cast<float>(std::max(0.0f, v_ego) * path_t[1]);
+    target.target_y_m = static_cast<float>(y_pts[1]);
+    target.heading_rad = static_cast<float>(mpc.states()[0][2]);
     target.curvature = static_cast<float>(mpc.states()[0][3]);
     target.desire = desire;
     for (int i = 0; i < kLateralControlN; ++i) {
@@ -429,7 +433,7 @@ struct OpenpilotLateralPlanner::Impl {
     return target;
   }
 
-  void update_lane_change(const K7VehicleCanState &vehicle, float v_ego,
+  void update_lane_change(const VehicleCanState &vehicle, float v_ego,
                           float measured_curvature, bool active,
                           float output_scale, double lane_change_prob) {
     const bool one_blinker = vehicle.left_blinker != vehicle.right_blinker;
@@ -490,7 +494,8 @@ struct OpenpilotLateralPlanner::Impl {
         if (lane_change_prob < 0.02 && lane_change_lane_prob < 0.01)
           lane_change_state = 3;
       } else if (lane_change_state == 3) {
-        lane_change_lane_prob = std::min(1.0, lane_change_lane_prob + kDtModel);
+        // 복구 0.5초 (openpilot 기본 1.0초). 변경 직후 새 차선 적응을 당긴다.
+        lane_change_lane_prob = std::min(1.0, lane_change_lane_prob + 2.0 * kDtModel);
         if (lane_change_lane_prob > 0.99) {
           lane_change_state = one_blinker ? 1 : 0;
           if (!one_blinker) direction = 0;
@@ -524,19 +529,19 @@ struct OpenpilotLateralPlanner::Impl {
   std::array<double, 2> model_road_edge_stds{};
 };
 
-OpenpilotLateralPlanner::OpenpilotLateralPlanner(const K7SteeringParams &params,
-                                                 const K7DrivingParams &driving)
+OpenpilotLateralPlanner::OpenpilotLateralPlanner(const SteeringParams &params,
+                                                 const DrivingParams &driving)
     : impl_(std::make_unique<Impl>(params, driving)) {}
 
 OpenpilotLateralPlanner::~OpenpilotLateralPlanner() = default;
 
-void OpenpilotLateralPlanner::update_params(const K7SteeringParams &params,
-                                            const K7DrivingParams &driving) {
+void OpenpilotLateralPlanner::update_params(const SteeringParams &params,
+                                            const DrivingParams &driving) {
   impl_->update_params(params, driving);
 }
 
 LateralTarget OpenpilotLateralPlanner::update(const K230ModelState &model,
-                                              const K7VehicleCanState &vehicle,
+                                              const VehicleCanState &vehicle,
                                               float v_ego,
                                               float measured_curvature,
                                               bool active,

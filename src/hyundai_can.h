@@ -4,17 +4,12 @@
 #include <cstdint>
 #include <vector>
 
+#include "vehicle_can.h"
+
 constexpr uint32_t kHyundaiLkas11Address = 832;   // 0x340
 constexpr uint32_t kHyundaiClu11Address = 1265;   // 0x4f1
 constexpr uint32_t kHyundaiMdps12Address = 593;   // 0x251
 constexpr uint8_t kHyundaiMdps12TxBus = 2;
-
-struct CanFrame {
-  uint32_t address = 0;
-  uint8_t bus = 0;
-  uint8_t length = 0;
-  std::array<uint8_t, 8> data = {};
-};
 
 struct HyundaiLkas11Values {
   int ldws_active_mode = 0;
@@ -96,11 +91,11 @@ CanFrame create_clu11_frame(const HyundaiClu11Values &seed, const HyundaiCluComm
 // 최신 MDPS12 seed에서 openpilot create_mdps12와 같은 오류 회피 frame을 만든다.
 CanFrame create_mdps12_frame(const std::array<uint8_t, 8> &seed, int frame);
 
-std::vector<CanFrame> build_k7_hev_lateral_can_frames(const HyundaiLkas11Values &lkas_seed,
-                                                      const HyundaiClu11Values &clu_seed,
-                                                      const HyundaiLkasCommand &lkas_command,
-                                                      const HyundaiCanConfig &config,
-                                                      bool lkas_active,
-                                                      float cluster_speed,
-                                                      bool is_mph,
-                                                      int frame);
+std::vector<CanFrame> build_lateral_can_frames(const HyundaiLkas11Values &lkas_seed,
+                                                   const HyundaiClu11Values &clu_seed,
+                                                   const HyundaiLkasCommand &lkas_command,
+                                                   const HyundaiCanConfig &config,
+                                                   bool lkas_active,
+                                                   float cluster_speed_raw,
+                                                   bool is_mph,
+                                                   int frame);

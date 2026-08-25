@@ -20,6 +20,9 @@ constexpr float kCurvatureDeviationWindowS = 0.05f;
  * 별도로 차단한다. */
 constexpr float kMaxPlanAgeCompS = 0.25f;
 constexpr float kMaxCurvature = 0.3f;
+// EU 안전 한계(openpilot MAX_LATERAL_JERK/ACCEL). accel 3.3은 K7 실측 기준.
+constexpr float kMaxLateralJerk = 5.0f;
+constexpr float kMaxLateralAccel = 3.3f;
 constexpr float kGravity = 9.8f;
 constexpr double kPandaEngageGraceS = 1.0;
 
@@ -43,11 +46,11 @@ bool is_transient_engage_block(const std::string &block) {
   return block == "panda_not_ready" || block == "panda_controls_off";
 }
 
-float cluster_speed_kph(const K7VehicleCanState &vehicle_state) {
-  if (!std::isfinite(vehicle_state.cluster_speed) || vehicle_state.cluster_speed < 0.0f) {
+float cluster_speed_kph(const VehicleCanState &vehicle_state) {
+  if (!std::isfinite(vehicle_state.cluster_speed_raw) || vehicle_state.cluster_speed_raw < 0.0f) {
     return 0.0f;
   }
-  return vehicle_state.cluster_speed * (vehicle_state.speed_unit_mph ? 1.609344f : 1.0f);
+  return vehicle_state.cluster_speed_raw * (vehicle_state.speed_unit_mph ? 1.609344f : 1.0f);
 }
 
 float interp_lateral(float x, const float *values) {
@@ -65,11 +68,11 @@ float interp_lateral(float x, const float *values) {
 
 }  // namespace
 
-K7LateralController::K7LateralController(K7LateralControllerConfig config)
+LateralController::LateralController(LateralControllerConfig config)
     : config_(config) {
-  config_.can_config.main_bus = kK7PowertrainBus;
-  config_.can_config.mdps_bus = kK7MdpsBus;
-  config_.can_config.scc_bus = kK7PowertrainBus;
+  config_.can_config.main_bus = kPowertrainBus;
+  config_.can_config.mdps_bus = kMdpsBus;
+  config_.can_config.scc_bus = kPowertrainBus;
   config_.can_config.send_lkas_on_scc_bus = false;
   config_.can_config.send_lkas_on_mdps_bus = true;
   config_.can_config.send_clu11_speed_to_mdps = true;
@@ -77,18 +80,18 @@ K7LateralController::K7LateralController(K7LateralControllerConfig config)
 }
 
 // 제어 상태를 유지한 채 런타임 파라미터를 즉시 교체한다.
-void K7LateralController::update_params(
-    const K7SteeringParams &steering_params,
-    const K7DrivingParams &driving_params) {
+void LateralController::update_params(
+    const SteeringParams &steering_params,
+    const DrivingParams &driving_params) {
   config_.steering_params = steering_params;
   config_.driving_params = driving_params;
   config_.can_config.mdps_speed_spoof_kph = driving_params.mdps_speed_spoof_kph;
 }
 
 // 차량 버튼/상태와 lane path를 바탕으로 LKAS 제어 결과와 CAN frame을 만든다.
-K7LateralControlResult K7LateralController::update(const LateralPath &path,
+LateralControlResult LateralController::update(const LateralPath &path,
                                                    const LateralTarget &target,
-                                                   const K7VehicleCanState &vehicle_state,
+                                                   const VehicleCanState &vehicle_state,
                                                    double now_s,
                                                    int frame,
                                                    bool panda_ready,
@@ -99,17 +102,17 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
   update_button_state(vehicle_state.clu_button, now_s);
   const bool logical_engaged = config_.force_engaged || engaged_;
 
-  K7LateralControlResult result;
+  LateralControlResult result;
   result.engaged = logical_engaged;
   result.path_usable = path.usable_for_steering;
   result.left_lane = path.left_valid;
   result.right_lane = path.right_valid;
-  result.seeds_ready = k7_seed_frames_ready(vehicle_state);
-  result.vehicle_fresh = k7_vehicle_state_fresh(
+  result.seeds_ready = seed_frames_ready(vehicle_state);
+  result.vehicle_fresh = vehicle_state_fresh(
       vehicle_state, now_s,
       static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) / 1000.0);
-  result.speed_kph = cluster_speed_kph(vehicle_state);
-  result.control_speed_kph = k7_vehicle_speed_kph(
+  result.cluster_speed_kph = cluster_speed_kph(vehicle_state);
+  result.control_speed_kph = vehicle_speed_kph(
       vehicle_state, now_s,
       static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) / 1000.0);
   const float speed_mps = result.control_speed_kph / 3.6f;
@@ -182,12 +185,9 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
   result.cut_steer_temp = update_cut_steer_state(result.active, vehicle_state);
 
   const bool steering_pressed = update_steering_pressed(vehicle_state.driver_torque);
-  const bool driver_guard_active =
-      driver_steering_torque_above_timer_ >= 0 && driver_steering_torque_above_timer_ < 100;
-  const EffectiveSteerLimits effective_limits = config_.steering_params.effective_steer_limits(
-      result.control_speed_kph, vehicle_state.steering_angle_deg, speed_mps,
-      driver_guard_active);
-  K7SteeringParams control_params = config_.steering_params;
+  const EffectiveSteerLimits effective_limits =
+      config_.steering_params.effective_steer_limits();
+  SteeringParams control_params = config_.steering_params;
   control_params.steer_max = effective_limits.steer_max;
   control_params.steer_delta_up = effective_limits.steer_delta_up;
   control_params.steer_delta_down = effective_limits.steer_delta_down;
@@ -217,7 +217,9 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
         result.desired_torque, last_torque_, vehicle_state.driver_torque,
         control_params.hyundai_limits(effective_limits));
   } else {
-    torque_controller_.update(false, speed_mps, 0.0f, vehicle_state.steering_angle_deg,
+    // 0을 넘기면 커브 중 engage 시 지연 버퍼가 0-setpoint로 P를 튀게 한다
+    torque_controller_.update(false, speed_mps, result.desired_curvature,
+                              vehicle_state.steering_angle_deg,
                               false, steer_rate_limited_, control_params,
                               vehicle_state.yaw_rate_rad_s, yaw_rate_valid);
     result.actual_curvature = torque_controller_.actual_curvature();
@@ -254,7 +256,7 @@ K7LateralControlResult K7LateralController::update(const LateralPath &path,
 }
 
 // CLU 버튼 edge로 engage/disengage 상태를 갱신한다.
-void K7LateralController::update_button_state(int button, double now_s) {
+void LateralController::update_button_state(int button, double now_s) {
   if (button == last_button_) return;
   if (button == kButtonCancel) {
     panda_engage_pending_ = false;
@@ -268,8 +270,8 @@ void K7LateralController::update_button_state(int button, double now_s) {
 }
 
 // 방향지시등 기반 수동 조향 차단 타이머를 갱신한다.
-void K7LateralController::update_manual_blinker_timers(
-    const K7VehicleCanState &vehicle_state, float speed_mps) {
+void LateralController::update_manual_blinker_timers(
+    const VehicleCanState &vehicle_state, float speed_mps) {
   const bool one_side_blinker = vehicle_state.left_blinker != vehicle_state.right_blinker;
   const float lane_change_min_speed_mps =
       config_.driving_params.lane_change_min_speed_kph / 3.6f;
@@ -281,18 +283,18 @@ void K7LateralController::update_manual_blinker_timers(
 }
 
 // 수동 조향 차단 타이머를 한 프레임 감소시킨다.
-void K7LateralController::decay_manual_blinker_timers() {
+void LateralController::decay_manual_blinker_timers() {
   if (lanechange_manual_timer_ > 0) --lanechange_manual_timer_;
 }
 
 // 현재 수동 조향 차단 사유를 반환한다.
-std::string K7LateralController::manual_blinker_block_reason() const {
+std::string LateralController::manual_blinker_block_reason() const {
   if (lanechange_manual_timer_ > 0) return "lanechange_manual";
   return "";
 }
 
 // openpilot K7 조향각 제한값을 현재 속도에 맞게 계산한다.
-float K7LateralController::steering_angle_limit_deg(float speed_kph) const {
+float LateralController::steering_angle_limit_deg(float speed_kph) const {
   const float limit = config_.steering_params.max_steering_angle_deg;
   if (limit <= 0.0f) return 0.0f;
   if (limit <= 90.0f) return limit;
@@ -301,8 +303,8 @@ float K7LateralController::steering_angle_limit_deg(float speed_kph) const {
 }
 
 // 조향각 제한으로 LKAS active를 막아야 하는지 확인한다.
-std::string K7LateralController::steering_angle_block(
-    const K7VehicleCanState &vehicle_state, float speed_kph) const {
+std::string LateralController::steering_angle_block(
+    const VehicleCanState &vehicle_state, float speed_kph) const {
   if (config_.steering_params.avoid_lkas_fault_enabled) return "";
   const float limit = steering_angle_limit_deg(speed_kph);
   if (limit > 0.0f && std::fabs(vehicle_state.steering_angle_deg) >= limit) {
@@ -312,9 +314,9 @@ std::string K7LateralController::steering_angle_block(
 }
 
 // LKAS fault 회피를 위한 임시 cut-steer 상태를 갱신한다.
-bool K7LateralController::update_cut_steer_state(
-    bool active, const K7VehicleCanState &vehicle_state) {
-  const K7SteeringParams &params = config_.steering_params;
+bool LateralController::update_cut_steer_state(
+    bool active, const VehicleCanState &vehicle_state) {
+  const SteeringParams &params = config_.steering_params;
   if (params.avoid_lkas_fault_enabled) {
     if (active && std::fabs(vehicle_state.steering_angle_deg) >=
                       params.avoid_lkas_fault_max_angle_deg) {
@@ -346,7 +348,7 @@ bool K7LateralController::update_cut_steer_state(
 }
 
 // 노이즈가 있는 운전자 조향 토크를 openpilot 방식으로 필터링한다.
-bool K7LateralController::update_steering_pressed(int driver_torque) {
+bool LateralController::update_steering_pressed(int driver_torque) {
   const bool pressed =
       std::abs(driver_torque) > config_.steering_params.steering_pressed_threshold;
   steering_pressed_counter_ += pressed ? 1 : -1;
@@ -356,8 +358,8 @@ bool K7LateralController::update_steering_pressed(int driver_torque) {
 }
 
 // 운전자 조향 토크 감지 타이머를 openpilot K7 방식으로 갱신한다.
-void K7LateralController::update_driver_steering_guard(
-    const K7VehicleCanState &vehicle_state, float speed_mps) {
+void LateralController::update_driver_steering_guard(
+    const VehicleCanState &vehicle_state, float speed_mps) {
   const bool driver_steering_torque_above =
       std::abs(vehicle_state.driver_torque) > config_.driving_params.driver_torque_threshold &&
       speed_mps < config_.driving_params.lane_change_min_speed_kph / 3.6f;
@@ -371,7 +373,7 @@ void K7LateralController::update_driver_steering_guard(
 }
 
 // 운전자 조향 중 요청 토크 fade 비율을 반환한다.
-float K7LateralController::driver_torque_scale() const {
+float LateralController::driver_torque_scale() const {
   if (driver_steering_torque_above_timer_ >= 0 &&
       driver_steering_torque_above_timer_ < 100) {
     return clamp_float(static_cast<float>(driver_steering_torque_above_timer_) / 100.0f,
@@ -381,9 +383,9 @@ float K7LateralController::driver_torque_scale() const {
 }
 
 // smooth steer 모드에서 요청 토크를 서서히 줄이거나 회복한다.
-int K7LateralController::smooth_steer_torque(
-    int raw_torque, const K7VehicleCanState &vehicle_state, bool steering_pressed) {
-  const K7SteeringParams &params = config_.steering_params;
+int LateralController::smooth_steer_torque(
+    int raw_torque, const VehicleCanState &vehicle_state, bool steering_pressed) {
+  const SteeringParams &params = config_.steering_params;
   if (params.smooth_max_steering_angle_deg > 0.0f &&
       std::fabs(vehicle_state.steering_angle_deg) > params.smooth_max_steering_angle_deg) {
     if (params.smooth_max_driver_angle_wait > 0.0f && steering_pressed) {
@@ -404,7 +406,7 @@ int K7LateralController::smooth_steer_torque(
 }
 
 // 제어 내부 상태를 초기값으로 되돌린다.
-void K7LateralController::reset_control_state() {
+void LateralController::reset_control_state() {
   last_torque_ = 0;
   steer_rate_limited_ = false;
   angle_limit_counter_ = 0;
@@ -417,10 +419,10 @@ void K7LateralController::reset_control_state() {
 }
 
 // active를 막는 현재 gate reason을 계산한다.
-std::string K7LateralController::active_block_reason(
+std::string LateralController::active_block_reason(
     const LateralPath &path,
     const LateralTarget &target,
-    const K7VehicleCanState &vehicle_state,
+    const VehicleCanState &vehicle_state,
     double now_s,
     bool seeds_ready,
     bool vehicle_fresh,
@@ -470,7 +472,7 @@ std::string K7LateralController::active_block_reason(
   return "";
 }
 
-float K7LateralController::lag_adjusted_desired_curvature(
+float LateralController::lag_adjusted_desired_curvature(
     const LateralTarget &target, float speed_mps, float plan_age_s) const {
   if (!target.valid) return 0.0f;
   /* plan은 카메라 캡처 시점 기준이므로 소비 시점까지의 실측 나이를 actuator
@@ -485,7 +487,7 @@ float K7LateralController::lag_adjusted_desired_curvature(
   float desired_curvature = current_curvature +
       2.0f * (curvature_from_psi - current_curvature);
 
-  const float max_curvature_rate = config_.driving_params.max_lateral_jerk /
+  const float max_curvature_rate = kMaxLateralJerk /
       (speed * speed);
   desired_curvature = clamp_float(
       desired_curvature,
@@ -496,17 +498,17 @@ float K7LateralController::lag_adjusted_desired_curvature(
   const float roll_compensation = config_.steering_params.roll_rad * kGravity;
   desired_curvature = clamp_float(
       desired_curvature,
-      (-config_.driving_params.max_lateral_accel + roll_compensation) /
+      (-kMaxLateralAccel + roll_compensation) /
           (limit_speed * limit_speed),
-      (config_.driving_params.max_lateral_accel + roll_compensation) /
+      (kMaxLateralAccel + roll_compensation) /
           (limit_speed * limit_speed));
   desired_curvature = clamp_float(desired_curvature,
                                   -kMaxCurvature, kMaxCurvature);
-  return config_.steering_params.invert_steer ? -desired_curvature : desired_curvature;
+  return desired_curvature;
 }
 
 // LKAS HUD state 값을 lane availability와 active 상태에서 만든다.
-int K7LateralController::lkas_sys_state(bool active, bool left_lane, bool right_lane) const {
+int LateralController::lkas_sys_state(bool active, bool left_lane, bool right_lane) const {
   if (left_lane && right_lane) return active ? 3 : 4;
   if (left_lane) return 5;
   if (right_lane) return 6;
@@ -514,9 +516,9 @@ int K7LateralController::lkas_sys_state(bool active, bool left_lane, bool right_
 }
 
 // 최종 송신 frame 묶음을 만든다.
-std::vector<CanFrame> K7LateralController::build_frames(
-    const K7VehicleCanState &vehicle_state,
-    const K7LateralControlResult &result,
+std::vector<CanFrame> LateralController::build_frames(
+    const VehicleCanState &vehicle_state,
+    const LateralControlResult &result,
     int frame) {
   HyundaiLkasCommand command;
   command.apply_steer = result.apply_torque;
@@ -527,11 +529,11 @@ std::vector<CanFrame> K7LateralController::build_frames(
   command.left_lane = result.left_lane;
   command.right_lane = result.right_lane;
   command.lkas_msg_count = next_lkas11_counter(vehicle_state);
-  command.ldws_fix = config_.steering_params.ldws_car_fix;
+  command.ldws_fix = false;  // K7 YG는 LDWS 전용차가 아니다
 
   const HyundaiLkas11Values lkas_seed = decode_lkas11(vehicle_state.lkas11_seed);
   const HyundaiClu11Values clu_seed = decode_clu11(vehicle_state.clu11_seed);
-  std::vector<CanFrame> frames = build_k7_hev_lateral_can_frames(
+  std::vector<CanFrame> frames = build_lateral_can_frames(
       lkas_seed, clu_seed, command, config_.can_config, result.active,
       clu_seed.speed, vehicle_state.speed_unit_mph, frame);
   if (vehicle_state.has_mdps12_seed &&
@@ -541,7 +543,7 @@ std::vector<CanFrame> K7LateralController::build_frames(
   return frames;
 }
 
-int K7LateralController::next_lkas11_counter(const K7VehicleCanState &vehicle_state) {
+int LateralController::next_lkas11_counter(const VehicleCanState &vehicle_state) {
   if (!lkas11_counter_valid_) {
     const HyundaiLkas11Values seed = decode_lkas11(vehicle_state.lkas11_seed);
     lkas11_counter_ = (seed.msg_count + 1) & 0xf;

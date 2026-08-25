@@ -37,7 +37,7 @@ LKAS11, CLU11, MDPS12의 signal bit 위치와 checksum 계산도
 
 ### 1. LDWS HUD 상태가 raw 모델 확률에 직접 연결됨
 
-현재 `k7_path_from_model_state()`는 좌우 lane probability를 각각 `0.3`과 즉시
+현재 `path_from_model_state()`는 좌우 lane probability를 각각 `0.3`과 즉시
 비교한다. hysteresis나 유지 시간이 없어 확률이 임계값 근처에서 흔들릴 때
 `CF_Lkas_LdwsSysState`가 `1`, `3`, `5`, `6` 사이를 모델 주기마다 바꿀 수 있다.
 
@@ -116,7 +116,7 @@ batch는 현재 버리도록 되어 있으나, 연속 오류와 물리적 discon
 대상:
 
 - `src/lateral_controller.cc`
-- `benchmarks/check_k7_control_replay.cc`
+- `benchmarks/check_control_replay.cc`
 
 작업:
 
@@ -199,7 +199,7 @@ batch는 현재 버리도록 되어 있으나, 연속 오류와 물리적 discon
 
 대상:
 
-- `params/yg_driving.json`
+- `params/driving.json`
 - `params/README.md`
 - `src/lateral_controller.cc`
 - controller host test
@@ -377,7 +377,7 @@ rate를 변경하지 않고 actuator lookahead를 `0.36 s`에서 `0.42 s`로만 
 
 ```text
 K230_CAN_QUEUE_OK
-K7_CONTROL_SELF_TEST_OK
+CONTROL_SELF_TEST_OK
 check_panda_can_codec: ok
 MODEL_OUTPUT_EQUIVALENCE_OK output=6012 recurrent=512 pose_offset=6000
 ```

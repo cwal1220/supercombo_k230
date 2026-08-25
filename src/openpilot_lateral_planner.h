@@ -1,28 +1,28 @@
 #pragma once
 
-#include "lateral_control.h"
+#include "lateral_target.h"
 
 #include <memory>
 
 struct K230ModelState;
-struct K7DrivingParams;
-struct K7SteeringParams;
-struct K7VehicleCanState;
+struct DrivingParams;
+struct SteeringParams;
+struct VehicleCanState;
 
 class OpenpilotLateralPlanner {
 public:
-  OpenpilotLateralPlanner(const K7SteeringParams &params,
-                          const K7DrivingParams &driving);
+  OpenpilotLateralPlanner(const SteeringParams &params,
+                          const DrivingParams &driving);
   ~OpenpilotLateralPlanner();
 
   OpenpilotLateralPlanner(const OpenpilotLateralPlanner &) = delete;
   OpenpilotLateralPlanner &operator=(const OpenpilotLateralPlanner &) = delete;
 
-  void update_params(const K7SteeringParams &params,
-                     const K7DrivingParams &driving);
+  void update_params(const SteeringParams &params,
+                     const DrivingParams &driving);
 
   LateralTarget update(const K230ModelState &model,
-                       const K7VehicleCanState &vehicle, float v_ego,
+                       const VehicleCanState &vehicle, float v_ego,
                        float measured_curvature, bool active,
                        float output_scale);
 

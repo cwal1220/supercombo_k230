@@ -1,7 +1,24 @@
 #ifndef PANDA_CAN_CODEC_H
 #define PANDA_CAN_CODEC_H
 
-#include "panda_can_frame.h"
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
+
+constexpr uint32_t kPandaCanMaxAddress = 0x1fffffffU;
+constexpr uint8_t kPandaCanMaxTxBus = 3U;
+constexpr uint8_t kPandaCanMaxDataLen = 64U;
+
+struct PandaCanFrame {
+    uint32_t address = 0;
+    uint8_t bus = 0;
+    uint8_t data_len = 0;
+    uint8_t data[kPandaCanMaxDataLen] = {};
+    bool returned = false;
+    bool rejected = false;
+};
+
 
 #include <cstdint>
 #include <string>

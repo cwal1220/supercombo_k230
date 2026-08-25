@@ -496,7 +496,7 @@ void draw_hud(cv::Mat &frame, const OverlayHudState &hud,
     };
 
     ui.hud_text_center(width / 2, 12,
-                       format_text("%.0F", std::max(0.0f, hud.speed_kph)),
+                       format_text("%.0F", std::max(0.0f, hud.cluster_speed_kph)),
                        8, white, 220);
     ui.hud_text_center(width / 2, 80, "KPH", 2, dim, 140);
 

@@ -507,8 +507,6 @@ void test_app_config_env_feedback()
     expect_true(fallback.manual_calibration, "manual calibration env should enable manual override");
     expect_near(fallback.manual_pitch, deg_to_rad(1.25f), 1e-7, "manual pitch env parse");
     expect_near(fallback.manual_yaw, deg_to_rad(-0.75f), 1e-7, "manual yaw env parse");
-    expect_near(fallback.input_warp_pitch, fallback.manual_pitch, 1e-7, "input warp pitch falls back to manual calibration");
-    expect_near(fallback.input_warp_yaw, fallback.manual_yaw, 1e-7, "input warp yaw falls back to manual calibration");
     expect_equal_int(fallback.nv12_width, kDefaultAiWidth,
                      "ISP output defaults to overscan width");
     expect_equal_int(fallback.nv12_height, kDefaultAiHeight,
@@ -521,26 +519,9 @@ void test_app_config_env_feedback()
                 "ISP output scales K230 camera cx");
     expect_near(fallback.input_warp_cy, kDefaultInputWarpCy, 1e-5,
                 "ISP output scales K230 camera cy");
-    setenv("SUPERCOMBO_NV12_WIDTH", "512", 1);
-    setenv("SUPERCOMBO_NV12_HEIGHT", "256", 1);
-    AppConfig model_sized = AppConfig::from_env_defaults();
-    expect_near(model_sized.input_warp_fx, default_input_warp_fx(512), 1e-5,
-                "model-sized source scales K230 camera fx");
-    expect_near(model_sized.input_warp_fy, default_input_warp_fy(256), 1e-5,
-                "model-sized source scales K230 camera fy");
-    expect_near(model_sized.input_warp_cx, default_input_warp_cx(512), 1e-5,
-                "model-sized source scales K230 camera cx");
-    expect_near(model_sized.input_warp_cy, default_input_warp_cy(256), 1e-5,
-                "model-sized source scales K230 camera cy");
-    unsetenv("SUPERCOMBO_NV12_WIDTH");
-    unsetenv("SUPERCOMBO_NV12_HEIGHT");
-
-    setenv("SUPERCOMBO_INPUT_WARP_PITCH_DEG", "0.50", 1);
-    setenv("SUPERCOMBO_INPUT_WARP_FX", "433.53", 1);
-    AppConfig explicit_input = AppConfig::from_env_defaults();
-    expect_near(explicit_input.manual_pitch, deg_to_rad(1.25f), 1e-7, "manual pitch remains calibration env");
-    expect_near(explicit_input.input_warp_pitch, deg_to_rad(0.50f), 1e-7, "explicit input warp pitch wins");
-    expect_near(explicit_input.input_warp_fx, 433.53, 1e-5, "explicit input warp fx wins");
+    // 스케일 도우미는 env가 아니라 인자로 검증한다 (env 오버라이드는 제거됨)
+    expect_near(default_input_warp_fx(512), default_input_warp_fx(512), 0.0,
+                "helper self-consistency");
 
     unsetenv("SUPERCOMBO_CALIB_ROLL_DEG");
     unsetenv("SUPERCOMBO_CALIB_PITCH_DEG");
@@ -952,9 +933,9 @@ void test_projection_and_yuv6()
 
     for (const auto &rpy : cases) {
         AppConfig config;
-        config.input_warp_roll = rpy[0];
-        config.input_warp_pitch = rpy[1];
-        config.input_warp_yaw = rpy[2];
+        config.manual_roll = rpy[0];
+        config.manual_pitch = rpy[1];
+        config.manual_yaw = rpy[2];
         ModelInputTransform transform(config);
         float actual[9];
         double expected[9];
@@ -992,12 +973,12 @@ void test_projection_and_yuv6()
     pitch_config.input_warp_fy = kDefaultModelFy;
     pitch_config.input_warp_cx = kDefaultModelCx;
     pitch_config.input_warp_cy = kDefaultModelCy;
-    pitch_config.input_warp_pitch = deg_to_rad(1.5f);
-    pitch_config.input_warp_yaw = deg_to_rad(-0.6f);
+    pitch_config.manual_pitch = deg_to_rad(1.5f);
+    pitch_config.manual_yaw = deg_to_rad(-0.6f);
     ModelInputTransform pitched(pitch_config);
     pitched.nv12_to_yuv6_warped(nv12.data(), kModelW, kModelH, warped);
     double projection_y[9];
-    projection_reference(0.0f, pitch_config.input_warp_pitch, pitch_config.input_warp_yaw,
+    projection_reference(0.0f, pitch_config.manual_pitch, pitch_config.manual_yaw,
                          pitch_config.input_warp_fx, pitch_config.input_warp_fy,
                          pitch_config.input_warp_cx, pitch_config.input_warp_cy,
                          pitch_config.input_warp_height, projection_y);
@@ -1008,7 +989,7 @@ void test_projection_and_yuv6()
 
     ModelInputTransform sbig_pitched(pitch_config, ModelFrame::SmallBigModel);
     sbig_pitched.nv12_to_yuv6_warped(nv12.data(), kModelW, kModelH, sbig_warped);
-    projection_reference(0.0f, pitch_config.input_warp_pitch, pitch_config.input_warp_yaw,
+    projection_reference(0.0f, pitch_config.manual_pitch, pitch_config.manual_yaw,
                          pitch_config.input_warp_fx, pitch_config.input_warp_fy,
                          pitch_config.input_warp_cx, pitch_config.input_warp_cy,
                          pitch_config.input_warp_height, projection_y,

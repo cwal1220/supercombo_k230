@@ -54,8 +54,8 @@ Export the collected drive log to the `K230CAN1` fixture format, then run:
 cmake -S . -B build/host-checks \
   -DSUPERCOMBO_BUILD_RUNTIME=OFF \
   -DSUPERCOMBO_BUILD_BENCHMARKS=ON
-cmake --build build/host-checks --target check_k7_control_replay
-./check_k7_control_replay build/k7_drive.k230can
+cmake --build build/host-checks --target check_control_replay
+./check_control_replay build/drive.k230can
 ```
 
 The 60.001 second K7 YG HEV fixture contains 43,273 CAN records. The expected
@@ -88,7 +88,7 @@ K230_PANDA_SAFETY=hyundaiCommunity
 K230_PANDA_ENGAGED=1
 ```
 
-Keep `K230_K7_FORCE_ENGAGED=0` in a vehicle. Engagement must come from the
+Keep `K230_FORCE_ENGAGED=0` in a vehicle. Engagement must come from the
 vehicle SET/CANCEL button state. Before any closed-course TX test, verify Panda
 USB RX, ignition, safety mode/param, `controls_allowed`, CAN freshness, checksum
 counters, and zero blocked/error counts in shadow mode.

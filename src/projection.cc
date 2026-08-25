@@ -2,8 +2,6 @@
 
 #include <cmath>
 
-namespace {
-
 void rotation_from_rpy(float roll, float pitch, float yaw, float *rot)
 {
     const float cr = std::cos(roll);
@@ -24,7 +22,6 @@ void rotation_from_rpy(float roll, float pitch, float yaw, float *rot)
     rot[8] = cp * cr;
 }
 
-} // namespace
 
 ProjectionState make_projection_state(float roll, float pitch, float yaw)
 {

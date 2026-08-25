@@ -1,5 +1,7 @@
 #include "model_input_transform.h"
 
+#include "projection.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -35,36 +37,6 @@ void matmul34(const float *a3, const float *b34, float *out34)
             out34[r * 4 + c] = sum;
         }
     }
-}
-
-void rotation_from_rpy(float roll, float pitch, float yaw, float *rot)
-{
-    const float cr = std::cos(roll);
-    const float sr = std::sin(roll);
-    const float cp = std::cos(pitch);
-    const float sp = std::sin(pitch);
-    const float cy = std::cos(yaw);
-    const float sy = std::sin(yaw);
-
-    const float rx[9] = {
-        1.0f, 0.0f, 0.0f,
-        0.0f, cr, -sr,
-        0.0f, sr, cr,
-    };
-    const float ry[9] = {
-        cp, 0.0f, sp,
-        0.0f, 1.0f, 0.0f,
-        -sp, 0.0f, cp,
-    };
-    const float rz[9] = {
-        cy, -sy, 0.0f,
-        sy, cy, 0.0f,
-        0.0f, 0.0f, 1.0f,
-    };
-
-    float tmp[9];
-    matmul3(ry, rx, tmp);
-    matmul3(rz, tmp, rot);
 }
 
 void transform_scale_buffer(const float *in, float scale, float *out)
@@ -111,9 +83,9 @@ ModelInputTransform::ModelInputTransform(const AppConfig &config, ModelFrame mod
       cx_(config.input_warp_cx),
       cy_(config.input_warp_cy),
       height_(config.input_warp_height),
-      roll_(config.input_warp_roll),
-      pitch_(config.input_warp_pitch),
-      yaw_(config.input_warp_yaw),
+      roll_(config.manual_roll),
+      pitch_(config.manual_pitch),
+      yaw_(config.manual_yaw),
       model_frame_(model_frame)
 {
 }

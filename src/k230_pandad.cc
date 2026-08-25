@@ -21,16 +21,6 @@ volatile sig_atomic_t g_stop = 0;
 constexpr uint64_t kCanPublishIntervalNs = 10000000ULL;
 constexpr uint64_t kMaxSendCanAgeNs = 100000000ULL;
 
-uint16_t env_u16(const char *name, uint16_t default_value)
-{
-    const char *value = std::getenv(name);
-    if (!value || value[0] == '\0') return default_value;
-    char *end = nullptr;
-    const unsigned long parsed = std::strtoul(value, &end, 0);
-    if (end == value || parsed > 0xffffUL) return default_value;
-    return static_cast<uint16_t>(parsed);
-}
-
 uint16_t parse_safety_model(const char *name, uint16_t *default_param)
 {
     const char *value = std::getenv(name);
@@ -155,16 +145,13 @@ int main()
         can_log_pub.reset();
         sendcan_log_pub.reset();
 
-        const bool tx_enabled = env_flag("K230_PANDA_TX", false) ||
-                                env_flag("K230_PANDA_ENABLE_TX", false);
+        const bool tx_enabled = env_flag("K230_PANDA_TX", false);
         const bool heartbeat_engaged = env_flag("K230_PANDA_ENGAGED", false);
         const bool log_can = env_flag("K230_PANDA_LOG_CAN", false);
-        const char *serial_env = std::getenv("K230_PANDA_SERIAL");
-        const std::string serial = serial_env ? serial_env : "";
-        const uint16_t idle_us = env_u16("K230_PANDA_IDLE_US", 5000);
+        const uint16_t idle_us = static_cast<uint16_t>(env_unsigned("K230_PANDA_IDLE_US", 5000));
         uint16_t default_safety_param = 0;
         const uint16_t safety_model = parse_safety_model("K230_PANDA_SAFETY", &default_safety_param);
-        const uint16_t safety_param = env_u16("K230_PANDA_SAFETY_PARAM", default_safety_param);
+        const uint16_t safety_param = static_cast<uint16_t>(env_unsigned("K230_PANDA_SAFETY_PARAM", default_safety_param));
 
         if (tx_enabled) {
             std::fprintf(stderr,
@@ -199,7 +186,7 @@ int main()
         while (!g_stop) {
             if (!panda.connected()) {
                 publish_disconnected(panda_state_pub, tx_enabled);
-                if (!panda.connect(serial)) {
+                if (!panda.connect()) {
                     std::fprintf(stderr, "k230_pandad: waiting for panda\n");
                     sleep(1);
                     continue;

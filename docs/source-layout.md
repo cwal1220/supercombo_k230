@@ -35,12 +35,13 @@
   - applies openpilot lane probability/width logic, lane-change state, and the
     generated Acados lateral MPC solver to produce curvature targets. This is the
     only producer of `LateralTarget`.
-- `src/lateral_control.h`
+- `src/lateral_target.h`
   - declares `LateralTarget`, the planner-to-controller interface.
-- `src/lateral_controller.*`, `src/steering_params.*`, `src/hyundai_steering.*`
+- `src/lateral_controller.*`, `src/openpilot_torque_controller.*`,
+  `src/steering_params.*`, `src/hyundai_steering.*`
   - apply the planner's lag-adjusted curvature through the validated K7
     torque/CAN path.
-- `src/path.*`
+- `src/lateral_path.*`
   - adapts `modelState` into the steering-usability path gate.
 - `src/adaptive_cruise.*`, `src/departure_alert.*`
   - vision cruise setpoint control and departure alerting.

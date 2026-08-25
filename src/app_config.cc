@@ -10,52 +10,7 @@ namespace {
 
 constexpr float kPi = 3.14159265358979323846f;
 
-std::string env_string(const char *name)
-{
-    const char *value = std::getenv(name);
-    return value && value[0] != '\0' ? std::string(value) : std::string();
-}
-
 } // namespace
-
-bool env_present(const char *name)
-{
-    return std::getenv(name) != nullptr;
-}
-
-unsigned env_unsigned(const char *name, unsigned default_value)
-{
-    const char *value = std::getenv(name);
-    if (!value || value[0] == '\0') return default_value;
-    char *end = nullptr;
-    const unsigned long parsed = std::strtoul(value, &end, 10);
-    return end == value ? default_value : static_cast<unsigned>(parsed);
-}
-
-float env_float(const char *name, float default_value)
-{
-    const char *value = std::getenv(name);
-    if (!value || value[0] == '\0') return default_value;
-    char *end = nullptr;
-    const float parsed = std::strtof(value, &end);
-    return end == value ? default_value : parsed;
-}
-
-float env_float_prefer(const char *primary, const char *fallback, float default_value)
-{
-    if (env_present(primary)) return env_float(primary, default_value);
-    return env_float(fallback, default_value);
-}
-
-float deg_to_rad(float deg)
-{
-    return deg * kPi / 180.0f;
-}
-
-float rad_to_deg(float rad)
-{
-    return rad * 180.0f / kPi;
-}
 
 std::string AppConfig::usage(const char *program_name)
 {
@@ -67,13 +22,6 @@ AppConfig AppConfig::from_env_defaults()
 {
     AppConfig config;
 
-    config.nv12_width = env_unsigned("SUPERCOMBO_NV12_WIDTH", config.nv12_width);
-    config.nv12_height = env_unsigned("SUPERCOMBO_NV12_HEIGHT", config.nv12_height);
-    config.nv12_crop_x = env_unsigned("SUPERCOMBO_NV12_CROP_X", config.nv12_crop_x);
-    config.nv12_crop_y = env_unsigned("SUPERCOMBO_NV12_CROP_Y", config.nv12_crop_y);
-    config.nv12_crop_width = env_unsigned("SUPERCOMBO_NV12_CROP_WIDTH", config.nv12_crop_width);
-    config.nv12_crop_height = env_unsigned("SUPERCOMBO_NV12_CROP_HEIGHT", config.nv12_crop_height);
-    config.model_fps = env_unsigned("SUPERCOMBO_MODEL_FPS", config.model_fps);
 
     config.input_warp_fx = default_input_warp_fx(config.nv12_width);
     config.input_warp_fy = default_input_warp_fy(config.nv12_height);
@@ -94,14 +42,6 @@ AppConfig AppConfig::from_env_defaults()
     config.log_calibration = env_flag("SUPERCOMBO_LOG_CALIB");
     config.profile = env_flag("SUPERCOMBO_PROFILE");
 
-    config.input_warp_fx = env_float("SUPERCOMBO_INPUT_WARP_FX", config.input_warp_fx);
-    config.input_warp_fy = env_float("SUPERCOMBO_INPUT_WARP_FY", config.input_warp_fy);
-    config.input_warp_cx = env_float("SUPERCOMBO_INPUT_WARP_CX", config.input_warp_cx);
-    config.input_warp_cy = env_float("SUPERCOMBO_INPUT_WARP_CY", config.input_warp_cy);
-    config.input_warp_height = env_float("SUPERCOMBO_INPUT_WARP_HEIGHT", config.input_warp_height);
-    config.input_warp_roll = deg_to_rad(env_float_prefer("SUPERCOMBO_INPUT_WARP_ROLL_DEG", "SUPERCOMBO_CALIB_ROLL_DEG", 0.0f));
-    config.input_warp_pitch = deg_to_rad(env_float_prefer("SUPERCOMBO_INPUT_WARP_PITCH_DEG", "SUPERCOMBO_CALIB_PITCH_DEG", 0.0f));
-    config.input_warp_yaw = deg_to_rad(env_float_prefer("SUPERCOMBO_INPUT_WARP_YAW_DEG", "SUPERCOMBO_CALIB_YAW_DEG", 0.0f));
 
     return config;
 }

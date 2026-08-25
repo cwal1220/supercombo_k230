@@ -24,8 +24,8 @@ bool valid_set_speed(float speed_kph) {
   return std::isfinite(speed_kph) && speed_kph > 0.0f && speed_kph < 300.0f;
 }
 
-bool valid_vision_lead(const K7AdaptiveCruiseInput &input,
-                       const K7AdaptiveCruiseConfig &config) {
+bool valid_vision_lead(const AdaptiveCruiseInput &input,
+                       const AdaptiveCruiseConfig &config) {
   return input.vision_lead_valid &&
          std::isfinite(input.vision_lead_probability) &&
          input.vision_lead_probability >= config.lead_probability_threshold &&
@@ -38,8 +38,8 @@ bool valid_vision_lead(const K7AdaptiveCruiseInput &input,
 
 }  // namespace
 
-bool load_k7_adaptive_cruise_params_json(
-    const std::string &path, K7AdaptiveCruiseConfig *config,
+bool load_adaptive_cruise_params_json(
+    const std::string &path, AdaptiveCruiseConfig *config,
     std::string *error) {
   if (!config) return false;
   std::ifstream file(path);
@@ -80,25 +80,25 @@ bool load_k7_adaptive_cruise_params_json(
   return true;
 }
 
-K7AdaptiveCruiseController::K7AdaptiveCruiseController(
-    K7AdaptiveCruiseConfig config)
+AdaptiveCruiseController::AdaptiveCruiseController(
+    AdaptiveCruiseConfig config)
     : config_(config) {}
 
-void K7AdaptiveCruiseController::update_config(
-    const K7AdaptiveCruiseConfig &config) {
+void AdaptiveCruiseController::update_config(
+    const AdaptiveCruiseConfig &config) {
   config_ = config;
 }
 
-float K7AdaptiveCruiseController::minimum_speed_kph(bool speed_unit_mph) const {
+float AdaptiveCruiseController::minimum_speed_kph(bool speed_unit_mph) const {
   return speed_unit_mph ? kMinimumSpeedMph * kMphToKph : kMinimumSpeedKph;
 }
 
-float K7AdaptiveCruiseController::display_step_kph(bool speed_unit_mph) const {
+float AdaptiveCruiseController::display_step_kph(bool speed_unit_mph) const {
   return kDisplayStep * (speed_unit_mph ? kMphToKph : 1.0f);
 }
 
-void K7AdaptiveCruiseController::capture_driver_set_speed(float speed_kph,
-                                                          double now_s) {
+void AdaptiveCruiseController::capture_driver_set_speed(float speed_kph,
+                                                        double now_s) {
   if (!valid_set_speed(speed_kph)) return;
   session_valid_ = true;
   maximum_speed_kph_ = speed_kph;
@@ -109,8 +109,8 @@ void K7AdaptiveCruiseController::capture_driver_set_speed(float speed_kph,
   command_frames_remaining_ = 0;
 }
 
-void K7AdaptiveCruiseController::update_vision_lead(
-    const K7AdaptiveCruiseInput &input) {
+void AdaptiveCruiseController::update_vision_lead(
+    const AdaptiveCruiseInput &input) {
   if (!input.vision_lead_updated || !valid_vision_lead(input, config_)) return;
 
   const bool reacquired = last_valid_lead_s_ < 0.0 ||
@@ -131,8 +131,8 @@ void K7AdaptiveCruiseController::update_vision_lead(
   last_valid_lead_s_ = input.now_s;
 }
 
-K7AdaptiveCruiseOutput K7AdaptiveCruiseController::update(
-    const K7AdaptiveCruiseInput &input) {
+AdaptiveCruiseOutput AdaptiveCruiseController::update(
+    const AdaptiveCruiseInput &input) {
   const bool accelerator_override =
       input.gas_pressed || input.driver_accelerator_override;
   if (accelerator_override) last_accelerator_override_s_ = input.now_s;
@@ -275,7 +275,7 @@ K7AdaptiveCruiseOutput K7AdaptiveCruiseController::update(
   previous_driver_button_ = input.driver_button;
   previous_driver_main_button_ = input.driver_main_button;
 
-  K7AdaptiveCruiseOutput output;
+  AdaptiveCruiseOutput output;
   output.session_valid = session_valid_;
   output.active = active;
   output.lead_valid = lead_valid;

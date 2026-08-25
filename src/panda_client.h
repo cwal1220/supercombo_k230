@@ -1,7 +1,7 @@
 #ifndef PANDA_CLIENT_H
 #define PANDA_CLIENT_H
 
-#include "panda_can_frame.h"
+#include "panda_can_codec.h"
 
 #include <libusb.h>
 

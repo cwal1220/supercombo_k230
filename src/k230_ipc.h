@@ -240,7 +240,7 @@ struct K230ControlState {
     uint32_t right_blinker = 0;
     uint32_t cruise_active = 0;
     int32_t gear = 0;
-    float speed_kph = 0.0f;
+    float cluster_speed_kph = 0.0f;
     float cruise_max_speed_kph = 0.0f;
     float cruise_command_speed_kph = 0.0f;
     float steering_angle_deg = 0.0f;

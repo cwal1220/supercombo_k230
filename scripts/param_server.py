@@ -25,11 +25,11 @@ else:
 CONTROLSD_NAME = "k230_controlsd"
 RECORDD_NAME = "k230_recordd"
 GROUP_ENV = {
-    "steering": ("K230_K7_STEERING_PARAMS", "yg_steering.json"),
-    "driving": ("K230_K7_DRIVING_PARAMS", "yg_driving.json"),
+    "steering": ("K230_STEERING_PARAMS", "steering.json"),
+    "driving": ("K230_DRIVING_PARAMS", "driving.json"),
     "adaptive_cruise": (
-        "K230_K7_ADAPTIVE_CRUISE_PARAMS",
-        "yg_adaptive_cruise.json",
+        "K230_ADAPTIVE_CRUISE_PARAMS",
+        "adaptive_cruise.json",
     ),
     "recording": ("K230_RECORDING_PARAMS", "recording.json"),
     "display": ("K230_DISPLAY_PARAMS", "display.json"),
@@ -122,57 +122,25 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "더 강하게 핸들을 잡아야 운전자 개입으로 판단합니다.",
             "작은 핸들 입력도 더 빨리 운전자 개입으로 판단합니다.",
         ),
-        "variable_steer_max": {
-            "label": "속도별 최대 토크",
-            "section": "속도별 토크 제한",
-            "description": "차량 속도에 따라 최대 토크를 보간합니다.",
-            "increase": "켜면 30~100 km/h에서 primary와 base 값을 보간합니다.",
-            "decrease": "끄면 base 최대 토크를 고정 사용합니다.",
-        },
-        "variable_steer_delta": {
-            "label": "속도별 토크 변화량",
-            "section": "속도별 토크 제한",
-            "description": "차량 속도에 따라 토크 증감 속도를 보간합니다.",
-            "increase": "켜면 속도에 따라 primary와 base 변화량을 보간합니다.",
-            "decrease": "끄면 base 변화량을 고정 사용합니다.",
-        },
-        "steer_max_base": param_meta(
-            "주행 최대 조향 토크", "고정 조향 한계", "CAN torque", 5, 0, 384,
-            "일반 주행에서 실제 사용하는 최대 조향 토크입니다.",
-            "급커브에서 더 강한 조향을 허용합니다.",
-            "조향 힘을 제한해 급커브 추종량이 줄어듭니다.",
-        ),
-        "steer_delta_up_base": param_meta(
-            "주행 토크 반응 속도", "고정 조향 한계", "torque/frame", 1, 0, 20,
-            "일반 주행에서 100 Hz 주기마다 토크를 올리는 최대량입니다.",
-            "커브 진입 시 핸들이 더 빠르게 반응합니다.",
-            "핸들 반응은 부드러워지지만 커브 진입이 늦을 수 있습니다.",
-        ),
-        "steer_delta_down_base": param_meta(
-            "주행 토크 해제 속도", "고정 조향 한계", "torque/frame", 1, 0, 30,
-            "일반 주행에서 100 Hz 주기마다 토크를 내리는 최대량입니다.",
-            "커브 종료 시 토크가 더 빠르게 풀립니다.",
-            "토크가 천천히 풀려 움직임이 부드럽지만 잔류할 수 있습니다.",
-        ),
         "torque_max_lat_accel_raw": param_meta(
             "토크 기준 횡가속도", "토크 컨트롤러", "0.1 m/s²", 1, 1, 80,
-            "토크 PID 이득을 정규화하는 최대 횡가속도 기준입니다.",
-            "같은 raw 이득의 실제 PID 반응이 약해집니다.",
-            "같은 raw 이득의 실제 PID 반응이 강해집니다.",
+            "kp/kf/ki가 전부 이 값에서 파생되는 횡방향 주 이득입니다. "
+            "fit_lateral_params.py fit으로 실측한 값을 넣습니다.",
+            "전체 이득이 약해져 추종이 느려지고 언더스티어가 늘어납니다.",
+            "전체 이득이 강해져 추종이 빨라지고 포화 여유가 줄어듭니다.",
+            quick=True, quick_section="조향 반응", quick_order=10,
         ),
         "torque_kp_raw": param_meta(
             "비례 이득 Kp", "토크 컨트롤러", "raw", 1, 0, 100,
             "현재 횡가속도 오차에 바로 반응하는 비례 이득입니다.",
             "경로 오차를 더 빠르고 강하게 보정하지만 흔들림이 늘 수 있습니다.",
             "반응이 부드러워지지만 경로 오차 회복이 느려질 수 있습니다.",
-            quick=True, quick_section="조향 반응", quick_order=30,
         ),
         "torque_kf_raw": param_meta(
             "선행 보상 Kf", "토크 컨트롤러", "raw", 1, 0, 100,
             "목표 횡가속도에 미리 더하는 feed-forward 이득입니다.",
             "커브에서 기본 조향 토크가 커집니다.",
             "커브에서 선행 조향 토크가 작아집니다.",
-            quick=True, quick_section="조향 반응", quick_order=40,
         ),
         "torque_ki_raw": param_meta(
             "적분 이득 Ki", "토크 컨트롤러", "raw", 1, 0, 100,
@@ -185,7 +153,6 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "조향계 마찰을 넘기 위해 방향 전환 시 더하는 보상입니다.",
             "작은 커브에도 핸들이 더 즉각 움직이지만 좌우 튐이 생길 수 있습니다.",
             "미세 조향이 부드러워지지만 dead zone이 커질 수 있습니다.",
-            quick=True, quick_section="조향 반응", quick_order=50,
         ),
         "torque_use_angle": {
             "label": "조향각 기반 곡률",
@@ -194,13 +161,6 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "increase": "켜면 조향각 기반 곡률을 사용합니다.",
             "decrease": "끄면 유효한 ESP yaw-rate와 속도별로 혼합합니다.",
         },
-        "torque_angle_deadzone_raw": param_meta(
-            "조향각 오차 무시 범위", "토크 컨트롤러", "0.1°", 1, 0, 50,
-            "조향각 기반 오차에서 무시하는 작은 구간입니다.",
-            "미세 오차에 덜 반응해 핸들 떨림이 줄 수 있습니다.",
-            "작은 경로 오차에도 더 민감하게 반응합니다.",
-            quick=True, quick_section="조향 반응", quick_order=60,
-        ),
         "torque_output_sign": param_meta(
             "토크 출력 방향", "고정 차량 설정", "부호", 2, -1, 1,
             "K7 YG HEV의 조향 토크 방향입니다. 정상값은 -1입니다.",
@@ -281,13 +241,6 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "request를 더 오래 유지한 뒤 잠시 끊습니다.",
             "request를 더 일찍 끊어 fault를 회피합니다.",
         ),
-        "avoid_lkas_fault_beyond": {
-            "label": "Fault 구간 확장 토크",
-            "section": "LKAS fault 보호",
-            "description": "저속·큰 조향각 fault 회피 구간에서 primary 토크 제한을 사용합니다.",
-            "increase": "켜면 해당 구간에서 확장 제한을 사용합니다.",
-            "decrease": "끄면 일반 base 토크 제한을 유지합니다.",
-        },
         "no_smart_mdps": {
             "label": "비 Smart MDPS 모드",
             "section": "고정 차량 설정",
@@ -302,13 +255,14 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "increase": "켜면 설정 속도 아래에서 차선 변경 조향을 운전자에게 넘깁니다.",
             "decrease": "끄면 방향지시등 중에도 desire 경로를 따라 자동 조향합니다.",
         },
-        "ldws_car_fix": {
-            "label": "LDWS 차량 보정",
-            "section": "고정 차량 설정",
-            "description": "LKAS11 생성 시 차량별 LDWS 보정 플래그를 사용합니다.",
-            "increase": "켜면 별도 LDWS 보정 플래그를 적용합니다.",
-            "decrease": "끄면 K7 기본 LKAS11 구성을 사용합니다.",
-        },
+        "torque_lat_accel_offset": param_meta(
+            "횡가속 편향 보정", "차량 중심 보정", "m/s²", 0.01, -1.0, 1.0,
+            "장착 롤 오차 등이 만드는 상수 횡가속 편향을 feed-forward에서 "
+            "뺍니다. fit_lateral_params.py fit의 latAccelOffset을 그대로 넣습니다.",
+            "차가 오른쪽으로 쏠릴 때 키우는 방향입니다.",
+            "차가 왼쪽으로 쏠릴 때 줄이는 방향입니다.",
+            quick=True, quick_section="주행 위치", quick_order=20,
+        ),
         "angle_offset_deg": param_meta(
             "직진 조향각 오프셋", "차량 중심 보정", "°", 0.1, -10, 10,
             "직진 상태의 조향각 센서 편차를 실제 곡률 계산 전에 뺍니다.",
@@ -350,6 +304,7 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "차량 중심에 대한 카메라 위치를 차선 검출선에 보정합니다.",
             "목표 차선 중심이 차량 기준 오른쪽으로 이동합니다.",
             "목표 차선 중심이 차량 기준 왼쪽으로 이동합니다.",
+            quick=True, quick_section="주행 위치", quick_order=30
         ),
         "path_offset_m": param_meta(
             "주행 경로 좌우 보정", "차량 중심 보정", "m", 0.01, -1, 1,
@@ -358,13 +313,6 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "목표 주행 위치가 차량 기준 왼쪽으로 이동합니다.",
             quick=True, quick_section="주행 위치", quick_order=10,
         ),
-        "invert_steer": {
-            "label": "목표 곡률 반전",
-            "section": "고정 차량 설정",
-            "description": "모델이 만든 목표 곡률의 좌우 부호를 반전합니다.",
-            "increase": "켜면 좌우 조향 방향이 완전히 반전됩니다.",
-            "decrease": "끄면 K7의 정상 곡률 방향을 사용합니다.",
-        },
         "min_steer_speed_mps": param_meta(
             "최소 자동 조향 속도", "기본 토크 제한", "m/s", 0.1, 0, 5,
             "이 속도 미만에서 토크 컨트롤러 출력을 0으로 만듭니다.",
@@ -415,20 +363,6 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "더 강한 운전자 입력에서만 자동 토크를 줄입니다.",
             "작은 운전자 입력에도 자동 토크를 더 빨리 줄입니다.",
         ),
-        "max_lateral_jerk": param_meta(
-            "최대 횡방향 Jerk", "빠른 주행 튜닝", "m/s³", 0.1, 0.1, 20,
-            "목표 곡률이 시간에 따라 바뀌는 최대 속도를 제한합니다.",
-            "커브 변화에 더 빠르게 반응하지만 조향이 급해질 수 있습니다.",
-            "조향이 부드러워지지만 급커브 진입이 늦을 수 있습니다.",
-            quick=True, quick_section="주행 반응", quick_order=10,
-        ),
-        "max_lateral_accel": param_meta(
-            "최대 횡가속도", "빠른 주행 튜닝", "m/s²", 0.1, 0.5, 5,
-            "차량 속도에 따라 허용하는 목표 곡률을 횡가속도로 제한합니다.",
-            "고속에서 더 큰 곡률과 적극적인 조향을 허용합니다.",
-            "고속 커브 조향을 더 보수적으로 제한합니다.",
-            quick=True, quick_section="주행 반응", quick_order=20,
-        ),
     },
     "adaptive_cruise": {
         "enabled": {
@@ -460,14 +394,12 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "실제 거리와 목표 거리의 차이를 목표 속도 보정으로 바꾸는 비율입니다.",
             "차간거리 변화에 더 빠르고 크게 반응하지만 속도 변동이 늘 수 있습니다.",
             "반응이 부드러워지지만 가까워지는 차량에 늦게 대응할 수 있습니다.",
-            quick=True, quick_section="속도 반응", quick_order=40,
         ),
         "max_slowdown_correction_mps": param_meta(
             "최대 감속 보정", "속도 반응", "m/s", 0.5, 0.5, 10.0,
             "선행차가 가깝거나 느릴 때 목표 속도를 낮추는 최대 보정량입니다.",
             "더 낮은 크루즈 설정을 요청해 감속 반응이 적극적이 됩니다.",
             "목표 속도 감소 폭이 작아져 감속 반응이 완만해집니다.",
-            quick=True, quick_section="속도 반응", quick_order=50,
         ),
         "max_speedup_correction_mps": param_meta(
             "최대 가속 보정", "속도 반응", "m/s", 0.5, 0.0, 5.0,
@@ -486,14 +418,12 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "선행차가 사라진 뒤 저장된 최대 속도로 복귀하기 전 기다리는 시간입니다.",
             "비전 검출이 끊겼을 때 현재 속도를 더 오래 유지합니다.",
             "선행차가 사라지면 최대 속도로 더 빨리 복귀합니다.",
-            quick=True, quick_section="복귀 동작", quick_order=60,
         ),
         "command_interval_s": param_meta(
             "속도 변경 명령 간격", "버튼 송신", "초", 0.1, 0.5, 5.0,
             "연속 SET-/RES+ 버튼 펄스를 시작할 수 있는 최소 시간 간격입니다.",
             "크루즈 설정 속도가 더 천천히 변합니다.",
             "크루즈 설정 속도가 더 빠르게 변하지만 잦은 버튼 명령이 발생합니다.",
-            quick=True, quick_section="속도 반응", quick_order=70,
         ),
         "lead_probability_threshold": param_meta(
             "선행차 인식 확률", "비전 판정", "0~1", 0.05, 0.2, 0.99,

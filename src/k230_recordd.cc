@@ -28,17 +28,6 @@ constexpr unsigned kRecordingBitrate = 12000000;
 constexpr uint64_t kConfigPollIntervalNs = 250000000ULL;
 constexpr uint64_t kMaximumFrameAgeNs = 100000000ULL;
 
-std::string env_string(const char *name, const char *fallback) {
-  const char *value = std::getenv(name);
-  return value && value[0] ? value : fallback;
-}
-
-unsigned env_uint(const char *name, unsigned fallback) {
-  const char *value = std::getenv(name);
-  if (!value || !value[0]) return fallback;
-  return static_cast<unsigned>(std::strtoul(value, nullptr, 10));
-}
-
 bool read_recording_enabled(const std::string &path, bool fallback) {
   std::ifstream file(path);
   if (!file) return fallback;
@@ -81,7 +70,7 @@ int main() {
     const std::string recording_root = env_string("K230_RECORD_ROOT", "recordings");
     const std::string codec_device = env_string("K230_RECORD_CODEC", "/dev/video0");
     const unsigned recording_bitrate =
-        env_uint("K230_RECORD_BITRATE", kRecordingBitrate);
+        env_unsigned("K230_RECORD_BITRATE", kRecordingBitrate);
 
     K230FrameRing frame_ring;
     while (!g_stop && !frame_ring.open(false)) {

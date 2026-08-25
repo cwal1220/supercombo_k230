@@ -5,21 +5,21 @@
 
 #include "driving_params.h"
 #include "hyundai_can.h"
-#include "path.h"
-#include "lateral_control.h"
-#include "steering_params.h"
+#include "lateral_path.h"
+#include "lateral_target.h"
+#include "openpilot_torque_controller.h"
 #include "vehicle_can.h"
 
-struct K7LateralControllerConfig {
+struct LateralControllerConfig {
   bool enabled = true;
   bool zero_release_when_inactive = true;
   bool force_engaged = false;
-  K7SteeringParams steering_params{};
-  K7DrivingParams driving_params{};
+  SteeringParams steering_params{};
+  DrivingParams driving_params{};
   HyundaiCanConfig can_config{};
 };
 
-struct K7LateralControlResult {
+struct LateralControlResult {
   bool engaged = false;
   bool active = false;
   bool engage_rejected = false;
@@ -29,7 +29,7 @@ struct K7LateralControlResult {
   bool vehicle_fresh = false;
   bool left_lane = false;
   bool right_lane = false;
-  float speed_kph = 0.0f;
+  float cluster_speed_kph = 0.0f;
   float control_speed_kph = 0.0f;
   float desired_curvature = 0.0f;
   float actual_curvature = 0.0f;
@@ -46,22 +46,22 @@ struct K7LateralControlResult {
   std::vector<CanFrame> frames;
 };
 
-class K7LateralController {
+class LateralController {
 public:
-  explicit K7LateralController(K7LateralControllerConfig config = K7LateralControllerConfig{});
+  explicit LateralController(LateralControllerConfig config = LateralControllerConfig{});
 
   // 제어 상태를 유지한 채 런타임 파라미터를 즉시 교체한다.
-  void update_params(const K7SteeringParams &steering_params,
-                     const K7DrivingParams &driving_params);
+  void update_params(const SteeringParams &steering_params,
+                     const DrivingParams &driving_params);
 
   // 차량 버튼/상태와 lane path를 바탕으로 LKAS 제어 결과와 CAN frame을 만든다.
-  K7LateralControlResult update(const LateralPath &path,
-                                const LateralTarget &target,
-                                const K7VehicleCanState &vehicle_state,
-                                double now_s,
-                                int frame,
-                                bool panda_ready = true,
-                                bool panda_controls_allowed = true);
+  LateralControlResult update(const LateralPath &path,
+                              const LateralTarget &target,
+                              const VehicleCanState &vehicle_state,
+                              double now_s,
+                              int frame,
+                              bool panda_ready = true,
+                              bool panda_controls_allowed = true);
 
 private:
   // CLU 버튼 edge로 engage/disengage 상태를 갱신한다.
@@ -70,7 +70,7 @@ private:
   // active를 막는 현재 gate reason을 계산한다.
   std::string active_block_reason(const LateralPath &path,
                                   const LateralTarget &target,
-                                  const K7VehicleCanState &vehicle_state,
+                                  const VehicleCanState &vehicle_state,
                                   double now_s,
                                   bool seeds_ready,
                                   bool vehicle_fresh,
@@ -80,7 +80,7 @@ private:
                                   float plan_age_s) const;
 
   // 방향지시등 기반 수동 조향 차단 타이머를 갱신한다.
-  void update_manual_blinker_timers(const K7VehicleCanState &vehicle_state,
+  void update_manual_blinker_timers(const VehicleCanState &vehicle_state,
                                     float speed_mps);
 
   // 수동 조향 차단 타이머를 한 프레임 감소시킨다.
@@ -93,17 +93,17 @@ private:
   float steering_angle_limit_deg(float speed_kph) const;
 
   // 조향각 제한으로 LKAS active를 막아야 하는지 확인한다.
-  std::string steering_angle_block(const K7VehicleCanState &vehicle_state,
+  std::string steering_angle_block(const VehicleCanState &vehicle_state,
                                    float speed_kph) const;
 
   // LKAS fault 회피를 위한 임시 cut-steer 상태를 갱신한다.
-  bool update_cut_steer_state(bool active, const K7VehicleCanState &vehicle_state);
+  bool update_cut_steer_state(bool active, const VehicleCanState &vehicle_state);
 
   // 노이즈가 있는 운전자 조향 토크를 openpilot 방식으로 필터링한다.
   bool update_steering_pressed(int driver_torque);
 
   // 운전자 조향 토크 감지 타이머를 openpilot K7 방식으로 갱신한다.
-  void update_driver_steering_guard(const K7VehicleCanState &vehicle_state,
+  void update_driver_steering_guard(const VehicleCanState &vehicle_state,
                                     float speed_mps);
 
   // 운전자 조향 중 요청 토크 fade 비율을 반환한다.
@@ -111,7 +111,7 @@ private:
 
   // smooth steer 모드에서 요청 토크를 서서히 줄이거나 회복한다.
   int smooth_steer_torque(int raw_torque,
-                          const K7VehicleCanState &vehicle_state,
+                          const VehicleCanState &vehicle_state,
                           bool steering_pressed);
 
   // 제어 내부 상태를 초기값으로 되돌린다.
@@ -126,14 +126,14 @@ private:
   int lkas_sys_state(bool active, bool left_lane, bool right_lane) const;
 
   // 최종 송신 frame 묶음을 만든다.
-  std::vector<CanFrame> build_frames(const K7VehicleCanState &vehicle_state,
-                                     const K7LateralControlResult &result,
+  std::vector<CanFrame> build_frames(const VehicleCanState &vehicle_state,
+                                     const LateralControlResult &result,
                                      int frame);
 
   // LKAS11 counter를 seed frame 기준으로 openpilot 방식에 맞춰 증가시킨다.
-  int next_lkas11_counter(const K7VehicleCanState &vehicle_state);
+  int next_lkas11_counter(const VehicleCanState &vehicle_state);
 
-  K7LateralControllerConfig config_{};
+  LateralControllerConfig config_{};
   OpenpilotTorqueController torque_controller_;
   bool engaged_ = false;
   int last_button_ = 0;

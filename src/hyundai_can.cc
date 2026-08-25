@@ -171,14 +171,14 @@ CanFrame create_mdps12_frame(const std::array<uint8_t, 8> &seed, int frame_count
   return {kHyundaiMdps12Address, kHyundaiMdps12TxBus, 8, data};
 }
 
-std::vector<CanFrame> build_k7_hev_lateral_can_frames(const HyundaiLkas11Values &lkas_seed,
-                                                      const HyundaiClu11Values &clu_seed,
-                                                      const HyundaiLkasCommand &lkas_command,
-                                                      const HyundaiCanConfig &config,
-                                                      bool lkas_active,
-                                                      float cluster_speed,
-                                                      bool is_mph,
-                                                      int frame) {
+std::vector<CanFrame> build_lateral_can_frames(const HyundaiLkas11Values &lkas_seed,
+                                                   const HyundaiClu11Values &clu_seed,
+                                                   const HyundaiLkasCommand &lkas_command,
+                                                   const HyundaiCanConfig &config,
+                                                   bool lkas_active,
+                                                   float cluster_speed_raw,
+                                                   bool is_mph,
+                                                   int frame) {
   std::vector<CanFrame> frames;
   frames.push_back(create_lkas11_frame(lkas_seed, lkas_command, config.main_bus));
 
@@ -192,7 +192,7 @@ std::vector<CanFrame> build_k7_hev_lateral_can_frames(const HyundaiLkas11Values 
       HyundaiCluCommand clu_command;
       clu_command.button = 0;
       clu_command.speed = mdps_speed_for_lkas(
-          cluster_speed, lkas_active, is_mph, config.mdps_speed_spoof_kph);
+          cluster_speed_raw, lkas_active, is_mph, config.mdps_speed_spoof_kph);
       clu_command.frame = frame;
       frames.push_back(create_clu11_frame(clu_seed, clu_command, config.mdps_bus));
     }

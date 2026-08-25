@@ -70,13 +70,13 @@ fi
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mv '$DEST/.upload/supercombo.kmodel' '$DEST/model/supercombo.kmodel'"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \
   params/calibration.json \
-  params/yg_adaptive_cruise.json \
-  params/yg_steering.json \
-  params/yg_driving.json \
+  params/adaptive_cruise.json \
+  params/steering.json \
+  params/driving.json \
   params/recording.json \
   params/display.json \
   "$BOARD:$DEST/params.defaults/"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
-  "for name in calibration.json yg_adaptive_cruise.json yg_steering.json yg_driving.json recording.json display.json; do test -e '$DEST/params/'\"\$name\" || cp '$DEST/params.defaults/'\"\$name\" '$DEST/params/'\"\$name\"; done"
+  "for name in calibration.json adaptive_cruise.json steering.json driving.json recording.json display.json; do test -e '$DEST/params/'\"\$name\" || cp '$DEST/params.defaults/'\"\$name\" '$DEST/params/'\"\$name\"; done"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "rm -rf '$DEST/.upload'; sync"
 echo "Uploaded runtime files to $BOARD:$DEST"

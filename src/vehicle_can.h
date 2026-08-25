@@ -17,9 +17,16 @@ constexpr uint32_t kHyundaiCgw2Address = 1363;       // 0x553
 constexpr uint32_t kHyundaiLca11Address = 1419;      // 0x58b
 constexpr uint32_t kHyundaiTpms11Address = 1427;     // 0x593
 
-constexpr uint8_t kK7PowertrainBus = 0;
-constexpr uint8_t kK7MdpsBus = 1;
-constexpr uint8_t kK7CameraBus = 2;
+constexpr uint8_t kPowertrainBus = 0;
+constexpr uint8_t kMdpsBus = 1;
+constexpr uint8_t kCameraBus = 2;
+
+struct CanFrame {
+  uint32_t address = 0;
+  uint8_t bus = 0;
+  uint8_t length = 0;
+  std::array<uint8_t, 8> data = {};
+};
 
 struct Sas11Values {
   float steering_angle_deg = 0.0f;
@@ -54,7 +61,7 @@ struct WhlSpd11Values {
 
 struct Scc11Values {
   bool main_mode = false;
-  float set_speed = 0.0f;
+  float set_speed_raw = 0.0f;
   bool object_valid = false;
   float object_distance_m = 0.0f;
   float object_relative_speed_mps = 0.0f;
@@ -112,7 +119,7 @@ struct Tpms11Values {
   bool warning = false;
 };
 
-struct K7VehicleCanState {
+struct VehicleCanState {
   std::array<uint8_t, 8> lkas11_seed{};
   std::array<uint8_t, 4> clu11_seed{};
   std::array<uint8_t, 8> mdps12_seed{};
@@ -139,7 +146,7 @@ struct K7VehicleCanState {
 
   int clu_button = 0;
   int clu_main_button = 0;
-  float cluster_speed = 0.0f;
+  float cluster_speed_raw = 0.0f;
   bool speed_unit_mph = false;
   int clu_alive_count = 0;
 
@@ -191,7 +198,7 @@ struct K7VehicleCanState {
   bool has_scc_cruise_state = false;
   bool cruise_main = false;
   bool cruise_active = false;
-  float cruise_set_speed = 0.0f;
+  float cruise_set_speed_raw = 0.0f;
   float estimated_cruise_set_speed_kph = 0.0f;
   bool estimated_cruise_set_speed_valid = false;
   bool estimated_cruise_active = false;
@@ -239,24 +246,24 @@ Lca11Values decode_lca11(const std::array<uint8_t, 8> &data);
 Tpms11Values decode_tpms11(const std::array<uint8_t, 8> &data);
 
 // raw CAN frame을 K7 vehicle state에 반영한다.
-void update_k7_vehicle_can_state(K7VehicleCanState *state, uint32_t address,
-                                 const std::array<uint8_t, 8> &data,
-                                 uint8_t length, uint8_t bus,
-                                 double now_s);
+void update_vehicle_can_state(VehicleCanState *state, uint32_t address,
+                              const std::array<uint8_t, 8> &data,
+                              uint8_t length, uint8_t bus,
+                              double now_s);
 
 // K7 lateral 제어에 필요한 필수 CAN이 모두 최신인지 확인한다.
-bool k7_vehicle_state_fresh(const K7VehicleCanState &state, double now_s,
-                            double timeout_s = 0.5);
+bool vehicle_state_fresh(const VehicleCanState &state, double now_s,
+                         double timeout_s = 0.5);
 
 // LKAS/CLU/MDPS seed frame이 모두 준비됐는지 확인한다.
-bool k7_seed_frames_ready(const K7VehicleCanState &state);
+bool seed_frames_ready(const VehicleCanState &state);
 
-bool k7_tpms_state_fresh(const K7VehicleCanState &state, double now_s,
-                         double timeout_s = 5.0);
+bool tpms_state_fresh(const VehicleCanState &state, double now_s,
+                      double timeout_s = 5.0);
 
 // SCC11 설정 속도를 사용하고, 없으면 고정형 크루즈 추정값을 반환한다.
-float k7_cruise_set_speed_kph(const K7VehicleCanState &state);
+float cruise_set_speed_kph(const VehicleCanState &state);
 
 // 최신 휠속도 평균을 반환하고, 프레임이 없거나 오래되면 CLU 속도로 대체한다.
-float k7_vehicle_speed_kph(const K7VehicleCanState &state, double now_s,
-                           double timeout_s = 0.5);
+float vehicle_speed_kph(const VehicleCanState &state, double now_s,
+                        double timeout_s = 0.5);

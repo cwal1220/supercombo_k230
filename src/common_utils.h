@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <cstdlib>
 #include <csignal>
 #include <cstring>
@@ -37,6 +38,72 @@ inline float clamp_float(float value, float lo, float hi)
 {
     if (!std::isfinite(value)) return lo;
     return std::min(std::max(value, lo), hi);
+}
+
+// openpilot interp: 단조 증가 xp에 대한 구간 선형 보간. 범위 밖은 끝값.
+inline float interp(float x, std::initializer_list<float> xp,
+                    std::initializer_list<float> fp) {
+  const auto xs = xp.begin();
+  const auto fs = fp.begin();
+  const size_t n = xp.size();
+  if (n == 0 || fp.size() != n) return 0.0f;
+  if (x <= xs[0]) return fs[0];
+  if (x >= xs[n - 1]) return fs[n - 1];
+  for (size_t idx = 1; idx < n; ++idx) {
+    if (x <= xs[idx]) {
+      const float low_x = xs[idx - 1];
+      const float high_x = xs[idx];
+      const float low_y = fs[idx - 1];
+      const float high_y = fs[idx];
+      if (high_x - low_x < 1e-6f && low_x - high_x < 1e-6f) return high_y;
+      return low_y + (x - low_x) * (high_y - low_y) / (high_x - low_x);
+    }
+  }
+  return fs[n - 1];
+}
+
+inline float deg_to_rad(float deg) {
+  return deg * 0.017453292519943295f;
+}
+
+inline float rad_to_deg(float rad) {
+  return rad * 57.29577951308232f;
+}
+
+inline bool env_present(const char *name) {
+  return std::getenv(name) != nullptr;
+}
+
+inline unsigned env_unsigned(const char *name, unsigned default_value) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0') return default_value;
+  char *end = nullptr;
+  const unsigned long parsed = std::strtoul(value, &end, 10);
+  return end == value ? default_value : static_cast<unsigned>(parsed);
+}
+
+inline float env_float(const char *name, float default_value) {
+  const char *value = std::getenv(name);
+  if (!value || value[0] == '\0') return default_value;
+  char *end = nullptr;
+  const float parsed = std::strtof(value, &end);
+  return end == value ? default_value : parsed;
+}
+
+
+inline std::string env_string(const char *name, const char *fallback = "") {
+  const char *value = std::getenv(name);
+  return value && value[0] ? value : fallback;
+}
+
+// params 디렉토리 경로 결정 (K230_PARAMS_DIR 재정의 가능)
+inline std::string k230_params_dir() {
+  const char *value = std::getenv("K230_PARAMS_DIR");
+  return value && value[0] != '\0' ? std::string(value) : std::string("params");
+}
+
+inline std::string k230_param_path(const char *name) {
+  return k230_params_dir() + "/" + (name ? name : "");
 }
 
 inline int clamp_int(float value, int lo, int hi)

@@ -45,7 +45,7 @@ set(PROJECT_LOCAL_INCLUDES
 )
 set(PROJECT_SYSTEM_INCLUDES)
 
-add_library(k7_control_core STATIC
+add_library(control_core STATIC
   src/departure_alert.cc
   src/driving_params.cc
   src/hyundai_can.cc
@@ -53,12 +53,13 @@ add_library(k7_control_core STATIC
   src/json_utils.cc
   src/adaptive_cruise.cc
   src/lateral_controller.cc
-  src/path.cc
+  src/lateral_path.cc
+  src/openpilot_torque_controller.cc
   src/steering_params.cc
   src/vehicle_can.cc
 )
-target_include_directories(k7_control_core PUBLIC ${PROJECT_LOCAL_INCLUDES})
-target_compile_options(k7_control_core PRIVATE ${PROJECT_WARNINGS})
+target_include_directories(control_core PUBLIC ${PROJECT_LOCAL_INCLUDES})
+target_compile_options(control_core PRIVATE ${PROJECT_WARNINGS})
 
 if(SUPERCOMBO_BUILD_RUNTIME)
   find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
@@ -127,7 +128,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
 
   set(COMMON_SOURCES
     src/app_config.cc
-    src/common_utils.cc
+    src/k230_ipc.cc
     src/model_output.cc
     src/projection.cc
   )
@@ -180,7 +181,6 @@ if(SUPERCOMBO_BUILD_RUNTIME)
 
   add_executable(k230_recordd
     src/k230_recordd.cc
-    src/common_utils.cc
     src/json_utils.cc
     src/k230_ipc.cc
     src/model_output.cc
@@ -211,7 +211,6 @@ if(SUPERCOMBO_BUILD_RUNTIME)
       src/k230_pandad.cc
       src/panda_client.cc
       src/panda_can_codec.cc
-      src/common_utils.cc
       src/k230_ipc.cc
       src/model_output.cc
       src/projection.cc
@@ -220,7 +219,9 @@ if(SUPERCOMBO_BUILD_RUNTIME)
 
     add_executable(k230_controlsd
       src/k230_controlsd.cc
-      src/common_utils.cc
+      src/k230_ipc.cc
+      src/model_output.cc
+      src/projection.cc
       src/openpilot_lateral_planner.cc
     )
     target_include_directories(k230_controlsd SYSTEM PRIVATE
@@ -234,7 +235,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
       INSTALL_RPATH "\$ORIGIN/lib"
     )
     configure_k230_target(k230_controlsd
-      k7_control_core
+      control_core
       ${ACADOS_RUNTIME_LIBS}
     )
   endif()
@@ -261,26 +262,28 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
 
   add_executable(check_k230_can_queue
     benchmarks/check_k230_can_queue.cc
-    src/common_utils.cc
+    src/k230_ipc.cc
+    src/model_output.cc
+    src/projection.cc
   )
   target_include_directories(check_k230_can_queue PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_compile_options(check_k230_can_queue PRIVATE ${PROJECT_WARNINGS})
 
-  add_executable(check_k7_control_replay
-    benchmarks/check_k7_control_replay.cc
+  add_executable(check_control_replay
+    benchmarks/check_control_replay.cc
     benchmarks/can_replay.cc
   )
-  target_link_libraries(check_k7_control_replay PRIVATE k7_control_core)
-  target_include_directories(check_k7_control_replay PRIVATE ${PROJECT_LOCAL_INCLUDES})
-  target_compile_options(check_k7_control_replay PRIVATE ${PROJECT_WARNINGS})
+  target_link_libraries(check_control_replay PRIVATE control_core)
+  target_include_directories(check_control_replay PRIVATE ${PROJECT_LOCAL_INCLUDES})
+  target_compile_options(check_control_replay PRIVATE ${PROJECT_WARNINGS})
 
   add_executable(check_departure_alert benchmarks/check_departure_alert.cc)
-  target_link_libraries(check_departure_alert PRIVATE k7_control_core)
+  target_link_libraries(check_departure_alert PRIVATE control_core)
   target_include_directories(check_departure_alert PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_compile_options(check_departure_alert PRIVATE ${PROJECT_WARNINGS})
 
   add_executable(check_adaptive_cruise benchmarks/check_adaptive_cruise.cc)
-  target_link_libraries(check_adaptive_cruise PRIVATE k7_control_core)
+  target_link_libraries(check_adaptive_cruise PRIVATE control_core)
   target_include_directories(check_adaptive_cruise PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_compile_options(check_adaptive_cruise PRIVATE ${PROJECT_WARNINGS})
 
@@ -288,6 +291,7 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
     benchmarks/bench_input_warp_overhead.cc
     src/app_config.cc
     src/model_input_transform.cc
+    src/projection.cc
   )
   target_include_directories(bench_input_warp_overhead PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_compile_options(bench_input_warp_overhead PRIVATE ${PROJECT_WARNINGS})

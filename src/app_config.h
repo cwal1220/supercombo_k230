@@ -3,6 +3,8 @@
 
 #include <string>
 
+#include "common_utils.h"
+
 constexpr unsigned kDefaultSensorWidth = 1920;
 constexpr unsigned kDefaultSensorHeight = 1080;
 /* AI 캡처 기본 해상도. 720p는 supercombo 학습 카메라(17.9 px/°)를 넘는
@@ -73,9 +75,6 @@ struct AppConfig {
     float input_warp_cx = kDefaultInputWarpCx;
     float input_warp_cy = kDefaultInputWarpCy;
     float input_warp_height = 1.22f;
-    float input_warp_roll = 0.0f;
-    float input_warp_pitch = 0.0f;
-    float input_warp_yaw = 0.0f;
 
     static AppConfig from_env(int argc, char *argv[]);
     static AppConfig from_env_defaults();
@@ -84,9 +83,4 @@ struct AppConfig {
     bool replay_enabled() const { return !replay_nv12_path.empty(); }
 };
 
-bool env_present(const char *name);
-unsigned env_unsigned(const char *name, unsigned default_value);
-float env_float(const char *name, float default_value);
-float deg_to_rad(float deg);
-float rad_to_deg(float rad);
 #endif

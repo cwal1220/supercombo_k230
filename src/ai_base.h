@@ -59,7 +59,7 @@ public:
      * @return None
      */
     ~AIBase();
-    
+
     /**
      * @brief 根据索引获取kmodel输入tensor
      * @param idx 输入数据指针

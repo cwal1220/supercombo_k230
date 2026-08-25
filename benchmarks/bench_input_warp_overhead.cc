@@ -117,7 +117,7 @@ int main(int argc, char **argv)
     ModelInputTransform identity_warp(identity_config);
 
     AppConfig pitch_config = identity_config;
-    pitch_config.input_warp_pitch = deg_to_rad(1.5f);
+    pitch_config.manual_pitch = deg_to_rad(1.5f);
     ModelInputTransform pitch_warp(pitch_config);
 
     nv12_to_yuv6_direct_openpilot_order(nv12.data(), direct.data());
@@ -163,8 +163,8 @@ int main(int argc, char **argv)
     fill_nv12(source_nv12, kSourceW, kSourceH);
 
     AppConfig source_config;
-    source_config.input_warp_pitch = deg_to_rad(-0.75f);
-    source_config.input_warp_yaw = deg_to_rad(1.1f);
+    source_config.manual_pitch = deg_to_rad(-0.75f);
+    source_config.manual_yaw = deg_to_rad(1.1f);
     ModelInputTransform med(source_config, ModelFrame::MedModel);
     ModelInputTransform sbig(source_config, ModelFrame::SmallBigModel);
     med.nv12_to_yuv6_warped_scalar(

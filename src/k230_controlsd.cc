@@ -2,9 +2,9 @@
 #include "departure_alert.h"
 #include "adaptive_cruise.h"
 #include "lateral_controller.h"
-#include "path.h"
+#include "lateral_path.h"
 #include "openpilot_lateral_planner.h"
-#include "param_paths.h"
+#include "common_utils.h"
 #include "steering_params.h"
 #include "vehicle_can.h"
 
@@ -84,22 +84,22 @@ FileStamp file_stamp(const std::string &path) {
 bool load_runtime_params(const std::string &steering_path,
                          const std::string &driving_path,
                          const std::string &adaptive_cruise_path,
-                         K7LateralControllerConfig *config,
-                         K7AdaptiveCruiseConfig *adaptive_cruise_config,
+                         LateralControllerConfig *config,
+                         AdaptiveCruiseConfig *adaptive_cruise_config,
                          std::string *error) {
-  K7SteeringParams steering = config->steering_params;
-  K7DrivingParams driving = config->driving_params;
-  K7AdaptiveCruiseConfig adaptive_cruise = *adaptive_cruise_config;
+  SteeringParams steering = config->steering_params;
+  DrivingParams driving = config->driving_params;
+  AdaptiveCruiseConfig adaptive_cruise = *adaptive_cruise_config;
   std::string load_error;
-  if (!load_k7_steering_params_json(steering_path, &steering, &load_error)) {
+  if (!load_steering_params_json(steering_path, &steering, &load_error)) {
     if (error) *error = "steering " + steering_path + ": " + load_error;
     return false;
   }
-  if (!load_k7_driving_params_json(driving_path, &driving, &load_error)) {
+  if (!load_driving_params_json(driving_path, &driving, &load_error)) {
     if (error) *error = "driving " + driving_path + ": " + load_error;
     return false;
   }
-  if (!load_k7_adaptive_cruise_params_json(
+  if (!load_adaptive_cruise_params_json(
           adaptive_cruise_path, &adaptive_cruise, &load_error)) {
     if (error) {
       *error = "adaptive cruise " + adaptive_cruise_path + ": " + load_error;
@@ -132,7 +132,7 @@ bool open_when_ready(K230CanQueue *queue, const char *topic, bool create) {
 }
 
 void apply_can_batch(const K230CanBatch &batch, double now_s,
-                     K7VehicleCanState *vehicle) {
+                     VehicleCanState *vehicle) {
   if (!batch.valid) return;
   const uint32_t count = std::min<uint32_t>(batch.count, kK230CanBatchMaxFrames);
   for (uint32_t i = 0; i < count; ++i) {
@@ -140,9 +140,9 @@ void apply_can_batch(const K230CanBatch &batch, double now_s,
     if (frame.flags != 0 || frame.data_len > 8 || frame.src > 7) continue;
     std::array<uint8_t, 8> data = {};
     std::copy_n(frame.data, frame.data_len, data.begin());
-    update_k7_vehicle_can_state(vehicle, frame.address, data,
-                                static_cast<uint8_t>(frame.data_len),
-                                static_cast<uint8_t>(frame.src), now_s);
+    update_vehicle_can_state(vehicle, frame.address, data,
+                             static_cast<uint8_t>(frame.data_len),
+                             static_cast<uint8_t>(frame.src), now_s);
   }
 }
 
@@ -164,15 +164,15 @@ K230CanBatch make_send_batch(const std::vector<CanFrame> &frames) {
   return batch;
 }
 
-float vehicle_speed_mps(const K7VehicleCanState &vehicle, double now_s,
+float vehicle_speed_mps(const VehicleCanState &vehicle, double now_s,
                         double timeout_s) {
-  return std::max(0.0f, k7_vehicle_speed_kph(vehicle, now_s, timeout_s) / 3.6f);
+  return std::max(0.0f, vehicle_speed_kph(vehicle, now_s, timeout_s) / 3.6f);
 }
 
 class LateralPlannerWorker {
 public:
-  LateralPlannerWorker(const K7SteeringParams &params,
-                       const K7DrivingParams &driving)
+  LateralPlannerWorker(const SteeringParams &params,
+                       const DrivingParams &driving)
       : planner_(params, driving), pending_steering_(params),
         pending_driving_(driving),
         thread_(&LateralPlannerWorker::run, this) {}
@@ -186,7 +186,7 @@ public:
     thread_.join();
   }
 
-  void submit(const K230ModelState &model, const K7VehicleCanState &vehicle,
+  void submit(const K230ModelState &model, const VehicleCanState &vehicle,
               float v_ego, float measured_curvature, bool active,
               float output_scale) {
     {
@@ -202,8 +202,8 @@ public:
     condition_.notify_one();
   }
 
-  void update_params(const K7SteeringParams &params,
-                     const K7DrivingParams &driving) {
+  void update_params(const SteeringParams &params,
+                     const DrivingParams &driving) {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       pending_steering_ = params;
@@ -221,7 +221,7 @@ public:
 private:
   struct Request {
     K230ModelState model;
-    K7VehicleCanState vehicle;
+    VehicleCanState vehicle;
     float v_ego = 0.0f;
     float measured_curvature = 0.0f;
     bool active = false;
@@ -231,8 +231,8 @@ private:
   void run() {
     while (true) {
       Request request;
-      K7SteeringParams steering;
-      K7DrivingParams driving;
+      SteeringParams steering;
+      DrivingParams driving;
       bool has_request = false;
       bool apply_params = false;
       {
@@ -269,8 +269,8 @@ private:
   mutable std::mutex mutex_;
   std::condition_variable condition_;
   Request request_;
-  K7SteeringParams pending_steering_;
-  K7DrivingParams pending_driving_;
+  SteeringParams pending_steering_;
+  DrivingParams pending_driving_;
   LateralTarget latest_;
   bool pending_ = false;
   bool params_pending_ = false;
@@ -301,24 +301,24 @@ int main() {
     }
     sendcan_pub.reset();
 
-    K7LateralControllerConfig config;
-    config.enabled = env_flag("K230_K7_CONTROL", true);
-    config.force_engaged = env_flag("K230_K7_FORCE_ENGAGED", false);
+    LateralControllerConfig config;
+    config.enabled = env_flag("K230_CONTROL", true);
+    config.force_engaged = env_flag("K230_FORCE_ENGAGED", false);
     const bool adaptive_cruise_env_enabled =
-        env_flag("K230_K7_ADAPTIVE_CRUISE", true);
-    K7AdaptiveCruiseConfig adaptive_cruise_config;
-    const char *steering_override = std::getenv("K230_K7_STEERING_PARAMS");
-    const char *driving_override = std::getenv("K230_K7_DRIVING_PARAMS");
+        env_flag("K230_ADAPTIVE_CRUISE", true);
+    AdaptiveCruiseConfig adaptive_cruise_config;
+    const char *steering_override = std::getenv("K230_STEERING_PARAMS");
+    const char *driving_override = std::getenv("K230_DRIVING_PARAMS");
     const char *adaptive_cruise_override =
-        std::getenv("K230_K7_ADAPTIVE_CRUISE_PARAMS");
+        std::getenv("K230_ADAPTIVE_CRUISE_PARAMS");
     const std::string steering_path = steering_override && steering_override[0] != '\0'
-        ? steering_override : k230_param_path("yg_steering.json");
+        ? steering_override : k230_param_path("steering.json");
     const std::string driving_path = driving_override && driving_override[0] != '\0'
-        ? driving_override : k230_param_path("yg_driving.json");
+        ? driving_override : k230_param_path("driving.json");
     const std::string adaptive_cruise_path =
         adaptive_cruise_override && adaptive_cruise_override[0] != '\0'
             ? adaptive_cruise_override
-            : k230_param_path("yg_adaptive_cruise.json");
+            : k230_param_path("adaptive_cruise.json");
     std::string error;
     if (!load_runtime_params(steering_path, driving_path, adaptive_cruise_path,
                              &config, &adaptive_cruise_config, &error)) {
@@ -336,17 +336,17 @@ int main() {
                  adaptive_cruise_config.standstill_gap_m,
                  adaptive_cruise_config.following_time_s,
                  adaptive_cruise_config.deceleration_rate_kph_per_s);
-    K7LateralController controller(config);
-    K7AdaptiveCruiseController adaptive_cruise_controller(
+    LateralController controller(config);
+    AdaptiveCruiseController adaptive_cruise_controller(
         adaptive_cruise_config);
     DepartureAlertDetector departure_alert_detector;
     LateralPlannerWorker lateral_planner(config.steering_params,
                                          config.driving_params);
-    K7VehicleCanState vehicle;
+    VehicleCanState vehicle;
     K230ModelState model;
     K230PandaState panda_state;
     LateralTarget lateral_target;
-    K7AdaptiveCruiseOutput adaptive_cruise;
+    AdaptiveCruiseOutput adaptive_cruise;
     uint64_t model_seq = 0;
     uint64_t panda_state_seq = 0;
     unsigned can_frames = 0;
@@ -371,7 +371,7 @@ int main() {
     double work_max_us = 0.0;
     unsigned ticks = 0;
     unsigned misses = 0;
-    K7LateralControlResult last_result;
+    LateralControlResult last_result;
     uint32_t engage_event_id = 0;
     uint32_t disengage_event_id = 0;
     uint32_t engage_reject_event_id = 0;
@@ -404,8 +404,8 @@ int main() {
         if (reload_requested || current_steering_stamp != steering_stamp ||
             current_driving_stamp != driving_stamp ||
             current_adaptive_cruise_stamp != adaptive_cruise_stamp) {
-          K7LateralControllerConfig candidate = config;
-          K7AdaptiveCruiseConfig adaptive_cruise_candidate =
+          LateralControllerConfig candidate = config;
+          AdaptiveCruiseConfig adaptive_cruise_candidate =
               adaptive_cruise_config;
           if (load_runtime_params(steering_path, driving_path,
                                   adaptive_cruise_path, &candidate,
@@ -507,7 +507,7 @@ int main() {
       const uint64_t model_timeout_ns =
           static_cast<unsigned long long>(config.driving_params.model_timeout_ms) *
           1000000ULL;
-      const LateralPath raw_path = k7_path_from_model_state(
+      const LateralPath raw_path = path_from_model_state(
           model, now_ns,
           model_timeout_ns);
       LateralPath path = raw_path;
@@ -598,7 +598,7 @@ int main() {
       const bool vision_lead_valid =
           vision_lead_signal_valid &&
           model.lead.probability >= kLeadProbabilityThreshold;
-      const float ego_speed_kph = k7_vehicle_speed_kph(vehicle, now_s);
+      const float ego_speed_kph = vehicle_speed_kph(vehicle, now_s);
       const float ego_speed_mps = ego_speed_kph / 3.6f;
       const float vision_lead_distance_m = vision_lead_signal_valid
           ? model.lead.x - kRadarToCameraDistanceM
@@ -619,7 +619,7 @@ int main() {
       alert_input.lead_relative_speed_mps =
           vision_lead_valid ? vision_lead_relative_speed_mps : 0.0f;
 
-      K7AdaptiveCruiseInput adaptive_input;
+      AdaptiveCruiseInput adaptive_input;
       adaptive_input.now_s = now_s;
       adaptive_input.enabled =
           adaptive_cruise_env_enabled && adaptive_cruise_config.enabled;
@@ -634,7 +634,7 @@ int main() {
       adaptive_input.driver_button = vehicle.clu_button;
       adaptive_input.driver_main_button = vehicle.clu_main_button;
       adaptive_input.ego_speed_kph = ego_speed_kph;
-      adaptive_input.driver_set_speed_kph = k7_cruise_set_speed_kph(vehicle);
+      adaptive_input.driver_set_speed_kph = cruise_set_speed_kph(vehicle);
       adaptive_input.vision_lead_updated = model_updated;
       adaptive_input.vision_lead_valid = vision_lead_signal_valid;
       adaptive_input.vision_lead_probability = model.lead.probability;
@@ -650,7 +650,7 @@ int main() {
         command.speed = clu_seed.speed;
         command.frame = frame;
         last_result.frames.push_back(
-            create_clu11_frame(clu_seed, command, kK7PowertrainBus));
+            create_clu11_frame(clu_seed, command, kPowertrainBus));
         last_result.should_send = true;
       }
 
@@ -701,8 +701,8 @@ int main() {
       control_state.right_blinker = vehicle.right_blinker ? 1U : 0U;
       control_state.cruise_active = vehicle.cruise_active ? 1U : 0U;
       control_state.gear = vehicle.gear;
-      control_state.speed_kph = last_result.speed_kph;
-      const float driver_set_speed_kph = k7_cruise_set_speed_kph(vehicle);
+      control_state.cluster_speed_kph = last_result.cluster_speed_kph;
+      const float driver_set_speed_kph = cruise_set_speed_kph(vehicle);
       control_state.cruise_max_speed_kph = adaptive_cruise.session_valid
           ? adaptive_cruise.maximum_speed_kph
           : driver_set_speed_kph;
@@ -730,7 +730,7 @@ int main() {
       control_state.green_light_alert_armed =
           departure_alert.green_light_armed ? 1U : 0U;
       control_state.tpms_valid =
-          k7_tpms_state_fresh(vehicle, now_s) ? 1U : 0U;
+          tpms_state_fresh(vehicle, now_s) ? 1U : 0U;
       control_state.tpms_unit = static_cast<uint32_t>(vehicle.tpms_unit);
       control_state.tpms_pressure_fl = vehicle.tpms_pressure_fl;
       control_state.tpms_pressure_fr = vehicle.tpms_pressure_fr;
@@ -773,11 +773,11 @@ int main() {
                      "engaged=%u active=%u "
                      "panda=%u/%u plan=%u mpc=%u desire=%d "
                      "torque=%d/%d driver=%d angle=%.2f "
-                     "curve=%.6f/%.6f curveVm=%.6f curveYaw=%.6f "
+                     "curve=%.6f/%.6f curveVm=%.6f curveYaw=%.6f lat=%.2f "
                      "error=%.6f pathY=%.3f "
                      "laneC=%.3f laneW=%.2f lane=%.2f/%.2f "
                      "lprob=%.2f/%.2f/%.2f lstd=%.2f/%.2f "
-                     "speed=%.1f cruise=%u max=%.1f cmd=%.1f target=%.1f "
+                     "cluster=%.1f wheel=%.1f cruise=%u max=%.1f cmd=%.1f target=%.1f "
                      "lead=%u/%.1f/%.1f button=%d pedal=%d/%d block=%s\n",
                      ticks / window_s, work_sum_us / std::max(1U, ticks), work_max_us,
                      misses, can_frames, generated_frames, publish_errors,
@@ -795,18 +795,20 @@ int main() {
                      last_result.desired_curvature, last_result.actual_curvature,
                      last_result.actual_curvature_vm,
                      last_result.actual_curvature_yaw,
-                     last_result.curvature_error, lateral_target.target_y,
-                     0.5 * (lateral_target.lane_left_y +
-                            lateral_target.lane_right_y),
-                     lateral_target.lane_width,
-                     lateral_target.lane_left_y,
-                     lateral_target.lane_right_y,
+                     vehicle.lat_accel_mps2,
+                     last_result.curvature_error, lateral_target.target_y_m,
+                     0.5 * (lateral_target.lane_left_y_m +
+                            lateral_target.lane_right_y_m),
+                     lateral_target.lane_width_m,
+                     lateral_target.lane_left_y_m,
+                     lateral_target.lane_right_y_m,
                      lateral_target.lane_left_prob,
                      lateral_target.lane_right_prob,
                      lateral_target.lane_d_prob,
                      lateral_target.lane_left_std,
                      lateral_target.lane_right_std,
-                     last_result.speed_kph,
+                     last_result.cluster_speed_kph,
+                     last_result.control_speed_kph,
                      adaptive_cruise.active ? 1U : 0U,
                      adaptive_cruise.maximum_speed_kph,
                      adaptive_cruise.commanded_speed_kph,

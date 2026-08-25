@@ -2,7 +2,7 @@
 
 #include <string>
 
-struct K7AdaptiveCruiseConfig {
+struct AdaptiveCruiseConfig {
   bool enabled = true;
   float lead_probability_threshold = 0.5f;
   float standstill_gap_m = 5.0f;
@@ -17,11 +17,11 @@ struct K7AdaptiveCruiseConfig {
   int button_pulse_frames = 5;
 };
 
-bool load_k7_adaptive_cruise_params_json(
-    const std::string &path, K7AdaptiveCruiseConfig *config,
+bool load_adaptive_cruise_params_json(
+    const std::string &path, AdaptiveCruiseConfig *config,
     std::string *error);
 
-struct K7AdaptiveCruiseInput {
+struct AdaptiveCruiseInput {
   double now_s = 0.0;
   bool enabled = true;
   bool controls_ready = false;
@@ -41,7 +41,7 @@ struct K7AdaptiveCruiseInput {
   float vision_lead_relative_speed_mps = 0.0f;
 };
 
-struct K7AdaptiveCruiseOutput {
+struct AdaptiveCruiseOutput {
   bool session_valid = false;
   bool active = false;
   bool lead_valid = false;
@@ -51,21 +51,21 @@ struct K7AdaptiveCruiseOutput {
   int command_button = 0;
 };
 
-class K7AdaptiveCruiseController {
+class AdaptiveCruiseController {
 public:
-  explicit K7AdaptiveCruiseController(
-      K7AdaptiveCruiseConfig config = K7AdaptiveCruiseConfig());
+  explicit AdaptiveCruiseController(
+      AdaptiveCruiseConfig config = AdaptiveCruiseConfig());
 
-  void update_config(const K7AdaptiveCruiseConfig &config);
-  K7AdaptiveCruiseOutput update(const K7AdaptiveCruiseInput &input);
+  void update_config(const AdaptiveCruiseConfig &config);
+  AdaptiveCruiseOutput update(const AdaptiveCruiseInput &input);
 
 private:
   void capture_driver_set_speed(float speed_kph, double now_s);
-  void update_vision_lead(const K7AdaptiveCruiseInput &input);
+  void update_vision_lead(const AdaptiveCruiseInput &input);
   float minimum_speed_kph(bool speed_unit_mph) const;
   float display_step_kph(bool speed_unit_mph) const;
 
-  K7AdaptiveCruiseConfig config_;
+  AdaptiveCruiseConfig config_;
   bool session_valid_ = false;
   bool previous_cruise_active_ = false;
   int previous_driver_button_ = 0;

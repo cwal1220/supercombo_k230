@@ -10,8 +10,6 @@ true.
 
 - `K230_KMODEL=/path/to/supercombo.kmodel`
   - overrides the model selected by `k230_manager.py`.
-- `SUPERCOMBO_MODEL_FPS=N`
-  - selects the model loop target from 1 to 30 FPS. The default is 20 FPS.
 - `SUPERCOMBO_PROFILE=1`
   - prints model pipeline averages. `k230_overlayd` also uses this for overlay
     draw/present timing.
@@ -30,16 +28,10 @@ true.
 
 ## Input warp
 
-- `SUPERCOMBO_INPUT_WARP_ROLL_DEG`, `SUPERCOMBO_INPUT_WARP_PITCH_DEG`,
-  `SUPERCOMBO_INPUT_WARP_YAW_DEG`
-  - optional model-input warp calibration in degrees. If unset, the input warp
-    reuses `SUPERCOMBO_CALIB_*` values. Without a manual override, pose-based
-    online calibration feeds back into the next frame's model input warp,
-    matching openpilot's `cameraOdometry -> liveCalibration -> modeld` loop.
-- `SUPERCOMBO_INPUT_WARP_FX`, `SUPERCOMBO_INPUT_WARP_FY`,
-  `SUPERCOMBO_INPUT_WARP_CX`, `SUPERCOMBO_INPUT_WARP_CY`
-  - optional camera intrinsics for the resized source frame. Defaults are derived
-    from the calibrated K230 `1920x1080` camera matrix.
+- `SUPERCOMBO_CALIB_ROLL_DEG`, `SUPERCOMBO_CALIB_PITCH_DEG`, `SUPERCOMBO_CALIB_YAW_DEG`
+  - optional model-input warp calibration in degrees. Without a manual override,
+    pose-based online calibration feeds back into the next frame's model input
+    warp, matching openpilot's `cameraOdometry -> liveCalibration -> modeld` loop.
 - `SUPERCOMBO_WARP_SCALAR=1`
   - disables the C908 RVV input-warp kernel for diagnostics and uses the
     bit-exact scalar fallback.
@@ -103,26 +95,26 @@ true.
 - `K230_ENABLE_CONTROL=1`
   - manager starts `k230_pandad` and `k230_controlsd`. This is the manager
     default. No openpilot checkout or Python native extension is required.
-- `K230_K7_CONTROL=0|1`
+- `K230_CONTROL=0|1`
   - enables the standalone controller. Default is `1`; Panda TX remains
     independently blocked unless `K230_PANDA_TX=1`.
-- `K230_K7_FORCE_ENGAGED=0|1`
+- `K230_FORCE_ENGAGED=0|1`
   - bypasses the SET/CANCEL engage latch for offline replay only. Default is `0`
     and must remain `0` in a vehicle.
-- `K230_K7_ADAPTIVE_CRUISE=0|1`
+- `K230_ADAPTIVE_CRUISE=0|1`
   - enables vision-based adjustment of the stock fixed-speed cruise setpoint.
     Default is `1`. The JSON defaults send at most one five-frame button pulse per
     second and pace repeated `SET-` commands with the measured vehicle
     deceleration response. It yields to driver buttons and pedals and never
     commands brakes; the driver remains responsible for braking when the stock
     cruise cannot maintain a safe following distance.
-- `K230_K7_STEERING_PARAMS=/path/to/steering_params.json`
-  - overrides the default `params/yg_steering.json` file.
-- `K230_K7_DRIVING_PARAMS=/path/to/driving_params.json`
-  - overrides `params/yg_driving.json`, which contains model/CAN freshness,
+- `K230_STEERING_PARAMS=/path/to/steering_params.json`
+  - overrides the default `params/steering.json` file.
+- `K230_DRIVING_PARAMS=/path/to/driving_params.json`
+  - overrides `params/driving.json`, which contains model/CAN freshness,
     inactive release, MDPS 60 kph spoof, and lateral motion limits.
-- `K230_K7_ADAPTIVE_CRUISE_PARAMS=/path/to/adaptive_cruise.json`
-  - overrides `params/yg_adaptive_cruise.json`. The web editor exposes it as a
+- `K230_ADAPTIVE_CRUISE_PARAMS=/path/to/adaptive_cruise.json`
+  - overrides `params/adaptive_cruise.json`. The web editor exposes it as a
     separate vision-cruise menu; valid changes are hot-reloaded on the next 100 Hz
     control tick without restarting the pipeline.
 
@@ -189,8 +181,7 @@ python3 scripts/param_server.py --host 0.0.0.0 --port 8080
 ## Production defaults
 
 - AI capture defaults to `/dev/video2`, `NV12 1280x720`, full sensor crop
-  `1920x1080+0+0`. `SUPERCOMBO_NV12_WIDTH/HEIGHT` and
-  `SUPERCOMBO_NV12_CROP_X/Y/WIDTH/HEIGHT` provide diagnostic overrides.
+  `1920x1080+0+0`.
 - Preview is fixed at `/dev/video1`; the manager waits for
   `/tmp/k230_display_ready` before opening the AI stream.
 - The ready barrier waits for 30 displayed preview frames and times out after
