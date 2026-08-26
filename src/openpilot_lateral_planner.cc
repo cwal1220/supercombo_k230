@@ -387,10 +387,13 @@ struct OpenpilotLateralPlanner::Impl {
     }
 
     const double lateral_factor = std::max(0.0, factor1 - factor2 * v_ego * v_ego);
-    const double heading_weight = use_model_path
-        ? (v_ego <= 5.0f ? 1.0 : v_ego >= 10.0f ? 0.15
-                                                : 1.0 - (v_ego - 5.0) * 0.17)
-        : 1.0;
+    /* lane 모드도 laneless와 같은 스케줄. heading은 차선 경로에서 나오므로
+     * 고속에서 heading 고정 1.0이면 횡 offset에 대한 DC 강성이 0이 되어
+     * 커브에서 바깥쪽 0.3~0.5m 평형이 생긴다(2026-08-25 실측: 요구곡률
+     * 3.4% 부족 + 바깥 offset +0.375m). */
+    const double heading_weight =
+        v_ego <= 5.0f ? 1.0 : v_ego >= 10.0f ? 0.15
+                                             : 1.0 - (v_ego - 5.0) * 0.17;
     mpc.run(x0, {std::max(0.0f, v_ego), lateral_factor}, y_pts, heading_pts,
             heading_weight);
     bool has_nan = false;

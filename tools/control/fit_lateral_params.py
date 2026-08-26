@@ -52,9 +52,12 @@ def parse_log_samples(paths, min_speed_kph, driver_max, sign, steer_max):
     samples = []
     cluster_fallback = [False]
     yaw_fallback = [False]
+    sign_probe = [0.0]
     skipped = {"inactive": 0, "driver": 0, "desire": 0, "slow": 0,
                "small": 0, "saturated": 0, "no_yaw": 0}
     for path in paths:
+        file_samples_start = len(samples)
+        sign_probe[0] = 0.0
         with open(path, "r", errors="replace") as f:
             for raw in f:
                 for line in raw.replace("\r", "\n").split("\n"):
@@ -98,11 +101,20 @@ def parse_log_samples(paths, min_speed_kph, driver_max, sign, steer_max):
                     # ESP12 실측 횡가속(lat=)이 있으면 그것을 쓴다. 요레이트
                     # 간접값과 달리 openpilot torqued의 offset 정의와 일치한다.
                     lat_accel = _field(line, "lat")
+                    v = speed / 3.6
+                    kin = curve_yaw * v * v
                     if lat_accel is None:
-                        v = speed / 3.6
-                        lat_accel = curve_yaw * v * v
+                        lat_accel = kin
                         yaw_fallback[0] = True
+                    else:
+                        # 부호 감지용: 반전 수정(2026-08-25) 이전 로그 호환
+                        sign_probe[0] += lat_accel * kin
                     samples.append((torque_norm, lat_accel))
+        if sign_probe[0] < 0:
+            print(f"공지: {path}: lat= 부호가 반전 이전 로그다. 파일 단위로 뒤집는다.")
+            for i in range(file_samples_start, len(samples)):
+                t, l = samples[i]
+                samples[i] = (t, -l)
     if yaw_fallback[0]:
         print("경고: lat= 필드가 없어 요레이트 간접값을 썼다. offset은 "
               "openpilot 정의와 달라 FF 보정에 그대로 넣으면 안 된다.")
