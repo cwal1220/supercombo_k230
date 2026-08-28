@@ -78,7 +78,8 @@ def main() -> None:
   onnx.checker.check_model(model)
   args.out_model.parent.mkdir(parents=True, exist_ok=True)
   onnx.save(model, str(args.out_model))
-  print(f"retyped {', '.join(IMAGE_INPUTS)} -> uint8 with Cast: {args.out_model}")
+  op_name = "DequantizeLinear" if args.op == "dequantize" else "Cast"
+  print(f"retyped {', '.join(IMAGE_INPUTS)} -> uint8 with {op_name}: {args.out_model}")
 
 
 if __name__ == "__main__":

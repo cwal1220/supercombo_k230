@@ -50,6 +50,10 @@ struct Esp12Values {
   float yaw_rate_rad_s = 0.0f;
   bool yaw_rate_valid = true;
   float lat_accel_mps2 = 0.0f;
+  bool lat_accel_valid = false;
+  float long_accel_mps2 = 0.0f;
+  bool long_accel_valid = false;
+  float brake_pressure_bar = 0.0f;
 };
 
 struct WhlSpd11Values {
@@ -155,6 +159,10 @@ struct VehicleCanState {
   float yaw_rate_rad_s = 0.0f;
   bool yaw_rate_valid = true;
   float lat_accel_mps2 = 0.0f;
+  bool lat_accel_valid = false;
+  float long_accel_mps2 = 0.0f;
+  bool long_accel_valid = false;
+  float brake_pressure_bar = 0.0f;
   float wheel_speed_fl_kph = 0.0f;
   float wheel_speed_fr_kph = 0.0f;
   float wheel_speed_rl_kph = 0.0f;

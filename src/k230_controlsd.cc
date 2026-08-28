@@ -773,7 +773,7 @@ int main() {
                      "engaged=%u active=%u "
                      "panda=%u/%u plan=%u mpc=%u desire=%d "
                      "torque=%d/%d driver=%d angle=%.2f "
-                     "curve=%.6f/%.6f curveVm=%.6f curveYaw=%.6f lat=%.2f "
+                     "curve=%.6f/%.6f curveVm=%.6f curveYaw=%.6f lat=%.2f bank=%.2f long=%.2f "
                      "error=%.6f pathY=%.3f "
                      "laneC=%.3f laneW=%.2f lane=%.2f/%.2f "
                      "lprob=%.2f/%.2f/%.2f lstd=%.2f/%.2f "
@@ -796,6 +796,8 @@ int main() {
                      last_result.actual_curvature_vm,
                      last_result.actual_curvature_yaw,
                      vehicle.lat_accel_mps2,
+                     controller.road_bank_lat_accel(),
+                     vehicle.long_accel_mps2,
                      last_result.curvature_error, lateral_target.target_y_m,
                      0.5 * (lateral_target.lane_left_y_m +
                             lateral_target.lane_right_y_m),

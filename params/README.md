@@ -152,6 +152,7 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 | `angle_offset_deg` | 0.0 | degree / -10~10 | 조향각 센서의 직진 오프셋이다. 실제 곡률 추정 전에 센서 각도에서 뺀다. |
 | `roll_rad` | 0.0 | radian / -0.2~0.2 | 도로 또는 차량 roll에 의한 횡가속도와 곡률 보정값이다. |
 | `torque_lat_accel_offset` | 0.0 | m/s^2 / -1.0~1.0 | 장착 롤 오차 등이 만드는 상수 횡가속 편향을 feed-forward에서 뺀다(openpilot latAccelOffset). 값은 `tools/control/fit_lateral_params.py fit`으로 주행 로그에서 실측한다. 양수 = 차가 오른쪽으로 쏠릴 때 키우는 방향(+y=오른쪽 관례, openpilot 문서와 반대 어휘). fit 출력을 그대로 넣는다. |
+| `live_bank_compensation` | true | bool | ESP12 실측으로 추정한 도로 편경사(2초 필터)를 feed-forward에서 실시간 보정한다. 켜면 센서로 보이는 편향(크라운·영점)은 bank가 흡수하므로, `torque_lat_accel_offset`은 센서에 안 보이는 토크 경로/기계 편향 전용 트림으로만 쓴다. |
 | `mass_kg` | 1816.0 | kg / 1000~2600 | 차량 모델과 타이어 횡강성 계산에 사용하는 차량 질량이다. |
 | `wheelbase_m` | 2.855 | m / 2.0~3.5 | 차량 축거다. |
 | `center_to_front_ratio` | 0.4 | wheelbase ratio / 0.2~0.7 | 무게중심에서 전축까지 거리의 축거 대비 비율이다. |

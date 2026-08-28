@@ -150,6 +150,13 @@ Esp12Values decode_esp12(const std::array<uint8_t, 8> &data) {
    * 실차 344샘플 회귀: 실측 = -1.022 x (curveYaw*v^2) + 0.158. 반전해 저장. */
   values.lat_accel_mps2 =
       -(static_cast<float>(get_signal_le(data.data(), 0, 11)) * 0.01f - 10.23f);
+  values.lat_accel_valid = get_signal_le(data.data(), 12, 1) == 0;
+  // 부호 관례 미검증(로그 전용). LAT처럼 반대일 수 있으니 제어에 쓰기 전 실측할 것.
+  values.long_accel_mps2 =
+      static_cast<float>(get_signal_le(data.data(), 13, 11)) * 0.01f - 10.23f;
+  values.long_accel_valid = get_signal_le(data.data(), 25, 1) == 0;
+  values.brake_pressure_bar =
+      static_cast<float>(get_signal_le(data.data(), 26, 12)) * 0.1f;
   return values;
 }
 
@@ -287,6 +294,10 @@ void update_vehicle_can_state(VehicleCanState *state, uint32_t address,
     state->yaw_rate_rad_s = esp.yaw_rate_rad_s;
     state->yaw_rate_valid = esp.yaw_rate_valid;
     state->lat_accel_mps2 = esp.lat_accel_mps2;
+    state->lat_accel_valid = esp.lat_accel_valid;
+    state->long_accel_mps2 = esp.long_accel_mps2;
+    state->long_accel_valid = esp.long_accel_valid;
+    state->brake_pressure_bar = esp.brake_pressure_bar;
     state->esp12_time_s = now_s;
   } else if (address == kHyundaiWhlSpd11Address && length >= 8) {
     const WhlSpd11Values wheel = decode_whl_spd11(data);

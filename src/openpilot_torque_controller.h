@@ -19,7 +19,8 @@ public:
              bool steering_rate_limited,
              const SteeringParams &params,
              float yaw_rate_rad_s = 0.0f,
-             bool yaw_rate_valid = false);
+             bool yaw_rate_valid = false,
+             float road_bank_lat_accel = 0.0f);
 
   // 현재 조향각/속도에서 차량 모델 기반 실제 curvature를 추정한다.
   float estimate_actual_curvature(float speed_mps,

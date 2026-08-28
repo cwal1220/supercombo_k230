@@ -64,7 +64,8 @@ int OpenpilotTorqueController::update(bool active,
                                       bool steering_rate_limited,
                                       const SteeringParams &params,
                                       float yaw_rate_rad_s,
-                                      bool yaw_rate_valid) {
+                                      bool yaw_rate_valid,
+                                      float road_bank_lat_accel) {
   const float actual_curvature = estimate_actual_curvature(
       speed_mps, steering_angle_deg, params, yaw_rate_rad_s, yaw_rate_valid);
 
@@ -116,8 +117,9 @@ int OpenpilotTorqueController::update(bool active,
   const float error = setpoint - measurement;
 
   float feedforward = desired_lat_accel - params.roll_rad * kGravity;
-  // 장착 롤 오차 등이 만드는 상수 횡가속 편향 보정 (openpilot latAccelOffset)
+  // 상수 편향(offset)과 실시간 편경사(bank)를 FF에서 뺀다
   feedforward -= params.torque_lat_accel_offset;
+  if (params.live_bank_compensation) feedforward -= road_bank_lat_accel;
   const float friction = interp(
       apply_deadzone(error + kJerkGain * jerk_filtered_, lat_accel_deadzone),
       {-kFrictionThreshold, kFrictionThreshold},

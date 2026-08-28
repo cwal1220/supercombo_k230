@@ -255,6 +255,13 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "increase": "켜면 설정 속도 아래에서 차선 변경 조향을 운전자에게 넘깁니다.",
             "decrease": "끄면 방향지시등 중에도 desire 경로를 따라 자동 조향합니다.",
         },
+        "live_bank_compensation": {
+            "label": "실시간 편경사 보정",
+            "section": "차량 중심 보정",
+            "description": "ESP12 실측 횡가속으로 추정한 도로 편경사를 FF에서 보정합니다.",
+            "increase": "켜면 커브별 편경사까지 실시간 보정합니다.",
+            "decrease": "끄면 상수 offset만 사용합니다.",
+        },
         "torque_lat_accel_offset": param_meta(
             "횡가속 편향 보정", "차량 중심 보정", "m/s²", 0.01, -1.0, 1.0,
             "장착 롤 오차 등이 만드는 상수 횡가속 편향을 feed-forward에서 "

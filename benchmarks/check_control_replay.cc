@@ -565,6 +565,26 @@ void verify_reengage_has_no_stale_buffer_spike() {
           "re-engage must not compare against stale pre-disengage requests");
 }
 
+// 라이브 뱅크: 편경사에 해당하는 만큼 FF가 이동해야 한다.
+void verify_live_bank_compensation() {
+  OpenpilotTorqueController with_bank, without_bank;
+  SteeringParams params;
+  params.enabled = true;
+  params.torque_use_angle = true;
+  params.live_bank_compensation = true;
+  SteeringParams off = params;
+  off.live_bank_compensation = false;
+  for (int i = 0; i < 120; ++i) {
+    with_bank.update(true, 20.0f, 0.002f, 1.0f, false, false, params,
+                     0.0f, false, -0.117f);
+    without_bank.update(true, 20.0f, 0.002f, 1.0f, false, false, off,
+                        0.0f, false, -0.117f);
+  }
+  const float diff = with_bank.feedforward() - without_bank.feedforward();
+  require(std::fabs(diff - 0.117f) < 1e-3f,
+          "live bank must shift feedforward by -bank exactly");
+}
+
 // latAccelOffset: 상수 편향이 FF에서 그대로 빠져야 한다.
 void verify_lat_accel_offset_shifts_feedforward() {
   OpenpilotTorqueController a, b;
@@ -830,6 +850,7 @@ int main(int argc, char **argv) {
     verify_delay_compensated_error();
     verify_reengage_has_no_stale_buffer_spike();
     verify_lat_accel_offset_shifts_feedforward();
+    verify_live_bank_compensation();
     verify_runtime_params_apply_immediately();
     verify_lkas_hud_state_stability();
     verify_panda_gate_and_handoff();

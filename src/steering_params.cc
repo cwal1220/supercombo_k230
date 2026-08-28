@@ -110,6 +110,7 @@ bool load_steering_params_json(const std::string &path,
     parse_json_optional_float(text, "angle_offset_deg", -10.0f, 10.0f, &params->angle_offset_deg);
     parse_json_optional_float(text, "roll_rad", -0.2f, 0.2f, &params->roll_rad);
     parse_json_optional_float(text, "torque_lat_accel_offset", -1.0f, 1.0f, &params->torque_lat_accel_offset);
+    parse_json_optional_bool(text, "live_bank_compensation", &params->live_bank_compensation);
     parse_json_optional_float(text, "mass_kg", 1000.0f, 2600.0f, &params->mass_kg);
     parse_json_optional_float(text, "wheelbase_m", 2.0f, 3.5f, &params->wheelbase_m);
     parse_json_optional_float(text, "center_to_front_ratio", 0.2f, 0.7f, &params->center_to_front_ratio);

@@ -196,11 +196,28 @@ LateralControlResult LateralController::update(const LateralPath &path,
                                   static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) /
                                       1000.0) &&
                               vehicle_state.yaw_rate_valid;
+  /* 편경사: 8 m/s 이상 + 신호 유효할 때만 갱신, rc 2초. 실측 검증식
+   * (2026-08-27, 직선 -0.117 재현): bank = lat + yaw_rate*v. */
+  constexpr float kBankAlpha = 0.01f / (2.0f + 0.01f);
+  if (yaw_rate_valid && vehicle_state.lat_accel_valid &&
+      std::isfinite(vehicle_state.lat_accel_mps2) && speed_mps > 8.0f) {
+    const float bank = clamp_float(
+        vehicle_state.lat_accel_mps2 + vehicle_state.yaw_rate_rad_s * speed_mps,
+        -2.0f, 2.0f);
+    if (!road_bank_init_) { road_bank_lat_accel_ = bank; road_bank_init_ = true; }
+    road_bank_lat_accel_ += kBankAlpha * (bank - road_bank_lat_accel_);
+    road_bank_stale_frames_ = 0;
+  } else if (++road_bank_stale_frames_ > 3000) {
+    // 30초 넘게 갱신이 없으면 낡은 편경사를 0으로 감쇠하고 재초기화를 허용
+    road_bank_lat_accel_ += kBankAlpha * (0.0f - road_bank_lat_accel_);
+    road_bank_init_ = false;
+  }
+
   if (result.active) {
     const int raw_torque = torque_controller_.update(
         true, speed_mps, result.desired_curvature, vehicle_state.steering_angle_deg,
         steering_pressed, steer_rate_limited_, control_params,
-        vehicle_state.yaw_rate_rad_s, yaw_rate_valid);
+        vehicle_state.yaw_rate_rad_s, yaw_rate_valid, road_bank_lat_accel_);
     if (config_.steering_params.smooth_steer_method == 1) {
       result.desired_torque = smooth_steer_torque(raw_torque, vehicle_state, steering_pressed);
     } else {
@@ -221,7 +238,8 @@ LateralControlResult LateralController::update(const LateralPath &path,
     torque_controller_.update(false, speed_mps, result.desired_curvature,
                               vehicle_state.steering_angle_deg,
                               false, steer_rate_limited_, control_params,
-                              vehicle_state.yaw_rate_rad_s, yaw_rate_valid);
+                              vehicle_state.yaw_rate_rad_s, yaw_rate_valid,
+                              road_bank_lat_accel_);
     result.actual_curvature = torque_controller_.actual_curvature();
     result.actual_curvature_vm = torque_controller_.actual_curvature_vm();
     result.actual_curvature_yaw = torque_controller_.actual_curvature_yaw();

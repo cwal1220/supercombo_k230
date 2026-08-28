@@ -268,6 +268,9 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
   )
   target_include_directories(check_k230_can_queue PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_compile_options(check_k230_can_queue PRIVATE ${PROJECT_WARNINGS})
+  if(NOT APPLE)
+    target_link_libraries(check_k230_can_queue PRIVATE rt)
+  endif()
 
   add_executable(check_control_replay
     benchmarks/check_control_replay.cc

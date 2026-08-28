@@ -49,6 +49,9 @@ struct SteeringParams {
   /* openpilot latAccelOffset(m/s^2). 상수 횡가속 편향을 FF에서 뺀다.
    * +y=오른쪽 관례라 양수 = 우측 쏠림 보정. fit 도구 출력을 그대로 넣는다. */
   float torque_lat_accel_offset = 0.0f;
+  /* ESP12 실측으로 추정한 도로 편경사(뱅크)를 FF에서 실시간 보정한다.
+   * 켜면 상수 offset이 커버 못 하는 커브별 편경사까지 잡는다. */
+  bool live_bank_compensation = true;
   float mass_kg = 1816.0f;
   float wheelbase_m = 2.855f;
   float center_to_front_ratio = 0.4f;
