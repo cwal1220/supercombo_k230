@@ -339,6 +339,11 @@ public:
                     size_t size);
     bool copy_slot(unsigned index, uint64_t frame_id, uint8_t *destination,
                    size_t size) const;
+    /* NV12 슬롯을 Y/UV 목적지로 나눠 복사한다. 소비자가 이미 스트라이드가
+     * 있는 버퍼(예: 인코더 입력)를 쥐고 있을 때 중간 복사를 없앤다. */
+    bool copy_slot_planes(unsigned index, uint64_t frame_id, uint8_t *luma,
+                          size_t luma_stride, uint8_t *chroma,
+                          size_t chroma_stride) const;
     unsigned slot_count() const { return header_ ? header_->slot_count : 0; }
     unsigned frame_bytes() const { return header_ ? header_->frame_bytes : 0; }
     unsigned width() const { return header_ ? header_->width : 0; }

@@ -48,9 +48,8 @@ true.
   - overrides the route output directory. The default is `recordings/` under the
     runtime working directory. Recording is toggled live through the web UI or
     `params/recording.json`; at least 5 GiB and 10% free space is kept.
-- `K230_RECORD_BITRATE=12000000`
-  - overrides the HEVC recording bitrate in bits per second (default 12 Mbps).
-    Low bitrates make the VPU's raster-tail corruption worse under load.
+- `K230_RECORD_BITRATE=8000000`
+  - overrides the HEVC recording bitrate in bits per second (default 8 Mbps).
 - `K230_RECORD_STAGING=/path/to/staging`
   - overrides the tmpfs staging directory for the active route (default
     `/tmp/record_staging`). Closed files are moved to `K230_RECORD_ROOT`

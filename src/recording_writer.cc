@@ -43,15 +43,20 @@ bool make_directories(const std::string &path) {
   return true;
 }
 
+/* 보드에는 tz 데이터가 없어 localtime이 UTC로 떨어진다. route 이름은 주행을
+ * 되짚는 사람이 읽는 값이므로 KST(DST 없음)로 고정한다. */
+constexpr std::chrono::hours kKoreaStandardTimeOffset{9};
+
 std::string route_name() {
   const auto now = std::chrono::system_clock::now();
   const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
       now.time_since_epoch()) % 1000;
-  const std::time_t wall = std::chrono::system_clock::to_time_t(now);
-  std::tm local{};
-  localtime_r(&wall, &local);
+  const std::time_t wall =
+      std::chrono::system_clock::to_time_t(now + kKoreaStandardTimeOffset);
+  std::tm korea{};
+  gmtime_r(&wall, &korea);
   std::ostringstream name;
-  name << std::put_time(&local, "%Y-%m-%d--%H-%M-%S") << '-'
+  name << std::put_time(&korea, "%Y-%m-%d--%H-%M-%S") << '-'
        << std::setw(3) << std::setfill('0') << milliseconds.count();
   return name.str();
 }

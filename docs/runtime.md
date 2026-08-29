@@ -79,15 +79,14 @@ minimal passive overlay subscriber.
   sampling the camera stream
 - keeps `/dev/video0` MVX ready, but while recording is off performs only one
   warm-up encode and then leaves the VPU idle
-- records `NV12 1280x720` as 12 Mbps HEVC at 20 FPS with 60-second, independently
+- records `NV12 1280x720` as 8 Mbps HEVC at 20 FPS with 60-second, independently
   decodable segments; `frames.bin` preserves each source frame ID and capture
   timestamp
+- names route directories in KST; the board clock runs UTC and carries no
+  timezone data, so the offset is applied in the recorder
 - writes the active route to a tmpfs staging directory (`K230_RECORD_STAGING`,
   default `/tmp/record_staging`) and a mover thread copies closed files to the
   SD card sequentially, so SD latency spikes never stall the record path
-- the coded stream is 1280x736 (CTU-aligned height with neutral padding rows);
-  crop to 1280x720 when converting for playback, e.g.
-  `-vf crop=1280:720:0:0`
 - records dedicated non-blocking CAN RX/TX copies plus model, control, and Panda
   state in 60 s `events/NNN.bin` chunks, and snapshots all runtime JSON
   parameters

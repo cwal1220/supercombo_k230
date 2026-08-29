@@ -112,16 +112,17 @@ bool K230FrameRing::write_slot(unsigned index, uint64_t frame_id,
     return true;
 }
 
-bool K230FrameRing::copy_slot(unsigned index, uint64_t frame_id,
-                              uint8_t *destination, size_t size) const
-{
-    if (!header_ || !destination || index >= header_->slot_count ||
-        size != header_->frame_bytes) return false;
+namespace {
 
+/* seqlock 재시도 껍데기. copy는 슬롯이 안정적일 때만 호출되고, 복사 도중
+ * 생산자가 슬롯을 덮었으면 결과를 버리고 다시 시도한다. */
+template <typename Copy>
+bool copy_slot_guarded(const K230FrameRingHeader &header, unsigned index,
+                       uint64_t frame_id, const uint8_t *source, Copy copy)
+{
     constexpr unsigned kCopyAttempts = 8;
-    const uint8_t *source = frames_ + static_cast<size_t>(index) * header_->frame_bytes;
-    const std::atomic<uint64_t> &sequence = header_->slot_seq[index];
-    const std::atomic<uint64_t> &stored_frame_id = header_->slot_frame_id[index];
+    const std::atomic<uint64_t> &sequence = header.slot_seq[index];
+    const std::atomic<uint64_t> &stored_frame_id = header.slot_frame_id[index];
     for (unsigned attempt = 0; attempt < kCopyAttempts; ++attempt) {
         const uint64_t before = sequence.load(std::memory_order_acquire);
         if (before == 0 || (before & 1ULL) != 0) continue;
@@ -131,15 +132,61 @@ bool K230FrameRing::copy_slot(unsigned index, uint64_t frame_id,
             continue;
         }
 
-        std::memcpy(destination, source, size);
+        copy(source);
 
         const uint64_t after = sequence.load(std::memory_order_acquire);
         const uint64_t after_frame_id = stored_frame_id.load(std::memory_order_acquire);
-        if (before == after && (after & 1ULL) == 0 &&
-            after_frame_id == frame_id)
+        if (before == after && (after & 1ULL) == 0 && after_frame_id == frame_id)
             return true;
     }
     return false;
+}
+
+void copy_plane(uint8_t *destination, size_t destination_stride,
+                const uint8_t *source, unsigned width, unsigned rows)
+{
+    if (destination_stride == width) {
+        std::memcpy(destination, source, static_cast<size_t>(width) * rows);
+        return;
+    }
+    for (unsigned row = 0; row < rows; ++row) {
+        std::memcpy(destination + row * destination_stride,
+                    source + static_cast<size_t>(row) * width, width);
+    }
+}
+
+}  // namespace
+
+bool K230FrameRing::copy_slot(unsigned index, uint64_t frame_id,
+                              uint8_t *destination, size_t size) const
+{
+    if (!header_ || !destination || index >= header_->slot_count ||
+        size != header_->frame_bytes) return false;
+
+    const uint8_t *source = frames_ + static_cast<size_t>(index) * header_->frame_bytes;
+    return copy_slot_guarded(*header_, index, frame_id, source,
+                             [&](const uint8_t *from) {
+                                 std::memcpy(destination, from, size);
+                             });
+}
+
+bool K230FrameRing::copy_slot_planes(unsigned index, uint64_t frame_id,
+                                     uint8_t *luma, size_t luma_stride,
+                                     uint8_t *chroma, size_t chroma_stride) const
+{
+    if (!header_ || !luma || !chroma || index >= header_->slot_count ||
+        luma_stride < header_->width || chroma_stride < header_->width) return false;
+
+    const unsigned width = header_->width;
+    const unsigned height = header_->height;
+    const uint8_t *source = frames_ + static_cast<size_t>(index) * header_->frame_bytes;
+    return copy_slot_guarded(*header_, index, frame_id, source,
+                             [&](const uint8_t *from) {
+                                 copy_plane(luma, luma_stride, from, width, height);
+                                 copy_plane(chroma, chroma_stride,
+                                            from + static_cast<size_t>(width) * height,
+                                            width, height / 2);
+                             });
 }
 
 void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parsed,

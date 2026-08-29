@@ -22,9 +22,8 @@ namespace {
 
 volatile sig_atomic_t g_stop = 0;
 constexpr unsigned kRecordingFps = 20;
-/* 프레임이 비트 예산을 넘치면 VPU가 래스터 마지막 블록들을 깨뜨리므로
- * 720p에는 여유 있는 값이 필요하다. K230_RECORD_BITRATE로 조정 가능. */
-constexpr unsigned kRecordingBitrate = 12000000;
+/* K230_RECORD_BITRATE로 조정 가능. */
+constexpr unsigned kRecordingBitrate = 8000000;
 constexpr uint64_t kConfigPollIntervalNs = 250000000ULL;
 constexpr uint64_t kMaximumFrameAgeNs = 100000000ULL;
 
@@ -90,9 +89,6 @@ int main() {
       throw std::runtime_error("open CAN recording queues failed");
     }
 
-    /* 인코더가 VPU의 DMA 꼬리 결함을 피하려고 코딩 높이에 패딩 행을
-     * 붙인다(736행). 스트림 하단 16행은 중립 패딩이므로 시청 변환 시
-     * 실높이(720)로 crop한다. */
     MvxV4l2Encoder encoder;
     if (!encoder.open(codec_device.c_str(), frame_ring.width(), frame_ring.height(),
                       kRecordingFps, recording_bitrate)) {
@@ -136,7 +132,6 @@ int main() {
     uint64_t stale_frames = 0;
     uint64_t frame_sync_failures = 0;
     bool warmed = false;
-    std::vector<uint8_t> frame_copy(frame_ring.frame_bytes());
 
     while (!g_stop) {
       const uint64_t now_ns = k230_now_ns();
@@ -167,16 +162,24 @@ int main() {
         if (frame.slot < frame_ring.slot_count() &&
             frame.width == frame_ring.width() && frame.height == frame_ring.height()) {
           if (age_ns <= kMaximumFrameAgeNs) {
-            if (frame_ring.copy_slot(frame.slot, frame.frame_id,
-                                     frame_copy.data(), frame_copy.size())) {
-              if (encoder.submit_frame(frame_copy.data(), frame_copy.size(), frame,
-                                       packet_handler)) {
-                warmed = true;
-              } else {
-                ++dropped_frames;
-              }
-            } else {
+            /* 링 슬롯에서 인코더 입력 버퍼로 바로 복사한다. 중간 버퍼를 두면
+             * 프레임마다 1.4 MB를 한 번 더 옮기게 된다. */
+            bool copy_attempted = false;
+            const bool submitted = encoder.submit_frame(
+                frame,
+                [&](uint8_t *luma, size_t luma_stride, uint8_t *chroma,
+                    size_t chroma_stride) {
+                  copy_attempted = true;
+                  return frame_ring.copy_slot_planes(frame.slot, frame.frame_id, luma,
+                                                     luma_stride, chroma, chroma_stride);
+                },
+                packet_handler);
+            if (submitted) {
+              warmed = true;
+            } else if (copy_attempted) {
               ++frame_sync_failures;
+            } else {
+              ++dropped_frames;
             }
           } else {
             ++stale_frames;
