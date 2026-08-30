@@ -62,6 +62,44 @@ Measured for the v0.9.4 swap (100 night-highway frames, int16 PTQ, uint8
 image inputs): plan lateral 0.024 m mean / 0.062 m max at 2 s, lane position
 0.048 m mean, feature buffer frame-to-frame correlation 0.77.
 
+## Lateral bias
+
+If the car holds one side of the lane, `tools/model/lane_bias.py` says whether
+the camera calibration is responsible:
+
+```sh
+python tools/model/lane_bias.py <route_dir> [<route_dir> ...]
+```
+
+It reads the recorded `modelState` and `controlState`, keeps straight engaged
+stretches, and fits the perceived lane-centre offset against distance:
+
+| term | meaning |
+| --- | --- |
+| translation (m) | camera off the vehicle centreline, or the car genuinely off-centre. **Camera intrinsics cannot produce this** -- a principal-point or focal-length error acts about the camera, so its lateral effect is exactly zero at `x=0`. |
+| rotation (rad/m) | the calibration-shaped term. A wrong `cx` of `dcx` pixels appears here as roughly `dcx/fx`. |
+
+It also prints the tuning that was active on that drive from the route's own
+`params/` snapshot, the mean steering angle needed to hold a straight line, and
+the mean curvature command, so a control bias can be told apart from a
+perception bias.
+
+Straightness is judged from the model's own 48 m path, never from the steering
+angle: when the car needs a non-zero angle to go straight, an `|angle| < k`
+filter keeps one side of the curve distribution and manufactures a rotation
+term that is not there. On the 2026-08-19 route that mistake reported
+-4.22 mrad where the honest figure is -0.74 mrad.
+
+Measured on the two logged drives, both with `camera_offset_m = 0`:
+
+| drive | `path_offset_m` | translation | rotation |
+| --- | ---: | ---: | ---: |
+| 2026-08-16 | 0.00 | +19.9 cm | +0.18 mrad |
+| 2026-08-19 | 0.07 | +7.2 cm | -0.74 mrad |
+
+The rotation term is under 1 mrad on both, so the left-hugging on those drives
+was a lateral offset, not a camera-matrix error.
+
 ## Recording format
 
 `k230_recordd` writes the event log as 60 s chunks in `events/NNN.bin`, each
