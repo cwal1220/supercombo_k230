@@ -30,24 +30,60 @@ SUPERCOMBO_REPLAY_NV12=/root/supercombo_k230/replay_120.scnv12 \
   ./k230_modeld model/supercombo.kmodel 0
 ```
 
+## Model swap verification
+
+A kmodel swap changes three things at once: the warp input, the temporal
+plumbing, and the network. Verify them together by running the same NV12
+frames through the board and through the host.
+
+```sh
+# host: build the replay and the fp32 reference for the candidate ONNX
+python tools/model/make_replay.py \
+  --route <route_dir> --out /tmp/verify --frames 100 --skip 400 \
+  --model models/onnx/supercombo_uint8.onnx \
+  --rpy "$(python3 -c 'import json;print(",".join(map(str,json.load(open("params/calibration.json"))["rpy_rad"])))')"
+
+# board: same frames through the runtime, dumping raw outputs
+SUPERCOMBO_REPLAY_NV12=/root/verify/replay.scnv12 \
+SUPERCOMBO_RAW_DUMP=/root/verify/board_raw.bin \
+SUPERCOMBO_CALIB_AUTO=0 \
+  ./k230_modeld model/<candidate>.kmodel 0
+```
+
+The `--rpy` value must be the board's stored calibration, because the
+calibration service overrides `SUPERCOMBO_INPUT_WARP_*` on every frame:
+those variables only seed the first warp. Compare `board_raw.bin` against
+`host_ref.npy` on the slices that drive control (plan lateral offset, lane
+positions) rather than on the raw vector, and check that the feature/hidden
+slice evolves smoothly — a dead temporal buffer still produces plausible
+single-frame output.
+
+Measured for the v0.9.4 swap (100 night-highway frames, int16 PTQ, uint8
+image inputs): plan lateral 0.024 m mean / 0.062 m max at 2 s, lane position
+0.048 m mean, feature buffer frame-to-frame correlation 0.77.
+
 ## Recording format
 
 `k230_recordd` writes the event log as 60 s chunks in `events/NNN.bin`, each
 starting with an 8-byte `K230LOG1` magic, a version word, and fixed 16-byte
-record headers. The current version is `3`.
+record headers. The current version is `5`.
 
 | Record type | Payload |
 | --- | ---: |
 | `CanRx` / `CanTx` | variable CAN batch |
-| `ModelState` | 4080 B |
+| `ModelState` | 3256 B |
 | `ControlState` | 240 B |
 | `PandaState` | 96 B |
 
-Version 1 recordings are not compatible: `ModelState` was 4384 B before the
-unused lateral draft fields were removed. Version 2 kept a single route-level
-`events.bin`; CAN logging alone (~0.5 MB/s) filled the 988 MB tmpfs staging in
-about 30 minutes on long drives and silently killed the rest of the recording,
-which is why version 3 rotates event chunks alongside video segments.
+Older recordings are not `ModelState`-compatible: version 1 carried 4384 B
+including unused lateral draft fields, versions 2–3 carried 4080 B including the
+stop-line block that openpilot v0.9.4 does not emit, and version 4 carried
+4048 B including plan position stds and orientations that nothing read.
+Version 2 also kept a
+single route-level `events.bin`; CAN logging alone (~0.5 MB/s) filled the 988 MB
+tmpfs staging in about 30 minutes on long drives and silently killed the rest of
+the recording, which is why version 3 rotates event chunks alongside video
+segments. `tools/model/k230_route.py` reads both the v3 and v4 layouts.
 
 ## Lateral dataset extraction
 

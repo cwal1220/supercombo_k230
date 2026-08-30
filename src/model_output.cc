@@ -17,26 +17,46 @@ constexpr int kLeadElementSize = 4;
 constexpr int kLeadPredictionStride = kLeadTrajLen * kLeadElementSize * 2 + kLeadMhpSelection;
 constexpr int kLeadOffset = kRoadEdgeOffset + kRoadEdgeSize;
 constexpr int kLeadProbOffset = kLeadOffset + kLeadMhpN * kLeadPredictionStride;
-constexpr int kStopLinePredictionStride = 17;
-constexpr int kStopLineMhpN = 3;
-constexpr int kStopLineOffset = kLeadProbOffset + kLeadMhpSelection;
-constexpr int kStopLineSize = kStopLineMhpN * kStopLinePredictionStride + 1;
-constexpr int kStopLineProbOffset = kStopLineOffset + kStopLineSize - 1;
-constexpr int kMetaOffset = kStopLineOffset + kStopLineSize;
-// road edge는 mean 뒤에 std가 이어지므로 kRoadEdgeSize 전체가 있어야 한다.
-// mean까지만 요구하면 아래 std 읽기가 버퍼 밖으로 나간다.
-constexpr int kMinOverlayOutputFloats = kRoadEdgeOffset + kRoadEdgeSize;
-constexpr int kMinLeadOutputFloats = kLeadProbOffset + kLeadMhpSelection;
-constexpr int kMinStopLineOutputFloats = kStopLineOffset + kStopLineSize;
-constexpr int kMinMetaOutputFloats = kMetaOffset + kDesireLen;
-constexpr int kPoseOffset = 6000;
-constexpr int kMinPoseOutputFloats = kPoseOffset + 12;
+constexpr int kDesireStateOffset = kLeadProbOffset + kLeadMhpSelection;  // 5860
+
+/* meta 블록만 크기를 유도할 수 없어서(desire_state 뒤에 openpilot의 disengage
+ * 확률과 desire_pred가 붙는다) pose 이후는 꼬리에서 역산한다. 꼬리 순서는
+ * pose(12) / wide_from_device_euler(6) / sim_pose(12) / road_transform(12) /
+ * feature(128) / pad(2)로 고정이다. */
+constexpr int kPadFloats = 2;
+constexpr int kRoadTransformFloats = 12;
+constexpr int kSimPoseFloats = 12;
+constexpr int kWideFromDeviceEulerFloats = 6;
+constexpr int kPoseFloats = 12;
+constexpr int kPoseOffset = kModelOutputFloats - kPadFloats - kModelFeatureLen -
+                            kRoadTransformFloats - kSimPoseFloats -
+                            kWideFromDeviceEulerFloats - kPoseFloats;
+static_assert(kPoseOffset > kDesireStateOffset + kDesireLen,
+              "pose block must follow the meta block");
+
+float sigmoid_impl(float x)
+{
+    return 1.0f / (1.0f + std::exp(-x));
+}
+
+void softmax(const float *input, float *output, int size)
+{
+    const float max_value = *std::max_element(input, input + size);
+    float denominator = 0.0f;
+    for (int i = 0; i < size; ++i) {
+        output[i] = std::exp(input[i] - max_value);
+        denominator += output[i];
+    }
+    const float inv_denominator = 1.0f / denominator;
+    for (int i = 0; i < size; ++i)
+        output[i] *= inv_denominator;
+}
 
 } // namespace
 
 float ModelOutputParser::sigmoid(float x)
 {
-    return 1.0f / (1.0f + std::exp(-x));
+    return sigmoid_impl(x);
 }
 
 bool ParsedLeads::primary(int time_idx, float min_probability, ParsedLeadPoint *lead, float *probability) const
@@ -60,23 +80,11 @@ bool ParsedLeads::primary(int time_idx, float min_probability, ParsedLeadPoint *
     return true;
 }
 
-void softmax(const float *input, float *output, int size)
-{
-    const float max_value = *std::max_element(input, input + size);
-    float denominator = 0.0f;
-    for (int i = 0; i < size; ++i) {
-        output[i] = std::exp(input[i] - max_value);
-        denominator += output[i];
-    }
-    const float inv_denominator = 1.0f / denominator;
-    for (int i = 0; i < size; ++i)
-        output[i] *= inv_denominator;
-}
-
 ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
 {
     ParsedModelOutput output;
-    output.valid = raw.size() >= static_cast<size_t>(kMinOverlayOutputFloats);
+    // kmodel 계약이 6120 float로 고정이라 부분 길이를 받아줄 이유가 없다.
+    output.valid = raw.size() >= static_cast<size_t>(kModelOutputFloats);
     if (!output.valid) return output;
 
     int best_plan = 0;
@@ -93,29 +101,12 @@ ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
     output.plan.best_index = best_plan;
     output.plan.probability = sigmoid(best_prob);
     const int plan_base = best_plan * kPlanStride;
-    const int plan_std_base = plan_base + kTrajectorySize * 15;
     for (int i = 0; i < kTrajectorySize; ++i) {
         const int mean_base = plan_base + i * 15;
-        const int std_base = plan_std_base + i * 15;
         output.plan.points[i] = {
             raw[mean_base + 0],
             raw[mean_base + 1],
             raw[mean_base + 2],
-        };
-        output.plan.position_stds[i] = {
-            std::exp(raw[std_base + 0]),
-            std::exp(raw[std_base + 1]),
-            std::exp(raw[std_base + 2]),
-        };
-        output.plan.orientations[i] = {
-            raw[mean_base + 9],
-            raw[mean_base + 10],
-            raw[mean_base + 11],
-        };
-        output.plan.orientation_rates[i] = {
-            raw[mean_base + 12],
-            raw[mean_base + 13],
-            raw[mean_base + 14],
         };
     }
 
@@ -151,61 +142,34 @@ ParsedModelOutput ModelOutputParser::parse(const std::vector<float> &raw)
         }
     }
 
-    if (raw.size() >= static_cast<size_t>(kMinLeadOutputFloats)) {
-        output.leads.valid = true;
-        for (int lead = 0; lead < kLeadMhpN; ++lead) {
-            const int base = kLeadOffset + lead * kLeadPredictionStride;
-            for (int i = 0; i < kLeadTrajLen; ++i) {
-                output.leads.predictions[lead].points[i] = {
-                    raw[base + i * kLeadElementSize + 0],
-                    raw[base + i * kLeadElementSize + 1],
-                    raw[base + i * kLeadElementSize + 2],
-                    raw[base + i * kLeadElementSize + 3],
-                };
-            }
-            const int prob_base = base + kLeadPredictionStride - kLeadMhpSelection;
-            for (int i = 0; i < kLeadMhpSelection; ++i)
-                output.leads.predictions[lead].probabilities[i] = sigmoid(raw[prob_base + i]);
+    output.leads.valid = true;
+    for (int lead = 0; lead < kLeadMhpN; ++lead) {
+        const int base = kLeadOffset + lead * kLeadPredictionStride;
+        for (int i = 0; i < kLeadTrajLen; ++i) {
+            output.leads.predictions[lead].points[i] = {
+                raw[base + i * kLeadElementSize + 0],
+                raw[base + i * kLeadElementSize + 1],
+                raw[base + i * kLeadElementSize + 2],
+                raw[base + i * kLeadElementSize + 3],
+            };
         }
+        const int prob_base = base + kLeadPredictionStride - kLeadMhpSelection;
         for (int i = 0; i < kLeadMhpSelection; ++i)
-            output.leads.global_probabilities[i] = sigmoid(raw[kLeadProbOffset + i]);
+            output.leads.predictions[lead].probabilities[i] = sigmoid(raw[prob_base + i]);
     }
+    for (int i = 0; i < kLeadMhpSelection; ++i)
+        output.leads.global_probabilities[i] = sigmoid(raw[kLeadProbOffset + i]);
 
-    if (raw.size() >= static_cast<size_t>(kMinStopLineOutputFloats)) {
-        int best = 0;
-        float best_prob = raw[kStopLineOffset + kStopLinePredictionStride - 1];
-        for (int i = 1; i < kStopLineMhpN; ++i) {
-            const float prob =
-                raw[kStopLineOffset + i * kStopLinePredictionStride +
-                    kStopLinePredictionStride - 1];
-            if (prob > best_prob) {
-                best = i;
-                best_prob = prob;
-            }
-        }
+    softmax(raw.data() + kDesireStateOffset,
+            output.meta.desire_state.data(), kDesireLen);
 
-        const int base = kStopLineOffset + best * kStopLinePredictionStride;
-        output.stop_line.valid = true;
-        output.stop_line.best_index = best;
-        output.stop_line.probability = sigmoid(raw[kStopLineProbOffset]);
-        output.stop_line.position = {raw[base], raw[base + 1], raw[base + 2]};
-        output.stop_line.rotation = {raw[base + 3], raw[base + 4], raw[base + 5]};
-        output.stop_line.speed = raw[base + 6];
-        output.stop_line.time = raw[base + 7];
-    }
-
-    if (raw.size() >= static_cast<size_t>(kMinMetaOutputFloats))
-        softmax(raw.data() + kMetaOffset, output.meta.desire_state.data(), kDesireLen);
-
-    if (raw.size() >= static_cast<size_t>(kMinPoseOutputFloats)) {
-        output.has_pose = true;
-        const float *src = raw.data() + kPoseOffset;
-        for (int i = 0; i < 3; ++i) {
-            output.pose.trans[i] = src[i];
-            output.pose.rot[i] = src[3 + i];
-            output.pose.trans_std[i] = std::exp(src[6 + i]);
-            output.pose.rot_std[i] = std::exp(src[9 + i]);
-        }
+    output.has_pose = true;
+    const float *pose_src = raw.data() + kPoseOffset;
+    for (int i = 0; i < 3; ++i) {
+        output.pose.trans[i] = pose_src[i];
+        output.pose.rot[i] = pose_src[3 + i];
+        output.pose.trans_std[i] = std::exp(pose_src[6 + i]);
+        output.pose.rot_std[i] = std::exp(pose_src[9 + i]);
     }
 
     return output;

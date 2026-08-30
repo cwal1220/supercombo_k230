@@ -36,7 +36,6 @@ double ns_to_ms(uint64_t ns)
 
 struct ProfileStats {
     uint64_t count = 0;
-    double source_copy_ms = 0.0;
     double preprocess_ms = 0.0;
     double input_ms = 0.0;
     double run_ms = 0.0;
@@ -44,11 +43,10 @@ struct ProfileStats {
     double output_ms = 0.0;
     double total_ms = 0.0;
 
-    void add(uint64_t source_copy_ns, uint64_t preprocess_ns, uint64_t input_ns, uint64_t run_ns,
+    void add(uint64_t preprocess_ns, uint64_t input_ns, uint64_t run_ns,
              uint64_t history_ns, uint64_t output_ns, uint64_t total_ns)
     {
         ++count;
-        source_copy_ms += ns_to_ms(source_copy_ns);
         preprocess_ms += ns_to_ms(preprocess_ns);
         input_ms += ns_to_ms(input_ns);
         run_ms += ns_to_ms(run_ns);
@@ -59,9 +57,8 @@ struct ProfileStats {
         if (count % 30 == 0) {
             const double denom = static_cast<double>(count);
             std::fprintf(stderr,
-                         "\nprofile avg[%llu] ms: source_copy=%.3f preprocess=%.3f input=%.3f run=%.3f history=%.3f output=%.3f total=%.3f\n",
+                         "\nprofile avg[%llu] ms: preprocess=%.3f input=%.3f run=%.3f history=%.3f output=%.3f total=%.3f\n",
                          static_cast<unsigned long long>(count),
-                         source_copy_ms / denom,
                          preprocess_ms / denom,
                          input_ms / denom,
                          run_ms / denom,
@@ -85,10 +82,12 @@ SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const 
     : AIBase(kmodel_file, "Supercombo", debug_mode),
       input_transform_(config, ModelFrame::MedModel),
       big_input_transform_(config, ModelFrame::SmallBigModel),
-      desire_(8, 0.0f),
-      prev_desire_(8, 0.0f),
+      desire_(kDesireLen, 0.0f),
+      prev_desire_(kDesireLen, 0.0f),
       traffic_convention_{1.0f, 0.0f},
-      recurrent_state_(kRecurrentFloats, 0.0f)
+      desire_history_(kDesireHistoryTicks * kDesireLen, 0.0f),
+      feature_history_(kFeatureHistoryTicks * kModelFeatureLen, 0.0f),
+      nav_features_(kNavFeatureLen, 0.0f)
 {
     for (size_t i = 0; i < input_shapes_.size(); ++i)
         input_tensors_.push_back(get_input_tensor(i));
@@ -99,10 +98,57 @@ SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const 
     }
     if (input_tensors_[0].datatype() != input_tensors_[1].datatype())
         throw std::runtime_error("image input datatype mismatch");
-    std::fprintf(stderr, "Supercombo image input dtype=%s\n",
+
+    /* openpilot v0.9.4 계약을 강제한다: 이미지 2 + desire 이력 + traffic
+     * convention + nav + 특징 버퍼 = 6입력, 출력 6120. 다른 kmodel은 조용히
+     * 오해석되지 않도록 여기서 거부한다. */
+    size_t output_floats = 0;
+    for (const auto &shape : output_shapes_)
+        output_floats += std::accumulate(shape.begin(), shape.end(), size_t{1},
+                                         std::multiplies<size_t>());
+    if (input_tensors_.size() != 6 || output_floats != kModelOutputFloats ||
+        shape_count(2) != static_cast<size_t>(kDesireHistoryTicks * kDesireLen) ||
+        shape_count(4) != static_cast<size_t>(kNavFeatureLen) ||
+        shape_count(5) != static_cast<size_t>(kFeatureHistoryTicks * kModelFeatureLen)) {
+        throw std::runtime_error("not an openpilot v0.9.4 supercombo kmodel: " +
+                                 std::to_string(input_tensors_.size()) +
+                                 " inputs, " + std::to_string(output_floats) +
+                                 " output floats");
+    }
+
+    std::fprintf(stderr, "Supercombo openpilot-v0.9.4 image dtype=%s\n",
                  input_tensors_[0].datatype() == nncase::dt_uint8 ? "uint8" : "float32");
     if (!clear_image_input(0) || !clear_image_input(1))
         throw std::runtime_error("initialize image input history failed");
+}
+
+void SupercomboModel::push_desire_pulse()
+{
+    // 오래된 틱을 앞으로 밀고 마지막 슬롯에 현재 펄스를 넣는다.
+    std::memmove(desire_history_.data(), desire_history_.data() + kDesireLen,
+                 sizeof(float) * kDesireLen * (kDesireHistoryTicks - 1));
+    std::memcpy(desire_history_.data() + kDesireLen * (kDesireHistoryTicks - 1),
+                desire_.data(), sizeof(float) * kDesireLen);
+}
+
+void SupercomboModel::push_feature_history(const std::vector<float> &raw_output)
+{
+    // hidden_state는 마지막 2 float(pad) 앞의 128개다.
+    constexpr size_t kHiddenOffset = kModelOutputFloats - 2u - kModelFeatureLen;
+    if (raw_output.size() < kHiddenOffset + kModelFeatureLen) return;
+    std::memmove(feature_history_.data(), feature_history_.data() + kModelFeatureLen,
+                 sizeof(float) * kModelFeatureLen * (kFeatureHistoryTicks - 1));
+    std::memcpy(feature_history_.data() + kModelFeatureLen * (kFeatureHistoryTicks - 1),
+                raw_output.data() + kHiddenOffset, sizeof(float) * kModelFeatureLen);
+}
+
+bool SupercomboModel::write_temporal_inputs()
+{
+    push_desire_pulse();
+    if (!write_input(2, desire_history_.data(), desire_history_.size())) return false;
+    if (!write_input(3, traffic_convention_.data(), traffic_convention_.size())) return false;
+    if (!write_input(4, nav_features_.data(), nav_features_.size())) return false;
+    return write_input(5, feature_history_.data(), feature_history_.size());
 }
 
 size_t SupercomboModel::image_elem_bytes(size_t index) const
@@ -125,42 +171,21 @@ void SupercomboModel::set_input_calibration(const float rpy[3])
     big_input_transform_.set_calibration(rpy[0], rpy[1], rpy[2]);
 }
 
-bool SupercomboModel::run_frame_nv12(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &raw_output)
-{
-    return run_frame_nv12_impl(nv12, src_w, src_h, raw_output, true);
-}
-
-bool SupercomboModel::run_frame_nv12_stable(const uint8_t *nv12, int src_w, int src_h,
-                                            std::vector<float> &raw_output)
-{
-    return run_frame_nv12_impl(nv12, src_w, src_h, raw_output, false);
-}
-
-bool SupercomboModel::run_frame_nv12_impl(const uint8_t *nv12, int src_w, int src_h,
-                                          std::vector<float> &raw_output, bool copy_input)
+bool SupercomboModel::run_frame_nv12(const uint8_t *nv12, int src_w, int src_h,
+                                     std::vector<float> &raw_output)
 {
     if (!nv12 || src_w <= 0 || src_h <= 0)
         return false;
 
     const bool profile = profile_enabled();
-    const uint64_t t0 = profile ? now_ns() : 0;
-    const size_t nv12_bytes = static_cast<size_t>(src_w) * static_cast<size_t>(src_h) * 3 / 2;
-    const uint8_t *input_nv12 = nv12;
-    if (copy_input) {
-        nv12_cache_.resize(nv12_bytes);
-        std::memcpy(nv12_cache_.data(), nv12, nv12_bytes);
-        input_nv12 = nv12_cache_.data();
-    }
     const uint64_t t1 = profile ? now_ns() : 0;
-    if (!prepare_image_input(0, input_transform_, input_nv12, src_w, src_h)) return false;
-    if (!prepare_image_input(1, big_input_transform_, input_nv12, src_w, src_h)) return false;
+    if (!prepare_image_input(0, input_transform_, nv12, src_w, src_h)) return false;
+    if (!prepare_image_input(1, big_input_transform_, nv12, src_w, src_h)) return false;
     const uint64_t t2 = profile ? now_ns() : 0;
 
     hrt::sync(input_tensors_[0], sync_op_t::sync_write_back, true).expect("sync input 0 failed");
     hrt::sync(input_tensors_[1], sync_op_t::sync_write_back, true).expect("sync input 1 failed");
-    if (!write_input(2, desire_.data(), desire_.size())) return false;
-    if (!write_input(3, traffic_convention_.data(), traffic_convention_.size())) return false;
-    if (!write_input(4, recurrent_state_.data(), recurrent_state_.size())) return false;
+    if (!write_temporal_inputs()) return false;
     const uint64_t t3 = profile ? now_ns() : 0;
 
     run();
@@ -181,14 +206,11 @@ bool SupercomboModel::run_frame_nv12_impl(const uint8_t *nv12, int src_w, int sr
         offset += count;
     }
 
-    if (raw_output.size() >= kRecurrentFloats) {
-        std::memcpy(recurrent_state_.data(), raw_output.data() + raw_output.size() - kRecurrentFloats,
-                    kRecurrentFloats * sizeof(float));
-    }
+    push_feature_history(raw_output);
 
     if (profile) {
         const uint64_t t6 = now_ns();
-        profile_stats().add(t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4, t6 - t5, t6 - t0);
+        profile_stats().add(t2 - t1, t3 - t2, t4 - t3, t5 - t4, t6 - t5, t6 - t1);
     }
 
     return true;

@@ -48,7 +48,6 @@ int main()
         while (!g_stop) {
             if (!source.read(frame)) {
                 ++errors;
-                if (source.eof()) break;
                 continue;
             }
 

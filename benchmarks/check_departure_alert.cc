@@ -57,6 +57,8 @@ void verify_lead_departure() {
           "one stop cycle must not trigger duplicate lead alerts");
 }
 
+/* 앞차 없이 정차하고 모델이 여기서 멈추겠다고 계획하면 신호 대기로 보고
+ * 무장한다. 길이 열리면(plan > 25 m) 알림이 뜬다. */
 void verify_green_light() {
   DepartureAlertDetector detector;
   DepartureAlertOutput output;
@@ -66,9 +68,6 @@ void verify_green_light() {
     input.model_updated = true;
     input.model_valid = true;
     input.plan_distance_m = 4.0f;
-    input.stop_line_valid = true;
-    input.stop_line_probability = 0.8f;
-    input.stop_line_distance_m = 3.0f;
     output = detector.update(input);
   }
   require(!output.green_light_armed,
@@ -78,9 +77,6 @@ void verify_green_light() {
   armed_input.model_updated = true;
   armed_input.model_valid = true;
   armed_input.plan_distance_m = 4.0f;
-  armed_input.stop_line_valid = true;
-  armed_input.stop_line_probability = 0.8f;
-  armed_input.stop_line_distance_m = 3.0f;
   output = detector.update(armed_input);
   require(output.green_light_armed,
           "stable stopped model state must arm at three seconds");
@@ -90,9 +86,6 @@ void verify_green_light() {
     input.model_updated = true;
     input.model_valid = true;
     input.plan_distance_m = 26.0f;
-    input.stop_line_valid = false;
-    input.stop_line_probability = 0.2f;
-    input.stop_line_distance_m = 20.0f;
     output = detector.update(input);
   }
   require(output.type == DepartureAlertType::green_light,
@@ -111,15 +104,14 @@ void verify_three_second_display_uses_total_stop_time() {
   input.model_updated = true;
   input.model_valid = true;
   input.plan_distance_m = 4.0f;
-  input.stop_line_valid = true;
-  input.stop_line_probability = 0.8f;
-  input.stop_line_distance_m = 3.0f;
   output = detector.update(input);
   require(output.green_light_armed,
           "traffic signal must display after three seconds of total stop time");
 }
 
-void verify_signal_change_has_priority_over_lead_departure() {
+/* 정체(앞차 있음)에서는 신호 대기로 오인해 무장하면 안 되고, lead_departed
+ * 알림이 그대로 살아 있어야 한다. */
+void verify_queue_keeps_lead_alert() {
   DepartureAlertDetector detector;
   DepartureAlertOutput output;
 
@@ -127,50 +119,73 @@ void verify_signal_change_has_priority_over_lead_departure() {
     DepartureAlertInput input = stopped_input(i * 0.05);
     input.lead_updated = true;
     input.lead_valid = true;
-    input.lead_distance_m = 5.0f;
+    input.lead_distance_m = 6.0f;
     input.model_updated = true;
     input.model_valid = true;
-    input.plan_distance_m = 4.0f;
-    input.stop_line_valid = true;
-    input.stop_line_probability = 0.8f;
-    input.stop_line_distance_m = 3.0f;
-    output = detector.update(input);
-  }
-  require(output.green_light_armed,
-          "a tracked lead must not suppress the red traffic signal");
-
-  for (int i = 61; i <= 68; ++i) {
-    DepartureAlertInput input = stopped_input(i * 0.05);
-    input.lead_updated = true;
-    input.lead_valid = true;
-    input.lead_distance_m = 5.6f;
-    input.lead_relative_speed_mps = 1.0f;
-    input.model_updated = true;
-    input.model_valid = true;
-    input.plan_distance_m = 26.0f;
-    output = detector.update(input);
-  }
-  require(output.type == DepartureAlertType::green_light,
-          "signal change must take priority over a departing lead");
-  require(output.event_id == 1, "priority alert must emit one event");
-}
-
-void verify_distant_stop_line_does_not_arm() {
-  DepartureAlertDetector detector;
-  DepartureAlertOutput output;
-
-  for (int i = 0; i <= 100; ++i) {
-    DepartureAlertInput input = stopped_input(i * 0.05);
-    input.model_updated = true;
-    input.model_valid = true;
-    input.plan_distance_m = 4.0f;
-    input.stop_line_valid = true;
-    input.stop_line_probability = 0.8f;
-    input.stop_line_distance_m = 5.1f;
+    input.plan_distance_m = 3.0f;
     output = detector.update(input);
   }
   require(!output.green_light_armed,
-          "raw stop-line distance above the C2 threshold must not arm");
+          "a lead in front must not arm the signal alert");
+
+  for (int i = 61; i <= 70; ++i) {
+    DepartureAlertInput input = stopped_input(i * 0.05);
+    input.lead_updated = true;
+    input.lead_valid = true;
+    input.lead_distance_m = 7.0f;
+    input.lead_relative_speed_mps = 1.0f;
+    input.model_updated = true;
+    input.model_valid = true;
+    input.plan_distance_m = 3.0f;
+    output = detector.update(input);
+  }
+  require(output.type == DepartureAlertType::lead_departed,
+          "lead departure must still alert without stop lines");
+}
+
+/* 신호 대기로 무장한 뒤 앞차가 끼어들면 그 정차는 더 이상 신호 대기가
+ * 아니다. 무장이 풀려야 그 앞차가 출발할 때 green_light가 아니라
+ * lead_departed가 뜬다. */
+void verify_lead_cut_in_disarms_green_light() {
+  DepartureAlertDetector detector;
+  DepartureAlertOutput output;
+
+  for (int i = 0; i <= 61; ++i) {
+    DepartureAlertInput input = stopped_input(i * 0.05);
+    input.model_updated = true;
+    input.model_valid = true;
+    input.plan_distance_m = 4.0f;
+    output = detector.update(input);
+  }
+  require(output.green_light_armed,
+          "an empty stop must arm the signal alert first");
+
+  for (int i = 62; i <= 90; ++i) {
+    DepartureAlertInput input = stopped_input(i * 0.05);
+    input.lead_updated = true;
+    input.lead_valid = true;
+    input.lead_distance_m = 6.0f;
+    input.model_updated = true;
+    input.model_valid = true;
+    input.plan_distance_m = 4.0f;
+    output = detector.update(input);
+  }
+  require(!output.green_light_armed,
+          "a lead cutting in must disarm the signal alert");
+
+  for (int i = 91; i <= 100; ++i) {
+    DepartureAlertInput input = stopped_input(i * 0.05);
+    input.lead_updated = true;
+    input.lead_valid = true;
+    input.lead_distance_m = 7.0f;
+    input.lead_relative_speed_mps = 1.0f;
+    input.model_updated = true;
+    input.model_valid = true;
+    input.plan_distance_m = 30.0f;
+    output = detector.update(input);
+  }
+  require(output.type == DepartureAlertType::lead_departed,
+          "the cut-in lead departing must report a lead alert, not a signal");
 }
 
 }  // namespace
@@ -179,7 +194,7 @@ int main() {
   verify_lead_departure();
   verify_green_light();
   verify_three_second_display_uses_total_stop_time();
-  verify_signal_change_has_priority_over_lead_departure();
-  verify_distant_stop_line_does_not_arm();
+  verify_queue_keeps_lead_alert();
+  verify_lead_cut_in_disarms_green_light();
   return 0;
 }

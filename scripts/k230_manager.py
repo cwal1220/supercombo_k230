@@ -14,9 +14,12 @@ IPC_MAGIC = 0x4B323349
 IPC_VERSION = 1
 HEADER = struct.Struct("<IIIIQQII")
 HEADER_SIZE = HEADER.size
-PROCESS = struct.Struct("<16sIiiIQ")
+# K230ProcessState: 오버레이가 읽는 것은 이름과 running뿐이다.
+PROCESS = struct.Struct("<16sI")
 MAX_PROCESSES = 7
-MANAGER_STATE_SIZE = 8 + 4 + 4 + PROCESS.size * MAX_PROCESSES
+# C++ K230ManagerState는 8바이트 정렬이라 배열 뒤에 꼬리 패딩이 붙는다.
+_MANAGER_STATE_BODY = 8 + 4 + 4 + PROCESS.size * MAX_PROCESSES
+MANAGER_STATE_SIZE = (_MANAGER_STATE_BODY + 7) // 8 * 8
 DISPLAY_READY_FILE = "/tmp/k230_display_ready"
 DISPLAY_READY_TIMEOUT_MS = 7000
 START_ORDER = ("k230_overlayd", "k230_camerad", "k230_recordd", "k230_modeld")
@@ -115,9 +118,6 @@ class ProcSpec:
 class ProcState:
     spec: ProcSpec
     proc: Optional[subprocess.Popen] = None
-    restart_count: int = 0
-    last_start_ns: int = 0
-    exit_code: int = 0
     next_restart_monotonic: float = 0.0
 
     def running(self) -> bool:
@@ -201,8 +201,6 @@ class Manager:
             state.spec.cmd,
             preexec_fn=lambda nice=state.spec.nice: child_setup(nice),
         )
-        state.last_start_ns = now_ns()
-        state.exit_code = 0
         print(f"manager: started {state.spec.name} pid={state.proc.pid} nice={state.spec.nice} "
               f"cmd={' '.join(state.spec.cmd)}",
               flush=True)
@@ -221,11 +219,7 @@ class Manager:
         for name in self.process_order[:MAX_PROCESSES]:
             state = self.procs[name]
             proc_name = name.encode("ascii")[:15].ljust(16, b"\x00")
-            pid = state.proc.pid if state.proc is not None else 0
-            running = 1 if state.running() else 0
-            exit_code = state.exit_code
-            payload += PROCESS.pack(proc_name, running, pid, exit_code,
-                                    state.restart_count, state.last_start_ns)
+            payload += PROCESS.pack(proc_name, 1 if state.running() else 0)
         payload += b"\x00" * (MANAGER_STATE_SIZE - len(payload))
         self.manager_state.publish(payload)
 
@@ -267,11 +261,9 @@ class Manager:
                 ret = state.proc.poll()
                 if ret is None:
                     continue
-                state.exit_code = ret
                 print(f"\nmanager: {state.spec.name} exited code={ret}", flush=True)
                 state.proc = None
                 exit_code = ret if ret != 0 else exit_code
-                state.restart_count += 1
                 state.next_restart_monotonic = now + 1.0
 
             for state in self.procs.values():

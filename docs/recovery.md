@@ -4,21 +4,18 @@ This directory is the final reusable native C++ app bundle for K230.
 
 ## Final model
 
-Use the `iddwelu223` model. This is the graph where `Elu_223` is kept on the
-native K230 path by inserting a mathematically identity depthwise 1x1 Conv before
-that ELU.
-
 Required runtime artifact:
 
 - `models/supercombo.kmodel`
 
-The original ONNX is available in the openpilot fork:
+The source ONNX is the upstream openpilot v0.9.4 release:
 
-- [supercombo.onnx](https://github.com/cwal1220/openpilot_c2/blob/master/selfdrive/modeld/models/supercombo.onnx)
+- [supercombo.onnx](https://github.com/commaai/openpilot/blob/v0.9.4/selfdrive/modeld/models/supercombo.onnx)
 
-The rewritten ONNX is an intermediate generated artifact and is intentionally
-not tracked in this repository. See `tools/model/` for the rewrite/compile
-scripts and exact reproduction commands.
+`scripts/build_supercombo_model.sh` rebuilds the kmodel from that release. The
+intermediate ONNX files are generated artifacts and are intentionally not
+tracked in this repository; see `tools/model/` for the scripts and
+`models/README.md` for the input contract.
 
 ## What must be preserved
 
@@ -193,10 +190,6 @@ print accepted/rejected sample counts, status, rpy, and spread. Set
 `SUPERCOMBO_CALIB_ROLL_DEG`, `SUPERCOMBO_CALIB_PITCH_DEG`, or
 `SUPERCOMBO_CALIB_YAW_DEG` is provided, that manual projection wins and online
 calibration is not applied to the overlay.
-
-The overlay projection defaults to the legacy K230 road-frame projection used by
-the pre-refactor runtime. Set `SUPERCOMBO_PROJECTION_MODE=openpilot` to compare
-against the openpilot `view_from_calib` rotation.
 
 The front-vehicle marker is enabled by default with probability threshold `0.5`.
 

@@ -290,8 +290,11 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
   )
   target_include_directories(check_k230_can_queue PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_compile_options(check_k230_can_queue PRIVATE ${PROJECT_WARNINGS})
-  if(NOT APPLE)
-    target_link_libraries(check_k230_can_queue PRIVATE rt)
+  # common_utils opens POSIX shared memory; glibc keeps shm_open in librt, while
+  # macOS has it in libc. configure_k230_target() links these for the runtime
+  # binaries, but the checks are plain executables so they need it here.
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(check_k230_can_queue PRIVATE rt pthread)
   endif()
 
   add_executable(check_control_replay
@@ -345,8 +348,11 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
     add_executable(bench_ai2d_resize benchmarks/bench_ai2d_resize.cc)
     configure_k230_target(bench_ai2d_resize ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
 
-    add_executable(sequence_runner benchmarks/sequence_runner.cc)
-    configure_k230_target(sequence_runner ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
+    add_executable(bench_kmodel benchmarks/bench_kmodel.cc)
+    configure_k230_target(bench_kmodel ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
+
+    add_executable(run_kmodel_sequence benchmarks/run_kmodel_sequence.cc)
+    configure_k230_target(run_kmodel_sequence ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
 
     add_executable(probe_drm_planes benchmarks/probe_drm_planes.cc)
     configure_k230_target(probe_drm_planes mmz ${K230_SHARED_LIBS})

@@ -13,6 +13,11 @@ constexpr int kLeadTrajLen = 6;
 constexpr int kDesireLen = 8;
 constexpr float kModelHeight = 1.22f;
 
+/* openpilot v0.9.4 supercombo 출력 계약. SupercomboModel이 로드 시 이 값으로
+ * kmodel을 검증하고, 파서가 꼬리 블록 오프셋을 여기서 역산한다. */
+constexpr int kModelOutputFloats = 6120;
+constexpr int kModelFeatureLen = 128;
+
 /* openpilot T_IDXS / X_IDXS 격자. 같은 식이 여러 파일에 재정의되지 않도록
  * 여기 한 벌만 둔다. */
 inline double model_t_idx_double(int i)
@@ -41,9 +46,6 @@ struct ParsedPlan {
     int best_index = 0;
     float probability = 0.0f;
     std::array<ModelPoint, kTrajectorySize> points{};
-    std::array<ModelPoint, kTrajectorySize> position_stds{};
-    std::array<ModelPoint, kTrajectorySize> orientations{};
-    std::array<ModelPoint, kTrajectorySize> orientation_rates{};
 };
 
 struct ParsedLaneLine {
@@ -83,23 +85,12 @@ struct ParsedLeads {
     bool primary(int time_idx, float min_probability, ParsedLeadPoint *lead, float *probability = nullptr) const;
 };
 
-struct ParsedStopLine {
-    bool valid = false;
-    int best_index = 0;
-    float probability = 0.0f;
-    ModelPoint position;
-    ModelPoint rotation;
-    float speed = 0.0f;
-    float time = 0.0f;
-};
-
 struct ParsedModelOutput {
     bool valid = false;
     ParsedPlan plan;
     std::array<ParsedLaneLine, 4> lanes{};
     std::array<ParsedRoadEdge, 2> road_edges{};
     ParsedLeads leads;
-    ParsedStopLine stop_line;
     ParsedMeta meta;
     bool has_pose = false;
     PoseObservation pose{};

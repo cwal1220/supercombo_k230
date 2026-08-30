@@ -216,6 +216,7 @@ int main(int argc, char **argv)
         source_nv12.data(), kSourceW, kSourceH, med_u8_rvv.data());
     sbig.nv12_to_yuv6_warped_rvv(
         source_nv12.data(), kSourceW, kSourceH, sbig_u8_rvv.data());
+    // uint8 경로가 float 경로와 비트 동일해야 한다는 검사라 == 비교가 맞다.
     auto u8_matches_float = [](const std::vector<uint8_t> &u8,
                                const std::vector<float> &f32) {
         for (size_t i = 0; i < u8.size(); ++i) {

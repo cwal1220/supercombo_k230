@@ -19,80 +19,57 @@ constexpr int kRoadEdgeMeanSize = 2 * kTrajectorySize * 2;
 constexpr int kLeadOffset = kRoadEdgeOffset + kRoadEdgeMeanSize * 2;
 constexpr int kLeadStride = kLeadTrajLen * 4 * 2 + kLeadMhpSelection;
 constexpr int kLeadProbOffset = kLeadOffset + kLeadMhpN * kLeadStride;
-constexpr int kStopLineOffset = kLeadProbOffset + kLeadMhpSelection;
-constexpr int kStopLineStride = 17;
-constexpr int kStopLineSize = 3 * kStopLineStride + 1;
-constexpr int kMetaOffset = kStopLineOffset + kStopLineSize;
-constexpr int kPoseOffset = 6000;
+constexpr int kDesireStateOffset = kLeadProbOffset + kLeadMhpSelection;
 
 bool near(float actual, float expected, float tolerance = 1e-6f)
 {
     return std::fabs(actual - expected) <= tolerance;
 }
 
-int self_test()
+/* openpilot v0.9.4 출력 레이아웃 검사. */
+int self_test_094()
 {
-    std::vector<float> raw(6012 + 512, 0.0f);
+    // 파서와 같은 방식으로 꼬리에서 역산한다: pose(12) / wide_from_device_euler(6)
+    // / sim_pose(12) / road_transform(12) / feature(128) / pad(2).
+    constexpr int kPoseOffset094 = kModelOutputFloats - 2 - kModelFeatureLen - 12 - 12 - 6 - 12;
+    static_assert(kPoseOffset094 == 5948, "v0.9.4 pose offset moved");
+    std::vector<float> raw(kModelOutputFloats, 0.0f);
+
     for (int plan = 0; plan < 5; ++plan)
-        raw[plan * kPlanStride + kPlanStride - 1] = static_cast<float>(plan);
-    const int plan_base = 4 * kPlanStride;
-    raw[plan_base + 7 * 15 + 0] = 17.0f;
-    raw[plan_base + 7 * 15 + 1] = -1.25f;
-    raw[plan_base + 7 * 15 + 9 + 2] = 0.12f;
-    raw[plan_base + kTrajectorySize * 15 + 7 * 15 + 1] = std::log(0.4f);
+        raw[plan * kPlanStride + kPlanStride - 1] = static_cast<float>(4 - plan);
+    const int plan_base = 0;
+    raw[plan_base + 7 * 15 + 0] = 23.0f;
+    raw[plan_base + 7 * 15 + 1] = 0.75f;
 
-    const int lane = 2;
-    raw[kLaneOffset + lane * kTrajectorySize * 2 + 5 * 2] = 2.5f;
-    raw[kLaneOffset + kLaneLineSize + lane * kTrajectorySize * 2] = std::log(0.2f);
-    raw[kLaneProbOffset + lane * 2 + 1] = 1.5f;
-
-    raw[kRoadEdgeOffset + kTrajectorySize * 2 + 3 * 2] = -3.0f;
-    raw[kRoadEdgeOffset + kRoadEdgeMeanSize + kTrajectorySize * 2] = std::log(0.3f);
-
-    raw[kLeadOffset + 1 * kLeadStride] = 31.0f;
-    raw[kLeadOffset + 1 * kLeadStride + kLeadStride - kLeadMhpSelection] = 2.0f;
+    const int lane = 1;
+    raw[kLaneOffset + lane * kTrajectorySize * 2 + 5 * 2] = -1.75f;
+    raw[kLaneProbOffset + lane * 2 + 1] = 2.0f;
+    raw[kLeadOffset] = 42.0f;
     raw[kLeadProbOffset] = 3.0f;
-    const int stop_line_base = kStopLineOffset + 2 * kStopLineStride;
-    raw[stop_line_base] = 6.5f;
-    raw[stop_line_base + 1] = -0.2f;
-    raw[stop_line_base + 6] = 0.1f;
-    raw[stop_line_base + 7] = 1.4f;
-    raw[stop_line_base + kStopLineStride - 1] = 3.0f;
-    raw[kStopLineOffset + kStopLineSize - 1] = 2.0f;
-    raw[kMetaOffset + 4] = 4.0f;
-    for (int i = 0; i < 3; ++i) {
-        raw[kPoseOffset + i] = 10.0f + i;
-        raw[kPoseOffset + 3 + i] = 0.1f * i;
-        raw[kPoseOffset + 6 + i] = std::log(0.01f * (i + 1));
-        raw[kPoseOffset + 9 + i] = std::log(0.02f * (i + 1));
-    }
 
+    raw[kDesireStateOffset + 3] = 5.0f;
+    for (int i = 0; i < 3; ++i) {
+        raw[kPoseOffset094 + i] = 20.0f + i;
+        raw[kPoseOffset094 + 6 + i] = std::log(0.05f);
+    }
     const ParsedModelOutput parsed = ModelOutputParser::parse(raw);
     ParsedLeadPoint lead;
-    const bool ok = parsed.valid && parsed.plan.best_index == 4 &&
-        near(parsed.plan.points[7].x, 17.0f) &&
-        near(parsed.plan.points[7].y, -1.25f) &&
-        near(parsed.plan.orientations[7].z, 0.12f) &&
-        near(parsed.plan.position_stds[7].y, 0.4f) &&
-        near(parsed.lanes[2].points[5].y, 2.5f) &&
-        near(parsed.lanes[2].std, 0.2f) &&
-        near(parsed.road_edges[1].points[3].y, -3.0f) &&
-        near(parsed.road_edges[1].std, 0.3f) &&
-        parsed.leads.primary(0, 0.0f, &lead) && near(lead.x, 31.0f) &&
-        parsed.stop_line.valid && parsed.stop_line.best_index == 2 &&
-        near(parsed.stop_line.position.x, 6.5f) &&
-        near(parsed.stop_line.position.y, -0.2f) &&
-        near(parsed.stop_line.speed, 0.1f) &&
-        near(parsed.stop_line.time, 1.4f) &&
-        parsed.stop_line.probability > 0.8f &&
-        parsed.meta.desire_state[4] > parsed.meta.desire_state[0] &&
-        parsed.has_pose && near(parsed.pose.trans[2], 12.0f) &&
-        near(parsed.pose.trans_std[2], 0.03f);
+    const bool ok = parsed.valid && parsed.plan.best_index == 0 &&
+        near(parsed.plan.points[7].x, 23.0f) &&
+        near(parsed.plan.points[7].y, 0.75f) &&
+        near(parsed.lanes[1].points[5].y, -1.75f) &&
+        parsed.leads.primary(0, 0.0f, &lead) && near(lead.x, 42.0f) &&
+        parsed.meta.desire_state[3] > parsed.meta.desire_state[0] &&
+        parsed.has_pose && near(parsed.pose.trans[2], 22.0f) &&
+        near(parsed.pose.trans_std[0], 0.05f);
     if (!ok) {
-        std::cerr << "model output layout self-test failed\n";
+        std::cerr << "v0.9.4 model output layout self-test failed\n";
         return 1;
     }
-    std::cout << "MODEL_OUTPUT_EQUIVALENCE_OK output=6012 recurrent=512 pose_offset=6000\n";
+
+    std::cout << "MODEL_OUTPUT_094_OK output=" << kModelOutputFloats
+              << " feature=" << kModelFeatureLen
+              << " pose_offset=" << kPoseOffset094 << "\n";
     return 0;
 }
 
@@ -107,7 +84,7 @@ bool read_exact(std::ifstream &file, T *value)
 
 int main(int argc, char *argv[])
 {
-    if (argc == 1) return self_test();
+    if (argc == 1) return self_test_094();
     if (argc != 2) {
         std::cerr << "Usage: " << argv[0] << " <SCODMP1 raw dump>\n";
         return 1;
@@ -158,9 +135,6 @@ int main(int argc, char *argv[])
               << " lead_valid=" << (have_lead ? 1 : 0);
     if (have_lead)
         std::cout << " lead_x=" << lead.x << " lead_y=" << lead.y;
-    if (parsed.stop_line.valid)
-        std::cout << " stopline_x=" << parsed.stop_line.position.x
-                  << " stopline_prob=" << parsed.stop_line.probability;
     std::cout << "\n";
     return 0;
 }

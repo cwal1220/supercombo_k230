@@ -23,7 +23,6 @@ public:
   bool valid() const { return !records_.empty(); }
   bool finished() const { return next_record_ >= records_.size(); }
   size_t total_frames() const { return records_.size(); }
-  size_t emitted_frames() const { return next_record_; }
   double duration_s() const;
 
 private:

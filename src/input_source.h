@@ -16,21 +16,14 @@ struct Nv12Frame {
     std::vector<uint8_t> data;
 };
 
-class FrameSource {
-public:
-    virtual ~FrameSource() = default;
-    virtual bool read(Nv12Frame &frame) = 0;
-    virtual bool eof() const { return false; }
-    virtual unsigned frame_count() const { return 0; }
-};
-
-class ReplayNv12Source : public FrameSource {
+/* SCNV12R1 리플레이 파일의 NV12 프레임 소스. k230_modeld의 헤드리스 재생용. */
+class ReplayNv12Source {
 public:
     explicit ReplayNv12Source(const std::string &path);
 
-    bool read(Nv12Frame &frame) override;
-    bool eof() const override { return frames_read_ >= frame_count_; }
-    unsigned frame_count() const override { return frame_count_; }
+    bool read(Nv12Frame &frame);
+    bool eof() const { return frames_read_ >= frame_count_; }
+    unsigned frame_count() const { return frame_count_; }
     unsigned width() const { return width_; }
     unsigned height() const { return height_; }
 
@@ -46,12 +39,17 @@ private:
     unsigned frames_read_ = 0;
 };
 
-class LiveNv12Source : public FrameSource {
+/* v4l2 캡처의 NV12 프레임 소스. k230_camerad가 끝없이 읽으므로 eof가 없다. */
+class LiveNv12Source {
 public:
     LiveNv12Source(const AppConfig &config, int video_device);
-    ~LiveNv12Source() override;
+    ~LiveNv12Source();
 
-    bool read(Nv12Frame &frame) override;
+    // v4l2 컨텍스트를 소유하므로 복사하면 stop이 두 번 불린다.
+    LiveNv12Source(const LiveNv12Source &) = delete;
+    LiveNv12Source &operator=(const LiveNv12Source &) = delete;
+
+    bool read(Nv12Frame &frame);
 
 private:
     v4l2_drm_context context_{};

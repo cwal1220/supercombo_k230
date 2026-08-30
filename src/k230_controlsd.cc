@@ -658,10 +658,6 @@ int main() {
       alert_input.model_valid = model_fresh;
       alert_input.plan_distance_m =
           model_fresh ? model.plan[kTrajectorySize - 1].x : 0.0f;
-      alert_input.stop_line_valid =
-          model_fresh && model.stop_line.valid != 0;
-      alert_input.stop_line_probability = model.stop_line.probability;
-      alert_input.stop_line_distance_m = model.stop_line.x;
       const DepartureAlertOutput departure_alert =
           departure_alert_detector.update(alert_input);
       if (departure_alert.event_id != 0 &&
@@ -670,16 +666,13 @@ int main() {
         std::fprintf(
             stderr,
             "k230_controlsd: departure alert=%s event=%u "
-            "visionLead=%.1fm rel=%.1fm/s p=%.2f plan=%.1fm "
-            "stopline=%.1fm p=%.2f\n",
+            "visionLead=%.1fm rel=%.1fm/s p=%.2f plan=%.1fm\n",
             departure_alert_name(departure_alert.type),
             departure_alert.event_id,
             alert_input.lead_distance_m,
             alert_input.lead_relative_speed_mps,
             model.lead.probability,
-            alert_input.plan_distance_m,
-            alert_input.stop_line_distance_m,
-            alert_input.stop_line_probability);
+            alert_input.plan_distance_m);
       }
 
       K230ControlState control_state;

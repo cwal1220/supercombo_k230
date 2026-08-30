@@ -35,7 +35,9 @@ Available utilities:
   against independent openpilot-formula references.
 - `bench_capture_nv12`: `/dev/video2` `NV12 512x256` capture timing.
 - `bench_ai2d_resize`: K230 AI2D crop/resize timing experiment.
-- `sequence_runner`: run a prebuilt tensor sequence through a kmodel and dump
-  raw outputs.
+- `bench_kmodel`: NPU latency for any kmodel, using zero-filled inputs shaped
+  from the model itself.
+- `run_kmodel_sequence`: run a `K230MSQ1` input sequence through a kmodel and
+  dump the raw outputs, for host-vs-board comparison.
 - `probe_drm_planes`: inspect DRM planes and optional ARGB plane commit.
 - `check_model_output_parser`: sanity-check one `SCODMP1` raw-output dump.

@@ -17,8 +17,6 @@ constexpr float kLeadDistanceChangeM = 0.5f;
 constexpr float kLeadRelativeSpeedMps = 0.5f;
 constexpr double kLeadConfirmTimeS = 0.3;
 
-constexpr float kStopLineProbability = 0.5f;
-constexpr float kMaximumStopLineDistanceM = 5.0f;
 constexpr float kMinimumStoppedPlanDistanceM = -5.0f;
 constexpr float kStoppedPlanDistanceM = 5.0f;
 constexpr float kOpenPlanDistanceM = 25.0f;
@@ -107,22 +105,25 @@ DepartureAlertOutput DepartureAlertDetector::update(
       reset_lead();
     }
 
-    if (!consumed_ && input.model_updated && input.model_valid) {
-      const bool stop_line_near =
-          input.stop_line_valid &&
-          input.stop_line_probability > kStopLineProbability &&
-          std::isfinite(input.stop_line_distance_m) &&
-          input.stop_line_distance_m < kMaximumStopLineDistanceM;
+    if (input.model_updated && input.model_valid) {
       const bool model_stopped =
           std::isfinite(input.plan_distance_m) &&
           input.plan_distance_m > kMinimumStoppedPlanDistanceM &&
           input.plan_distance_m < kStoppedPlanDistanceM;
 
-      if (!green_light_armed_) {
+      /* 앞차가 없는데도 모델이 여기서 멈추겠다고 계획하면 신호 대기로 본다.
+       * 앞차가 있으면 그건 정체이고 lead_departed가 담당한다. 발동 조건은
+       * plan이 25 m 넘게 열리는 것이라, 무장이 헛나가도 길이 실제로 열리지
+       * 않는 한 알림은 뜨지 않는다.
+       * 무장 뒤에 앞차가 끼어들면 그 정차는 더 이상 신호 대기가 아니므로
+       * 무장을 푼다. 안 그러면 그 앞차가 출발할 때 lead_departed 대신
+       * green_light가 떠서 알림 사유가 틀린다. */
+      if (lead_present) {
+        reset_green_light();
+      } else if (!green_light_armed_) {
         green_light_armed_ =
-            stop_line_near && model_stopped &&
-            elapsed(input.now_s, stopped_since_s_,
-                    kTrafficSignalDisplayStopTimeS);
+            model_stopped && elapsed(input.now_s, stopped_since_s_,
+                                     kTrafficSignalDisplayStopTimeS);
       }
 
       const bool road_open =
@@ -140,7 +141,7 @@ DepartureAlertOutput DepartureAlertDetector::update(
 
     if (green_light_changed) {
       trigger(DepartureAlertType::green_light, input.now_s);
-    } else if (lead_departed && !green_light_armed_) {
+    } else if (lead_departed) {
       trigger(DepartureAlertType::lead_departed, input.now_s);
     }
   }

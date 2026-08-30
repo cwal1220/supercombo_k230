@@ -26,6 +26,52 @@ uint64_t steady_ns()
         std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
+/* SUPERCOMBO_RAW_DUMP: replay 중 모델 raw 출력을 SCODMP1로 남긴다.
+ * benchmarks/check_model_output_parser가 이 포맷을 읽어 보드 출력과 호스트
+ * 기준을 프레임 단위로 비교할 수 있다(모델 교체 검증용). */
+class RawOutputDump
+{
+public:
+    explicit RawOutputDump(const char *path)
+    {
+        if (!path || !path[0]) return;
+        file_ = std::fopen(path, "wb");
+        if (!file_) {
+            std::fprintf(stderr, "modeld: cannot open raw dump %s\n", path);
+            return;
+        }
+        std::fwrite("SCODMP1\0", 1, 8, file_);
+        const uint32_t placeholder = 0;
+        std::fwrite(&placeholder, sizeof(placeholder), 1, file_);  // raw floats
+        std::fwrite(&placeholder, sizeof(placeholder), 1, file_);  // frames
+    }
+
+    ~RawOutputDump()
+    {
+        if (!file_) return;
+        std::fseek(file_, 8, SEEK_SET);
+        std::fwrite(&raw_size_, sizeof(raw_size_), 1, file_);
+        std::fwrite(&frames_, sizeof(frames_), 1, file_);
+        std::fclose(file_);
+        std::fprintf(stderr, "modeld: raw dump wrote %u frames x %u floats\n",
+                     frames_, raw_size_);
+    }
+
+    void append(const std::vector<float> &raw)
+    {
+        if (!file_ || raw.empty()) return;
+        if (raw_size_ == 0) raw_size_ = static_cast<uint32_t>(raw.size());
+        if (raw.size() != raw_size_) return;
+        std::fwrite(raw.data(), sizeof(float), raw.size(), file_);
+        ++frames_;
+    }
+
+private:
+    std::FILE *file_ = nullptr;
+    uint32_t raw_size_ = 0;
+    uint32_t frames_ = 0;
+};
+
 bool publish_output(K230LatestChannel &model_pub, SupercomboModel &model, const ParsedModelOutput &parsed,
                     CalibrationService &calibration,
                     uint64_t frame_id, uint64_t capture_timestamp_ns, float model_ms,
@@ -70,6 +116,7 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
 
     Nv12Frame frame;
     std::vector<float> raw;
+    RawOutputDump raw_dump(std::getenv("SUPERCOMBO_RAW_DUMP"));
     unsigned processed = 0;
     unsigned errors = 0;
     timeval start {};
@@ -79,9 +126,10 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
 
     while (!g_stop && source.read(frame)) {
         const uint64_t t0 = steady_ns();
-        const bool ok = model.run_frame_nv12_stable(frame.data.data(), frame.width, frame.height, raw);
+        const bool ok = model.run_frame_nv12(frame.data.data(), frame.width, frame.height, raw);
         const uint64_t t1 = steady_ns();
         if (ok) {
+            raw_dump.append(raw);
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);
             const float model_ms = static_cast<float>((t1 - t0) / 1000000.0);
             if (!publish_output(model_pub, model, parsed, calibration,
@@ -219,7 +267,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
         }
 
         const uint64_t t0 = steady_ns();
-        const bool ok = model.run_frame_nv12_stable(nv12, meta.width, meta.height, raw);
+        const bool ok = model.run_frame_nv12(nv12, meta.width, meta.height, raw);
         const uint64_t t1 = steady_ns();
         next_model_start_ns = t0 + model_interval_ns;
         if (ok) {

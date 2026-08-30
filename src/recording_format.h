@@ -7,8 +7,13 @@
  * v3: 이벤트 로그를 route 단위 events.bin 하나에서 60초 청크 events/NNN.bin
  * 으로 분할했다. route 단위 파일은 CAN 로깅(~0.5 MB/s)만으로 30분이면 988 MB
  * tmpfs 스테이징을 가득 채워 남은 주행의 기록을 전부 죽였다. 레코드/헤더
- * 레이아웃은 v2와 동일하고 각 청크가 K230EventFileHeader로 시작한다. */
-constexpr uint32_t kK230RecordingVersion = 3;
+ * 레이아웃은 v2와 동일하고 각 청크가 K230EventFileHeader로 시작한다.
+ * v4: openpilot v0.9.4 모델로 옮기면서 그 모델이 내지 않는 stop_line(28 B)을
+ * K230ModelState에서 뺐다.
+ * v5: 소비자가 없던 plan_position_stds/plan_orientations(792 B)를
+ * K230ModelState에서 뺐다. 페이로드가 4048 -> 3256 B로 줄어 v4 이하 녹화와
+ * 호환되지 않는다. */
+constexpr uint32_t kK230RecordingVersion = 5;
 
 enum class K230RecordType : uint16_t {
   CanRx = 1,

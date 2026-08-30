@@ -9,7 +9,14 @@ true.
 ## Model and calibration
 
 - `K230_KMODEL=/path/to/supercombo.kmodel`
-  - overrides the model selected by `k230_manager.py`.
+  - overrides the model selected by `k230_manager.py`. The runtime targets the
+    openpilot v0.9.4 supercombo only: 6 inputs (two uint8 image towers, a
+    100-tick desire pulse history, traffic convention, unused nav features, and
+    a 99x128 feature buffer) and 6120 output floats. `k230_modeld` checks that
+    contract at startup and refuses any other kmodel rather than misreading it,
+    logging `Supercombo openpilot-v0.9.4 image dtype=uint8`.
+- `SUPERCOMBO_MODEL_FPS=N`
+  - selects the model loop target from 1 to 30 FPS. The default is 20 FPS.
 - `SUPERCOMBO_PROFILE=1`
   - prints model pipeline averages. `k230_overlayd` also uses this for overlay
     draw/present timing.
@@ -63,6 +70,11 @@ true.
     and online calibration from collected logs.
 - `SUPERCOMBO_MAX_FRAMES=N`
   - stops after `N` inferred frames. This is mainly useful with replay mode.
+- `SUPERCOMBO_RAW_DUMP=/path/to/dump.bin`
+  - during replay, writes every raw model output to an `SCODMP1` file that
+    `check_model_output_parser` reads. Pair it with a host run over the same
+    replay to verify a model swap end to end (warp, temporal inputs, kmodel);
+    see [diagnostics](diagnostics.md#model-swap-verification).
 
 ## Panda
 
@@ -80,6 +92,12 @@ true.
   - allows `k230_pandad` to relay ordered `/dev/shm/k230_sendcan` batches to
     panda. Its standalone default is `0`; the managed full pipeline defaults
     to `1`.
+- `K230_PANDA_SERIAL=<serial>`
+  - selects a specific panda by USB serial when more than one is attached. Unset
+    takes the first panda found.
+- `K230_PANDA_LOG_CAN=1`
+  - prints every received CAN frame from `k230_pandad`. This is a bus-bringup
+    aid only; at full bus load it is far too noisy to leave on.
 - `K230_PANDA_ENGAGED=1`
   - sends panda heartbeat as engaged, only meaningful with `K230_PANDA_TX=1`. Its
     standalone default is disengaged; the managed full pipeline defaults to

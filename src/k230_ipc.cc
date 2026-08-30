@@ -207,16 +207,6 @@ void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parse
     for (int i = 0; i < kTrajectorySize; ++i) {
         state.model_t[i] = model_t_idx(i);
         state.plan[i] = {parsed.plan.points[i].x, parsed.plan.points[i].y, parsed.plan.points[i].z};
-        state.plan_position_stds[i] = {
-            parsed.plan.position_stds[i].x,
-            parsed.plan.position_stds[i].y,
-            parsed.plan.position_stds[i].z,
-        };
-        state.plan_orientations[i] = {
-            parsed.plan.orientations[i].x,
-            parsed.plan.orientations[i].y,
-            parsed.plan.orientations[i].z,
-        };
         for (int lane = 0; lane < 4; ++lane) {
             state.lanes[lane][i] = {
                 parsed.lanes[lane].points[i].x,
@@ -272,14 +262,6 @@ void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parse
         state.lead.acceleration = lead.acceleration;
     }
 
-    state.stop_line.valid = parsed.stop_line.valid ? 1 : 0;
-    state.stop_line.probability = parsed.stop_line.probability;
-    state.stop_line.x = parsed.stop_line.position.x;
-    state.stop_line.y = parsed.stop_line.position.y;
-    state.stop_line.z = parsed.stop_line.position.z;
-    state.stop_line.speed = parsed.stop_line.speed;
-    state.stop_line.time = parsed.stop_line.time;
-
     state.pose.valid = parsed.has_pose ? 1 : 0;
     if (parsed.has_pose) {
         for (int i = 0; i < 3; ++i) {
@@ -308,16 +290,6 @@ ParsedModelOutput k230_parsed_from_model_state(const K230ModelState &state)
     parsed.plan.probability = state.plan_probability;
     for (int i = 0; i < kTrajectorySize; ++i) {
         parsed.plan.points[i] = {state.plan[i].x, state.plan[i].y, state.plan[i].z};
-        parsed.plan.position_stds[i] = {
-            state.plan_position_stds[i].x,
-            state.plan_position_stds[i].y,
-            state.plan_position_stds[i].z,
-        };
-        parsed.plan.orientations[i] = {
-            state.plan_orientations[i].x,
-            state.plan_orientations[i].y,
-            state.plan_orientations[i].z,
-        };
         for (int lane = 0; lane < 4; ++lane) {
             parsed.lanes[lane].valid = parsed.valid;
             parsed.lanes[lane].probability = state.lane_probabilities[lane];
@@ -352,16 +324,6 @@ ParsedModelOutput k230_parsed_from_model_state(const K230ModelState &state)
             state.lead.acceleration,
         };
     }
-
-    parsed.stop_line.valid = state.stop_line.valid != 0;
-    parsed.stop_line.probability = state.stop_line.probability;
-    parsed.stop_line.position = {
-        state.stop_line.x,
-        state.stop_line.y,
-        state.stop_line.z,
-    };
-    parsed.stop_line.speed = state.stop_line.speed;
-    parsed.stop_line.time = state.stop_line.time;
 
     parsed.has_pose = state.pose.valid != 0;
     if (parsed.has_pose) {

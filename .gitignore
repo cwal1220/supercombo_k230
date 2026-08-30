@@ -24,6 +24,8 @@ __pycache__/
 *.pyc
 *.raw
 *.scnv12
+core
+core.*
 *.mp4
 /recordings/
 models/*.onnx

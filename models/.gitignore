@@ -1,4 +1,2 @@
 work/
 onnx/*.onnx
-variants/*/onnx/*.onnx
-variants/*/work/

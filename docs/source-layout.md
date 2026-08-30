@@ -14,7 +14,7 @@
 
 - `src/model_output.*`
   - owns the supercombo raw-output layout and exposes parsed plan, lanes, road
-    edges, leads, stop line, and pose. Also owns the shared `T_IDXS`/`X_IDXS`
+    edges, leads, and pose. Also owns the shared `T_IDXS`/`X_IDXS`
     trajectory grids.
 - `src/model_input_transform.*`
   - direct `NV12 -> calibrated warped YUV6` input transform. It fuses homography

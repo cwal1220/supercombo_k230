@@ -95,16 +95,6 @@ struct K230LeadState {
     float acceleration = 0.0f;
 };
 
-struct K230StopLineState {
-    uint32_t valid = 0;
-    float probability = 0.0f;
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
-    float speed = 0.0f;
-    float time = 0.0f;
-};
-
 struct K230PoseState {
     uint32_t valid = 0;
     float trans[3] = {};
@@ -133,8 +123,6 @@ struct K230ModelState {
     float model_t[kTrajectorySize] = {};
     float lane_t[kTrajectorySize] = {};
     K230IpcPoint plan[kTrajectorySize] = {};
-    K230IpcPoint plan_position_stds[kTrajectorySize] = {};
-    K230IpcPoint plan_orientations[kTrajectorySize] = {};
     K230IpcPoint lanes[4][kTrajectorySize] = {};
     float lane_probabilities[4] = {};
     float lane_stds[4] = {};
@@ -142,21 +130,22 @@ struct K230ModelState {
     float road_edge_stds[2] = {};
     float desire_state[kDesireLen] = {};
     K230LeadState lead;
-    K230StopLineState stop_line;
     K230PoseState pose;
     K230CalibrationState calibration;
 };
 
+/* 이 크기가 녹화 ModelState 레코드의 페이로드 크기다. 바뀌면 기존 녹화를
+ * 읽는 tools/model/k230_route.py와 어긋나므로 recording_format.h의
+ * kK230RecordingVersion도 함께 올려야 한다. */
+static_assert(sizeof(K230ModelState) == 3256,
+              "K230ModelState layout is shared with the recording reader");
+
 struct K230ProcessState {
     char name[16] = {};
     uint32_t running = 0;
-    int32_t pid = 0;
-    int32_t exit_code = 0;
-    uint32_t restart_count = 0;
-    uint64_t last_start_ns = 0;
 };
 
-static_assert(sizeof(K230ProcessState) == 40,
+static_assert(sizeof(K230ProcessState) == 20,
               "K230ProcessState layout is shared with the Python manager");
 
 struct K230ManagerState {
@@ -166,7 +155,7 @@ struct K230ManagerState {
     K230ProcessState processes[kK230MaxProcesses] = {};
 };
 
-static_assert(sizeof(K230ManagerState) == 296,
+static_assert(sizeof(K230ManagerState) == 160,
               "K230ManagerState layout is shared with the Python manager");
 
 struct K230CanFrame {
@@ -316,7 +305,6 @@ public:
     bool push(const K230CanBatch &batch);
     bool pop(K230CanBatch *batch);
     uint64_t depth() const;
-    unsigned capacity() const { return header_ ? header_->slot_count : 0; }
     bool valid() const { return header_ != nullptr; }
 
 private:

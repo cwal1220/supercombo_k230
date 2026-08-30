@@ -46,15 +46,14 @@ cruise setpoint through simulated button presses.
 
 - `models/supercombo.kmodel`
 
-The kmodel is generated from the ONNX graph where `Elu_223` is kept native by
-inserting an identity depthwise 1x1 Conv before it. The original model lives in
-the openpilot fork:
+The kmodel is compiled from the upstream openpilot v0.9.4 release:
 
-- [supercombo.onnx](https://github.com/cwal1220/openpilot_c2/blob/master/selfdrive/modeld/models/supercombo.onnx)
+- [supercombo.onnx](https://github.com/commaai/openpilot/blob/v0.9.4/selfdrive/modeld/models/supercombo.onnx)
 
-The rewritten ONNX is an intermediate generated artifact and is intentionally not
-tracked here. See `tools/model/` for the rewrite/compile scripts and exact
-reproduction commands.
+`scripts/build_supercombo_model.sh` fetches it and runs the whole pipeline. The
+intermediate ONNX files are generated artifacts and are intentionally not
+tracked here; see `tools/model/` for the scripts and `models/README.md` for the
+input contract and board verification numbers.
 
 ## Quick start
 

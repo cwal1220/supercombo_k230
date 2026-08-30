@@ -25,9 +25,6 @@ struct DepartureAlertInput {
   bool model_updated = false;
   bool model_valid = false;
   float plan_distance_m = 0.0f;
-  bool stop_line_valid = false;
-  float stop_line_probability = 0.0f;
-  float stop_line_distance_m = 0.0f;
 };
 
 struct DepartureAlertOutput {
