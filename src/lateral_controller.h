@@ -148,7 +148,7 @@ private:
   int steering_pressed_counter_ = 0;
   int driver_steering_torque_above_timer_ = 100;
   float steer_timer_apply_torque_ = 1.0f;
-  // 라이브 편경사 추정: bank = lat실측 + yaw_rate*v, 2초 저역통과
+  // 라이브 편경사 추정: bank = lat실측 + yaw_rate*v, 2초 저역통과, 직선에서만 갱신
   float road_bank_lat_accel_ = 0.0f;
   bool road_bank_init_ = false;
   int road_bank_stale_frames_ = 0;

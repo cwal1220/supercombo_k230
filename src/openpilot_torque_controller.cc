@@ -117,9 +117,10 @@ int OpenpilotTorqueController::update(bool active,
   const float error = setpoint - measurement;
 
   float feedforward = desired_lat_accel - params.roll_rad * kGravity;
-  // 상수 편향(offset)과 실시간 편경사(bank)를 FF에서 뺀다
+  // 상수 편향(offset)은 FF에서 뺀다. bank = -g*sin(도로기울기)이므로
+  // 중력의 횡가속 기여(-bank)를 빼려면 bank를 더한다 (2026-08-30 부호 수정)
   feedforward -= params.torque_lat_accel_offset;
-  if (params.live_bank_compensation) feedforward -= road_bank_lat_accel;
+  if (params.live_bank_compensation) feedforward += road_bank_lat_accel;
   const float friction = interp(
       apply_deadzone(error + kJerkGain * jerk_filtered_, lat_accel_deadzone),
       {-kFrictionThreshold, kFrictionThreshold},

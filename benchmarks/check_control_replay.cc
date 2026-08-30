@@ -580,9 +580,40 @@ void verify_live_bank_compensation() {
     without_bank.update(true, 20.0f, 0.002f, 1.0f, false, false, off,
                         0.0f, false, -0.117f);
   }
+  // bank -0.117(우측 기움) -> 중력이 우로 끄니 FF는 좌로 0.117 이동해야 한다
   const float diff = with_bank.feedforward() - without_bank.feedforward();
-  require(std::fabs(diff - 0.117f) < 1e-3f,
-          "live bank must shift feedforward by -bank exactly");
+  require(std::fabs(diff + 0.117f) < 1e-3f,
+          "live bank must shift feedforward by +bank (gravity opposes)");
+}
+
+// 라이브 뱅크: 커브(|yaw*v| >= 0.4)에서는 갱신을 멈추고 직선 값을 유지해야 한다.
+void verify_bank_holds_during_curves() {
+  LateralControllerConfig config;
+  config.force_engaged = true;
+  config.driving_params.vehicle_state_timeout_ms = 2000;
+  LateralController controller(config);
+  double t = 1.0;
+  auto step = [&](float yaw_rate_rad_s, float lat_accel_mps2) {
+    VehicleCanState vehicle = ready_vehicle(t);
+    vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
+    vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
+    vehicle.cluster_speed_raw = 63.0f;
+    vehicle.yaw_rate_valid = true;
+    vehicle.yaw_rate_rad_s = yaw_rate_rad_s;
+    vehicle.lat_accel_valid = true;
+    vehicle.lat_accel_mps2 = lat_accel_mps2;
+    controller.update(replay_path(), replay_target(), vehicle, t, 0);
+    t += 0.01;
+  };
+  for (int i = 0; i < 1500; ++i) step(0.0f, -0.117f);  // 직선 크라운
+  const float straight_bank = controller.road_bank_lat_accel();
+  require(std::fabs(straight_bank + 0.117f) < 5e-3f,
+          "bank must converge to crown on straights");
+  // 커브: yaw*v = +1.2, 롤 누설 +0.5 (기구학 성분 상쇄 후 잔여)
+  const float v = 60.0f / 3.6f;
+  for (int i = 0; i < 500; ++i) step(1.2f / v, -1.2f + 0.5f);
+  require(std::fabs(controller.road_bank_lat_accel() - straight_bank) < 1e-4f,
+          "bank must hold during curves, not track roll leak");
 }
 
 // latAccelOffset: 상수 편향이 FF에서 그대로 빠져야 한다.
@@ -851,6 +882,7 @@ int main(int argc, char **argv) {
     verify_reengage_has_no_stale_buffer_spike();
     verify_lat_accel_offset_shifts_feedforward();
     verify_live_bank_compensation();
+    verify_bank_holds_during_curves();
     verify_runtime_params_apply_immediately();
     verify_lkas_hud_state_stability();
     verify_panda_gate_and_handoff();

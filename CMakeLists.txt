@@ -238,6 +238,28 @@ if(SUPERCOMBO_BUILD_RUNTIME)
       control_core
       ${ACADOS_RUNTIME_LIBS}
     )
+
+    add_executable(planner_replay
+      benchmarks/planner_replay.cc
+      src/k230_ipc.cc
+      src/model_output.cc
+      src/projection.cc
+      src/openpilot_lateral_planner.cc
+    )
+    target_include_directories(planner_replay SYSTEM PRIVATE
+      "${ACADOS_INCLUDE_DIR}"
+      "${ACADOS_INCLUDE_DIR}/blasfeo/include"
+      "${ACADOS_INCLUDE_DIR}/hpipm/include"
+      "${ACADOS_SOLVER_DIR}"
+    )
+    set_target_properties(planner_replay PROPERTIES
+      BUILD_RPATH "\$ORIGIN/lib"
+      INSTALL_RPATH "\$ORIGIN/lib"
+    )
+    configure_k230_target(planner_replay
+      control_core
+      ${ACADOS_RUNTIME_LIBS}
+    )
   endif()
 endif()
 
@@ -279,6 +301,11 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
   target_link_libraries(check_control_replay PRIVATE control_core)
   target_include_directories(check_control_replay PRIVATE ${PROJECT_LOCAL_INCLUDES})
   target_compile_options(check_control_replay PRIVATE ${PROJECT_WARNINGS})
+
+  add_executable(extract_lateral_dataset benchmarks/extract_lateral_dataset.cc)
+  target_link_libraries(extract_lateral_dataset PRIVATE control_core)
+  target_include_directories(extract_lateral_dataset PRIVATE ${PROJECT_LOCAL_INCLUDES})
+  target_compile_options(extract_lateral_dataset PRIVATE ${PROJECT_WARNINGS})
 
   add_executable(check_departure_alert benchmarks/check_departure_alert.cc)
   target_link_libraries(check_departure_alert PRIVATE control_core)

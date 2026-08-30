@@ -196,11 +196,13 @@ LateralControlResult LateralController::update(const LateralPath &path,
                                   static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) /
                                       1000.0) &&
                               vehicle_state.yaw_rate_valid;
-  /* 편경사: 8 m/s 이상 + 신호 유효할 때만 갱신, rc 2초. 실측 검증식
-   * (2026-08-27, 직선 -0.117 재현): bank = lat + yaw_rate*v. */
+  /* 편경사: 직선(|yaw*v| < 0.4)에서만 갱신, 커브는 홀드 — 커브에서는 차체 롤
+   * 중력 누설이 섞인다(2026-08-30 drive10: 커브 방향 반상관 ±0.2~0.5 + 탈출 꼬리).
+   * rc 2초. 실측 검증식 (2026-08-27, 직선 -0.117 재현): bank = lat + yaw_rate*v. */
   constexpr float kBankAlpha = 0.01f / (2.0f + 0.01f);
   if (yaw_rate_valid && vehicle_state.lat_accel_valid &&
-      std::isfinite(vehicle_state.lat_accel_mps2) && speed_mps > 8.0f) {
+      std::isfinite(vehicle_state.lat_accel_mps2) && speed_mps > 8.0f &&
+      std::fabs(vehicle_state.yaw_rate_rad_s * speed_mps) < 0.4f) {
     const float bank = clamp_float(
         vehicle_state.lat_accel_mps2 + vehicle_state.yaw_rate_rad_s * speed_mps,
         -2.0f, 2.0f);
