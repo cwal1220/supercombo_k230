@@ -37,13 +37,14 @@ openpilot's, so the measured lens distortion coefficients are recorded in the
 JSON but not applied.
 
 The medmodel transform feeds the current and previous frames into `input_imgs`;
-the wider C2 sbigmodel transform independently feeds its current and previous
+the wider sbigmodel transform independently feeds its current and previous
 frames into `big_input_imgs`.
 
 ## Model output
 
-The supercombo graph emits 6012 floats plus a 512-float recurrent state that is
-fed back on the next frame. `src/model_output.*` owns the layout:
+The supercombo graph (openpilot v0.9.4) emits 6120 floats, the last 128 of
+which (before a 2-float pad) are the feature vector fed back through the
+99-tick feature buffer. `src/model_output.*` owns the layout:
 
 | Block | Offset | Floats | Contents |
 | --- | ---: | ---: | --- |
@@ -53,10 +54,12 @@ fed back on the next frame. `src/model_output.*` owns the layout:
 | road edges | 5491 | 264 | 2 edges x 33 points, mean/std |
 | leads | 5755 | 102 | 2 hypotheses x 6 timesteps x (x, y, v, a) |
 | lead probabilities | 5857 | 3 | 0/2/4 s selection |
-| stop line | 5860 | 52 | 3 hypotheses x (position, rotation, speed, time) |
-| meta/desire | 5912 | 8 | desire softmax |
-| pose | 6000 | 12 | translation/rotation and standard deviations |
-| recurrent | 6012 | 512 | fed back into the next inference |
+| meta/desire | 5860 | 8 | desire softmax |
+| pose | 5948 | 12 | translation/rotation and standard deviations |
+| wide_from_device_euler | 5960 | 6 | unused by this runtime |
+| sim_pose | 5966 | 12 | unused by this runtime |
+| road_transform | 5978 | 12 | unused by this runtime |
+| feature | 5990 | 128 | fed back into the next inference |
 
 Of the 15 values per plan point, the parser consumes position (0–2),
 orientation (9–11), and orientation rate (12–14).

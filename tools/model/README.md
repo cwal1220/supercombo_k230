@@ -1,44 +1,55 @@
 # Model tools
 
-This directory contains the scripts used to rewrite openpilot `supercombo.onnx`
-and compile a K230 `.kmodel`.
-
-The current cleaned final artifact package is:
-
-- `../../models/`
-
-Use `../../models/README.md` for the exact final ONNX, PTQ, compile
-commands, hashes, and input contract. That package is the source of truth for
-the current no-GRU, full dual-image-input K230 model.
+Scripts that turn an upstream openpilot `supercombo.onnx` into the K230
+`.kmodel`. `../../scripts/build_supercombo_model.sh` runs them in order; see
+`../../models/README.md` for the resulting package, its contract, and the board
+verification numbers.
 
 ## Scripts
 
-- `rewrite_supercombo_onnx.py`
-  - Applies graph rewrites such as Gemm/Split replacement, plan-output split,
-    plan probability delta output, optional GRU update rewrite, and the
-    identity depthwise Conv before `Elu_223`.
-  - The current final model intentionally omits `--gru-update`.
+- `sanitize_onnx_for_nncase.py`
+  - Normalizes the release ONNX for nncase: fp16 weights and tensors to fp32
+    (the PTQ path needs an fp32 graph), duplicate opset entries merged, empty
+    node names filled, and `Reshape` `allowzero` removed. Values are unchanged.
 
-- `make_supercombo_calibration.py`
-  - Builds PTQ NPZ data from local driving logs.
-  - Supports an ordered `--segment-list`, metadata output, and `--warp-mode`.
+- `retype_image_inputs_uint8.py`
+  - Retypes the image inputs to uint8 and inserts `DequantizeLinear(scale=1)`.
+    Bit-identical outputs, but the runtime writes a quarter of the bytes and
+    skips the int-to-float conversion.
 
 - `compile_supercombo_nncase.py`
-  - Imports ONNX into nncase, applies optional PTQ data, and writes `.kmodel`.
-  - On this Mac, the practical K230 path is the `linux/amd64` Docker image
-    `supercombo-nncase-k230:2.11.0-sdk` with the Rosetta/.NET mitigation flags
-    documented in `../../models/README.md`.
+  - Imports the ONNX into nncase, applies PTQ calibration, and writes the
+    `.kmodel`.
+  - On this Mac the practical K230 path is the `linux/amd64` Docker image
+    `supercombo-nncase-k230:2.11.0-sdk`. The build script passes the
+    Rosetta/.NET mitigation flags; without them the compiler spins on the ONNX
+    import and then dies inside the .NET JIT.
 
-## Current final model summary
+## Host environment
 
-- Final ONNX:
-  - `../../models/onnx/supercombo_base.onnx`
-- Final kmodel:
-  - `../../models/supercombo.kmodel`
-- PTQ data:
-  - `../../models/ptq/supercombo_calib.npz`
-- Quantization:
-  - INT16 activations, UINT8 weights, `NoClip`, 77 balanced samples (3 degenerate frames removed).
-- Runtime compatibility:
-  - Keeps `input_imgs`, `big_input_imgs`, `desire`, `traffic_convention`, and
-    `initial_state` inputs, with both image towers active.
+```sh
+python3 -m venv ~/Documents/k230/.model-venv
+~/Documents/k230/.model-venv/bin/pip install -r tools/model/requirements.txt
+```
+
+## Recording-driven helpers
+
+These read `k230_recordd` routes and reproduce the device's input pipeline
+(`k230_route.py` decodes the route, `model_warp.py` is a numpy port of
+`src/model_input_transform.cc`, `route_frames.py` joins them, and
+`op094_runner.py` drives the model with the same desire/feature history the
+runtime keeps).
+
+- `make_calibration.py`
+  - captures PTQ samples across routes; each sample carries the feature buffer
+    the model itself produced, so calibration sees the real activation ranges.
+
+- `make_replay.py`
+  - writes an `SCNV12R1` replay plus host reference outputs for the board
+    verification described in `../../docs/diagnostics.md`.
+
+- `lane_bias.py`
+  - measures the lateral bias of a drive and splits it into a translation term
+    and a rotation term, which is what tells you whether a lane-hugging
+    complaint is a camera-calibration problem or not. See
+    `../../docs/diagnostics.md`.

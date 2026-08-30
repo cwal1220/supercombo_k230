@@ -1,0 +1,6 @@
+# Host environment for the recording-driven model tools. The nncase compile
+# itself runs in the Docker image, so nothing here needs a GPU or a compiler.
+numpy
+onnx
+onnxruntime
+av

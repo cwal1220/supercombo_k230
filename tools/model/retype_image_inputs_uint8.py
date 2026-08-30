@@ -24,22 +24,25 @@ def main() -> None:
   parser.add_argument("--op", choices=("cast", "dequantize"), default="dequantize",
                       help="uint8->float 변환 방식. dequantize(QDQ 관용구)가 "
                            "컴파일러 융합에 유리하다.")
+  parser.add_argument("--image-inputs", nargs="+", default=list(IMAGE_INPUTS),
+                      help="uint8로 바꿀 이미지 입력 이름")
   args = parser.parse_args()
+  image_inputs = tuple(args.image_inputs)
 
   model = onnx.load(str(args.in_model))
   graph = model.graph
 
   retyped = []
   for value in graph.input:
-    if value.name not in IMAGE_INPUTS:
+    if value.name not in image_inputs:
       continue
     if value.type.tensor_type.elem_type != TensorProto.FLOAT:
       raise RuntimeError(f"{value.name} is not float32; already retyped?")
     value.type.tensor_type.elem_type = TensorProto.UINT8
     retyped.append(value.name)
 
-  if sorted(retyped) != sorted(IMAGE_INPUTS):
-    raise RuntimeError(f"expected image inputs {IMAGE_INPUTS}, retyped {retyped}")
+  if sorted(retyped) != sorted(image_inputs):
+    raise RuntimeError(f"expected image inputs {image_inputs}, retyped {retyped}")
 
   # 입력 이름은 유지한다(PTQ npz 키·런타임 바인딩과 일치). 대신 float
   # 소비자들이 변환 출력(name_f32)을 읽도록 참조를 바꾼다.
@@ -55,7 +58,7 @@ def main() -> None:
     ])
 
   convert_nodes = []
-  for name in IMAGE_INPUTS:
+  for name in image_inputs:
     f32_name = name + "_f32"
     for node in graph.node:
       for i, node_input in enumerate(node.input):
@@ -79,7 +82,7 @@ def main() -> None:
   args.out_model.parent.mkdir(parents=True, exist_ok=True)
   onnx.save(model, str(args.out_model))
   op_name = "DequantizeLinear" if args.op == "dequantize" else "Cast"
-  print(f"retyped {', '.join(IMAGE_INPUTS)} -> uint8 with {op_name}: {args.out_model}")
+  print(f"retyped {', '.join(image_inputs)} -> uint8 with {op_name}: {args.out_model}")
 
 
 if __name__ == "__main__":
