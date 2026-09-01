@@ -39,3 +39,4 @@ core.*
 
 # 사내 DBC — 커밋 금지
 *.dbc
+gmodel_dump_dir/

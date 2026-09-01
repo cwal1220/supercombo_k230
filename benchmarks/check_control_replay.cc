@@ -69,8 +69,14 @@ VehicleCanState ready_vehicle(double timestamp_s = 1.0) {
   vehicle.tcs15_time_s = timestamp_s;
   vehicle.e_ems11_time_s = timestamp_s;
   vehicle.elect_gear_time_s = timestamp_s;
+  vehicle.whl_spd11_time_s = timestamp_s;
   vehicle.cgw1_time_s = timestamp_s;
   vehicle.cgw2_time_s = timestamp_s;
+  vehicle.whl_spd11_time_s = timestamp_s;
+  // 저속 조향 게이트를 넘는 주행 상태가 헬퍼의 기본값이다.
+  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
+  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
+  vehicle.cluster_speed_raw = 63.0f;
   vehicle.gear = 5;
   return vehicle;
 }
@@ -178,8 +184,12 @@ void verify_whl_spd11() {
   require(vehicle.whl_spd11_time_s == 1.0 &&
               std::fabs(vehicle_speed_kph(vehicle, 1.2) - 40.125f) < 0.001f,
           "WHL_SPD11 vehicle speed average");
-  require(std::fabs(vehicle_speed_kph(vehicle, 1.6) - 72.0f) < 0.001f,
-          "stale WHL_SPD11 falls back to CLU speed");
+  /* 클러스터로 대체하지 않는다: 도메인이 달라 최소 조향 속도 게이트가
+   * 뒤집힌다. 대신 낡은 휠 속도는 vehicle_state_fresh에서 막힌다. */
+  require(!std::isfinite(vehicle_speed_kph(vehicle, 1.6)),
+          "stale WHL_SPD11 must not fall back to CLU speed");
+  require(!vehicle_state_fresh(vehicle, 1.6, 0.5),
+          "stale WHL_SPD11 must block control");
 }
 
 void verify_tpms11() {
@@ -403,8 +413,12 @@ void verify_braking_does_not_disengage() {
   vehicle.tcs15_time_s = 1.0;
   vehicle.e_ems11_time_s = 1.0;
   vehicle.elect_gear_time_s = 1.0;
+  vehicle.whl_spd11_time_s = 1.0;
   vehicle.cgw1_time_s = 1.0;
   vehicle.cgw2_time_s = 1.0;
+  vehicle.whl_spd11_time_s = 1.0;
+  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
+  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
   vehicle.gear = 5;
   vehicle.brake_light = true;
 
@@ -438,8 +452,12 @@ void verify_large_angle_fault_avoidance() {
   vehicle.tcs15_time_s = 1.0;
   vehicle.e_ems11_time_s = 1.0;
   vehicle.elect_gear_time_s = 1.0;
+  vehicle.whl_spd11_time_s = 1.0;
   vehicle.cgw1_time_s = 1.0;
   vehicle.cgw2_time_s = 1.0;
+  vehicle.whl_spd11_time_s = 1.0;
+  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
+  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
   vehicle.gear = 5;
   vehicle.cluster_speed_raw = 72.0f;
   vehicle.steering_angle_deg = 85.0f;
@@ -497,12 +515,84 @@ void verify_configured_steering_angle_limit() {
           "configured steering angle limit must apply below 90 degrees");
 }
 
+// 정지 부근 path 깜빡임: active 재진입은 0.5s 연속 유효 후에만.
+void verify_path_flicker_debounce() {
+  LateralControllerConfig config;
+  config.force_engaged = true;
+  config.driving_params.vehicle_state_timeout_ms = 2000;
+  LateralController controller(config);
+  LateralPath bad = replay_path();
+  bad.usable_for_steering = false;
+  double t = 1.0;
+  auto step = [&](const LateralPath &path) {
+    VehicleCanState vehicle = ready_vehicle(t);
+    const auto r = controller.update(path, replay_target(), vehicle, t, 0);
+    t += 0.01;
+    return r;
+  };
+  require(step(replay_path()).active, "initial valid path must activate");
+  require(!step(bad).active, "invalid path must deactivate immediately");
+  int reactivated = 0;
+  for (int i = 0; i < 20; ++i) reactivated += step(replay_path()).active ? 1 : 0;
+  require(reactivated == 0, "path flicker must not reactivate before the hold");
+  require(!step(bad).active, "still inactive on the next dropout");
+  int active_after = 0;
+  for (int i = 0; i < 60; ++i) active_after = step(replay_path()).active ? 1 : 0;
+  require(active_after == 1, "sustained valid path must reactivate after the hold");
+}
+
+// 정차(path 무효)에서도 engage는 받아야 한다 — 조향만 쉰다.
+void verify_engage_allowed_with_unavailable_path() {
+  LateralControllerConfig config;
+  config.driving_params.vehicle_state_timeout_ms = 2000;
+  LateralController controller(config);
+  LateralPath bad = replay_path();
+  bad.usable_for_steering = false;
+  VehicleCanState vehicle = ready_vehicle(1.0);
+  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 0.0f;
+  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 0.0f;
+  vehicle.clu_button = 2;
+  controller.update(bad, replay_target(), vehicle, 1.0, 0, true, true);
+  vehicle.clu_button = 0;
+  const auto engaged =
+      controller.update(bad, replay_target(), vehicle, 1.01, 1, true, true);
+  require(engaged.engaged && !engaged.engage_rejected,
+          "standstill engage must be accepted with an unavailable path");
+  // 정지 + path 무효는 오류가 아니라 대기 상태로 보고한다
+  require(!engaged.active && engaged.active_block == "stopped",
+          "standstill without a path must report stopped, not an error");
+  // 대기 중에도 steer_req/스푸프는 유지(토크 0) — 정차 천이 부저 방지
+  require(!engaged.frames.empty() &&
+              decode_lkas11(engaged.frames.front().data).steer_req &&
+              decode_lkas11(engaged.frames.front().data).steer_torque == 0,
+          "availability wait must hold steer_req with zero torque");
+  // 주행 중 path 무효는 진짜 문제로 보고한다
+  vehicle = ready_vehicle(1.02);
+  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
+  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
+  const auto rolling =
+      controller.update(bad, replay_target(), vehicle, 1.02, 2, true, true);
+  require(!rolling.active && rolling.active_block == "path_invalid",
+          "unusable path while moving must report path_invalid");
+  // 결함은 가용성 대기보다 우선한다 (정차 중 문 열림 -> hard disengage)
+  vehicle = ready_vehicle(1.03);
+  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 0.0f;
+  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 0.0f;
+  vehicle.door_open = true;
+  const auto door =
+      controller.update(bad, replay_target(), vehicle, 1.03, 3, true, true);
+  require(door.active_block == "door_open" && !door.engaged,
+          "faults must outrank availability and hard-disengage at standstill");
+}
+
 void verify_fixed_max_curvature() {
   LateralControllerConfig config;
   config.force_engaged = true;
   config.driving_params.vehicle_state_timeout_ms = 2000;
   LateralController controller(config);
   VehicleCanState vehicle = ready_vehicle();
+  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 3.6f;
+  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 3.6f;
   vehicle.cluster_speed_raw = 3.6f;
 
   LateralTarget target = replay_target();
@@ -650,8 +740,12 @@ void verify_runtime_params_apply_immediately() {
   vehicle.tcs15_time_s = 1.0;
   vehicle.e_ems11_time_s = 1.0;
   vehicle.elect_gear_time_s = 1.0;
+  vehicle.whl_spd11_time_s = 1.0;
   vehicle.cgw1_time_s = 1.0;
   vehicle.cgw2_time_s = 1.0;
+  vehicle.whl_spd11_time_s = 1.0;
+  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
+  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
   vehicle.gear = 5;
   vehicle.cluster_speed_raw = 72.0f;
 
@@ -692,8 +786,12 @@ void verify_lkas_hud_state_stability() {
   vehicle.tcs15_time_s = 1.0;
   vehicle.e_ems11_time_s = 1.0;
   vehicle.elect_gear_time_s = 1.0;
+  vehicle.whl_spd11_time_s = 1.0;
   vehicle.cgw1_time_s = 1.0;
   vehicle.cgw2_time_s = 1.0;
+  vehicle.whl_spd11_time_s = 1.0;
+  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
+  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
   vehicle.gear = 5;
 
   LateralPath no_lane_path = replay_path();
@@ -705,13 +803,15 @@ void verify_lkas_hud_state_stability() {
   require(decode_lkas11(active.frames.front().data).ldws_sys_state == 3,
           "active HUD state must remain active with fluctuating lane probability");
 
+  /* 클러스터는 sys_state 천이마다 부저를 울리므로, sys_state는 active가
+   * 아니라 engaged만 따른다. enable/disable에서만 천이가 생긴다. */
   LateralTarget invalid_target = replay_target();
   invalid_target.mpc_solution_valid = false;
   const auto inactive =
-      controller.update(no_lane_path, invalid_target, vehicle, 1.01, 1);
+      controller.update(no_lane_path, invalid_target, vehicle, 2.5, 2);
   require(!inactive.active && !inactive.frames.empty(), "inactive HUD test frame");
-  require(decode_lkas11(inactive.frames.front().data).ldws_sys_state == 4,
-          "inactive HUD state must remain standby with fluctuating lane probability");
+  require(decode_lkas11(inactive.frames.front().data).ldws_sys_state == 3,
+          "engaged but inactive must keep sys_state to avoid chimes");
 }
 
 void verify_panda_gate_and_handoff() {
@@ -730,8 +830,12 @@ void verify_panda_gate_and_handoff() {
   vehicle.tcs15_time_s = 1.0;
   vehicle.e_ems11_time_s = 1.0;
   vehicle.elect_gear_time_s = 1.0;
+  vehicle.whl_spd11_time_s = 1.0;
   vehicle.cgw1_time_s = 1.0;
   vehicle.cgw2_time_s = 1.0;
+  vehicle.whl_spd11_time_s = 1.0;
+  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
+  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
   vehicle.gear = 5;
 
   vehicle.clu_button = 2;
@@ -771,7 +875,10 @@ void verify_panda_gate_and_handoff() {
           "persistent Panda mismatch must eventually reject engage");
 
   LateralController deferred_static_controller(config);
-  VehicleCanState deferred_vehicle = vehicle;
+  // t=12 시점 검사이므로 차량 데이터도 신선해야 한다(낡으면 stale이 우선).
+  VehicleCanState deferred_vehicle = ready_vehicle(12.0);
+  deferred_vehicle.wheel_speed_fl_kph = deferred_vehicle.wheel_speed_fr_kph = 60.0f;
+  deferred_vehicle.wheel_speed_rl_kph = deferred_vehicle.wheel_speed_rr_kph = 60.0f;
   deferred_vehicle.clu_button = 2;
   deferred_static_controller.update(replay_path(), replay_target(), deferred_vehicle,
                                     12.0, 0, true, true);
@@ -812,6 +919,7 @@ void verify_panda_gate_and_handoff() {
   vehicle.tcs15_time_s = 4.05;
   vehicle.e_ems11_time_s = 4.05;
   vehicle.elect_gear_time_s = 4.05;
+  vehicle.whl_spd11_time_s = 4.05;
   vehicle.cgw1_time_s = 4.05;
   vehicle.cgw2_time_s = 4.05;
   vehicle.clu_button = 2;
@@ -882,6 +990,8 @@ int main(int argc, char **argv) {
     verify_reengage_has_no_stale_buffer_spike();
     verify_lat_accel_offset_shifts_feedforward();
     verify_live_bank_compensation();
+    verify_engage_allowed_with_unavailable_path();
+    verify_path_flicker_debounce();
     verify_bank_holds_during_curves();
     verify_runtime_params_apply_immediately();
     verify_lkas_hud_state_stability();

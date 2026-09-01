@@ -137,6 +137,14 @@ private:
   LateralControllerConfig config_{};
   OpenpilotTorqueController torque_controller_;
   bool engaged_ = false;
+  /* path 유효성 디바운스: 차단은 즉시, 복귀는 연속 유효 0.5s 후.
+   * 정지 부근에서 plan 도달거리가 경계를 넘나들며 active가 깜빡이고
+   * 클러스터가 천이마다 부저를 울리는 것을 막는다. */
+  double path_valid_since_s_ = -1.0;
+  bool path_usable_debounced_ = false;
+  bool path_seen_invalid_ = false;
+  // 가용성 대기 중 steer_req/스푸프 유지(토크는 0) — 정차 부저 방지
+  bool steer_availability_hold_ = false;
   int last_button_ = 0;
   int last_torque_ = 0;
   bool steer_rate_limited_ = false;

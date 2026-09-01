@@ -523,25 +523,9 @@ private:
                              "k230_overlayd: piezo alert=unavailable event=%u\n",
                              event_id);
             }
-        } else if (!unavailable && !departure_alert_triggered &&
-                   !engagement_alert_triggered &&
-                   now >= engage_activation_suppress_until_ns_) {
-            if (hud_.controller_active && !previous_controller_active_) {
-                const uint32_t event_id = next_piezo_event_id();
-                piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_ACTIVATED,
-                                  event_id);
-                std::fprintf(stderr,
-                             "k230_overlayd: piezo alert=activated event=%u\n",
-                             event_id);
-            } else if (!hud_.controller_active && previous_controller_active_) {
-                const uint32_t event_id = next_piezo_event_id();
-                piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_DEACTIVATED,
-                                  event_id);
-                std::fprintf(stderr,
-                             "k230_overlayd: piezo alert=deactivated event=%u\n",
-                             event_id);
-            }
         }
+        /* active(가용성) 천이는 소리내지 않는다 — 정차 부근 path 깜빡임마다
+         * 울린다. 부저는 engage/disengage/engage거부/가용성상실만. */
         previous_controller_active_ = !unavailable && hud_.controller_active;
         previous_unavailable_ = unavailable;
         hud_.steering_angle_deg = control_fresh ? latest_control_state_.steering_angle_deg : 0.0f;
