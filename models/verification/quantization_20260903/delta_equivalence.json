@@ -1,0 +1,81 @@
+{
+  "samples": 77,
+  "non_plan_logits": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "state": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "pose": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "lane_geometry": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "plan_logits_delta": {
+    "mae": 7.714176332795775e-06,
+    "rmse": 1.0613342773112386e-05,
+    "p95": 2.1767616271972645e-05,
+    "max": 3.170967102050781e-05
+  },
+  "plan_matches": 77,
+  "plan_match_rate": 1.0,
+  "candidate_top_ties": 0,
+  "mismatch_reference_margin": null,
+  "selected_path_x_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "same_hypothesis_path_x_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "selected_path_y_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "same_hypothesis_path_y_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "selected_path_z_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "same_hypothesis_path_z_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "selected_path_y_first_17_knots_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "reference": "models/quantization_work/reference_legacy.npy",
+  "candidate": "models/quantization_work/delta_fp32_legacy.npy"
+}

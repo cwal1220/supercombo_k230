@@ -1,5 +1,10 @@
 # Model tools
 
+For the 2026-09-03 quantization experiments, real K230 driving-data loader,
+independent/recurrent board comparisons, and candidate build workflow, see
+[QUANTIZATION.md](QUANTIZATION.md) and
+[the measured report](../../models/verification/quantization_20260903.md).
+
 This directory contains the scripts used to rewrite openpilot `supercombo.onnx`
 and compile a K230 `.kmodel`.
 
@@ -9,7 +14,7 @@ The current cleaned final artifact package is:
 
 Use `../../models/README.md` for the exact final ONNX, PTQ, compile
 commands, hashes, and input contract. That package is the source of truth for
-the current no-GRU, full dual-image-input K230 model.
+the current full dual-image-input K230 model with the original GRU update expression.
 
 ## Scripts
 

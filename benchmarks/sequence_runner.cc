@@ -22,6 +22,8 @@ namespace {
 constexpr uint32_t kModeFloatYuv6 = 0;
 constexpr uint32_t kModeNv12Both = 1;
 constexpr uint32_t kModeUint8Yuv6 = 2;
+// Same uint8 images plus an explicit reset flag and saved FP32 initial state.
+constexpr uint32_t kModeUint8State = 3;
 constexpr size_t kYuv6InputBytes = 12 * 128 * 256 * sizeof(float);
 constexpr size_t kYuv6Uint8InputBytes = 12 * 128 * 256;
 constexpr size_t kNv12InputBytes = 384 * 512;
@@ -118,8 +120,10 @@ int main(int argc, char **argv)
         read_exact(seq, &header, sizeof(header));
         if (std::memcmp(header.magic, "SCSEQ1\0\0", 8) != 0)
             throw std::runtime_error("bad sequence magic");
-        if (header.mode != kModeFloatYuv6 && header.mode != kModeNv12Both && header.mode != kModeUint8Yuv6)
+        if (header.mode != kModeFloatYuv6 && header.mode != kModeNv12Both &&
+            header.mode != kModeUint8Yuv6 && header.mode != kModeUint8State)
             throw std::runtime_error("bad sequence mode");
+        if (header.frames == 0) throw std::runtime_error("empty sequence");
 
         std::ifstream model_stream(argv[1], std::ios::binary);
         if (!model_stream) throw std::runtime_error("cannot open kmodel");
@@ -165,11 +169,19 @@ int main(int argc, char **argv)
                 write_input(interp, 4, desire.data(), kDesireBytes);
                 write_input(interp, 5, traffic.data(), kTrafficBytes);
                 write_input(interp, 6, recurrent.data(), recurrent.size() * sizeof(float));
-            } else if (header.mode == kModeUint8Yuv6) {
+            } else if (header.mode == kModeUint8Yuv6 || header.mode == kModeUint8State) {
                 read_exact(seq, buf0.data(), kYuv6Uint8InputBytes);
                 read_exact(seq, buf1.data(), kYuv6Uint8InputBytes);
                 read_exact(seq, desire.data(), kDesireBytes);
                 read_exact(seq, traffic.data(), kTrafficBytes);
+                if (header.mode == kModeUint8State) {
+                    uint32_t reset = 0;
+                    std::vector<float> saved_state(kRecurrentFloats);
+                    read_exact(seq, &reset, sizeof(reset));
+                    read_exact(seq, saved_state.data(), saved_state.size() * sizeof(float));
+                    if (reset > 1) throw std::runtime_error("bad state reset flag");
+                    if (reset) recurrent = std::move(saved_state);
+                }
                 write_input(interp, 0, buf0.data(), kYuv6Uint8InputBytes);
                 write_input(interp, 1, buf1.data(), kYuv6Uint8InputBytes);
                 write_input(interp, 2, desire.data(), kDesireBytes);

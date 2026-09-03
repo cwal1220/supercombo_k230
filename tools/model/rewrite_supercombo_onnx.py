@@ -428,7 +428,12 @@ def rewrite_gru_update(model: onnx.ModelProto) -> int:
 
 def split_final_plan_output(model: onnx.ModelProto, plan_prob_shift: float = 0.0,
                             plan_prob_delta: bool = False,
-                            plan_prob_delta_after_gemm: bool = False) -> int:
+                            plan_prob_delta_after_gemm: bool = False,
+                            plan_prob_center_before_delta: bool = False) -> int:
+  if plan_prob_center_before_delta and not plan_prob_delta_after_gemm:
+    raise ValueError("centering requires --plan-prob-delta-after-gemm")
+  if plan_prob_delta and plan_prob_delta_after_gemm:
+    raise ValueError("choose one plan probability delta strategy")
   shapes = inferred_float_shapes(model)
   initializers = {t.name: t for t in model.graph.initializer}
   plan_gemm = None
@@ -455,6 +460,10 @@ def split_final_plan_output(model: onnx.ModelProto, plan_prob_shift: float = 0.0
   new_plan_nodes = []
   raw_prob_outputs = []
   ref_prob_idx = PLAN_STRIDE - 1
+  # KPU final bias addition uses FP16 even with INT16 activations. The original
+  # ~-320 common bias gives 0.25 ULPs, losing small differences before Sub.
+  # A common bias shift cancels exactly in the delta, without changing weights.
+  common_bias = np.mean(bias[PLAN_STRIDE-1::PLAN_STRIDE], dtype=np.float64)
   for plan_idx in range(PLAN_MHP_N):
     base = plan_idx * PLAN_STRIDE
     chunks = [
@@ -469,6 +478,8 @@ def split_final_plan_output(model: onnx.ModelProto, plan_prob_shift: float = 0.0
       chunk_weight = weight[start:end].astype(weight.dtype).copy()
       chunk_bias = bias[start:end].astype(bias.dtype).copy()
       if suffix == "prob" and plan_prob_delta_after_gemm:
+        if plan_prob_center_before_delta:
+          chunk_bias -= np.array(common_bias, dtype=chunk_bias.dtype)
         gemm_out_name = f"{out_name}__raw"
         raw_prob_outputs.append(gemm_out_name)
       elif suffix == "prob" and plan_prob_delta:
@@ -547,7 +558,11 @@ def main() -> None:
   parser.add_argument("--plan-prob-shift", default=0.0, type=float)
   parser.add_argument("--plan-prob-delta", action="store_true")
   parser.add_argument("--plan-prob-delta-after-gemm", action="store_true")
+  parser.add_argument("--plan-prob-center-before-delta", action="store_true",
+                      help="remove common logit bias before KPU FP16 rounding; preserve delta outputs")
   args = parser.parse_args()
+  if args.plan_prob_center_before_delta and not (args.split_plan_output and args.plan_prob_delta_after_gemm):
+    parser.error("--plan-prob-center-before-delta requires --split-plan-output and --plan-prob-delta-after-gemm")
 
   model = onnx.load(args.in_model)
   counts = {}
@@ -569,6 +584,7 @@ def main() -> None:
       args.plan_prob_shift,
       args.plan_prob_delta,
       args.plan_prob_delta_after_gemm,
+      args.plan_prob_center_before_delta,
     )
   if not counts:
     counts["gemm_split"] = rewrite_gemm_split(model)

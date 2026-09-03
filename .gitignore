@@ -27,6 +27,7 @@ __pycache__/
 *.mp4
 /recordings/
 models/*.onnx
+/models/quantization_work/
 
 # 코어덤프 (960MB급이 생긴다)
 core

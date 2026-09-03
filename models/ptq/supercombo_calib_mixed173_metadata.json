@@ -1,0 +1,1673 @@
+{
+  "samples": 173,
+  "sha256": "0806ce662e64e2a65b8f0e50e739e5ecb132b0e93d6364be117d3f95333157bf",
+  "merge_order": [
+    "C2 77",
+    "native K230 72",
+    "native K230 lane-change 24"
+  ],
+  "sources": [
+    {
+      "path": "ptq/supercombo_calib.npz",
+      "samples": 77,
+      "sha256": "69656304316814b7b98ab4af26e31482f10d212478cee18165d80160291cbe2e",
+      "metadata": "ptq/supercombo_calib_metadata.json"
+    },
+    {
+      "path": "quantization_work/train_k230.npz",
+      "samples": 72,
+      "manifest": "verification/quantization_20260903/train_manifest.json",
+      "warmup": 40,
+      "frames": 40,
+      "stride": 10,
+      "metadata": [
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/001/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 160,
+          "timestamp_ns": 1338731209312,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 132.1129608154297,
+          "std_luma": 50.39659829408052
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/001/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 170,
+          "timestamp_ns": 1339230415756,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 130.27637481689453,
+          "std_luma": 50.071371281422785
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/001/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 180,
+          "timestamp_ns": 1339730755904,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 131.76583099365234,
+          "std_luma": 49.46371961844549
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/001/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 190,
+          "timestamp_ns": 1340264161644,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 133.26166534423828,
+          "std_luma": 49.58924762895016
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/006/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 360,
+          "timestamp_ns": 1650258059625,
+          "speed_kph": 59.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 128.99884796142578,
+          "std_luma": 39.578980767352704
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/006/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 370,
+          "timestamp_ns": 1650759155842,
+          "speed_kph": 58.5,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 141.07762908935547,
+          "std_luma": 41.23467354839787
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/006/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 380,
+          "timestamp_ns": 1651259488798,
+          "speed_kph": 58.125,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 143.472900390625,
+          "std_luma": 42.4398589784783
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/006/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 390,
+          "timestamp_ns": 1651759141391,
+          "speed_kph": 57.625,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 146.7747039794922,
+          "std_luma": 43.78587265789166
+        },
+        {
+          "sequence_id": 2,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/010/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 560,
+          "timestamp_ns": 1901890949365,
+          "speed_kph": 53.5,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 145.37310028076172,
+          "std_luma": 37.434840573925804
+        },
+        {
+          "sequence_id": 2,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/010/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 570,
+          "timestamp_ns": 1902423061941,
+          "speed_kph": 53.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 140.89462280273438,
+          "std_luma": 37.80106124297988
+        },
+        {
+          "sequence_id": 2,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/010/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 580,
+          "timestamp_ns": 1902923437369,
+          "speed_kph": 52.5,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 136.26995086669922,
+          "std_luma": 36.303185463316616
+        },
+        {
+          "sequence_id": 2,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/010/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 590,
+          "timestamp_ns": 1903423072884,
+          "speed_kph": 52.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 129.74920654296875,
+          "std_luma": 35.224825254211865
+        },
+        {
+          "sequence_id": 3,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/015/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 160,
+          "timestamp_ns": 2183325074682,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 134.89891815185547,
+          "std_luma": 56.320497799117035
+        },
+        {
+          "sequence_id": 3,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/015/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 170,
+          "timestamp_ns": 2183858332724,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 135.5833511352539,
+          "std_luma": 56.403627110506505
+        },
+        {
+          "sequence_id": 3,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/015/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 180,
+          "timestamp_ns": 2184359681951,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 135.04925537109375,
+          "std_luma": 56.346682049050045
+        },
+        {
+          "sequence_id": 3,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/015/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 190,
+          "timestamp_ns": 2184859065742,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 134.37288665771484,
+          "std_luma": 56.18251364537427
+        },
+        {
+          "sequence_id": 4,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/019/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 360,
+          "timestamp_ns": 2440447319004,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 143.7152328491211,
+          "std_luma": 54.840178479607005
+        },
+        {
+          "sequence_id": 4,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/019/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 370,
+          "timestamp_ns": 2440947568663,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 138.7834014892578,
+          "std_luma": 55.2440584720393
+        },
+        {
+          "sequence_id": 4,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/019/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 380,
+          "timestamp_ns": 2441447647721,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 138.2453384399414,
+          "std_luma": 55.33121356861044
+        },
+        {
+          "sequence_id": 4,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/019/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 390,
+          "timestamp_ns": 2441947927943,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 138.3062973022461,
+          "std_luma": 55.473591068607675
+        },
+        {
+          "sequence_id": 5,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/024/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 560,
+          "timestamp_ns": 2748875778420,
+          "speed_kph": 2.5,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 143.91554260253906,
+          "std_luma": 63.4471555113791
+        },
+        {
+          "sequence_id": 5,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/024/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 570,
+          "timestamp_ns": 2749375464985,
+          "speed_kph": 2.5,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 143.73483276367188,
+          "std_luma": 64.06874123129589
+        },
+        {
+          "sequence_id": 5,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/024/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 580,
+          "timestamp_ns": 2749875750915,
+          "speed_kph": 1.125,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 148.13633728027344,
+          "std_luma": 63.95365871034257
+        },
+        {
+          "sequence_id": 5,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/024/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 590,
+          "timestamp_ns": 2750377481897,
+          "speed_kph": 0.125,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 144.52556610107422,
+          "std_luma": 64.7160506235737
+        },
+        {
+          "sequence_id": 6,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/001/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 160,
+          "timestamp_ns": 148148052170,
+          "speed_kph": 44.25,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 131.36009979248047,
+          "std_luma": 32.85553825641058
+        },
+        {
+          "sequence_id": 6,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/001/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 170,
+          "timestamp_ns": 148680615355,
+          "speed_kph": 45.375,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 136.8648681640625,
+          "std_luma": 32.582137622071926
+        },
+        {
+          "sequence_id": 6,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/001/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 180,
+          "timestamp_ns": 149182665318,
+          "speed_kph": 46.5,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 138.54139709472656,
+          "std_luma": 37.487064152657126
+        },
+        {
+          "sequence_id": 6,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/001/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 190,
+          "timestamp_ns": 149681910169,
+          "speed_kph": 47.625,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 115.85688781738281,
+          "std_luma": 30.834719865778546
+        },
+        {
+          "sequence_id": 7,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/006/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 360,
+          "timestamp_ns": 460298468890,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 115.1626205444336,
+          "std_luma": 41.773316113771095
+        },
+        {
+          "sequence_id": 7,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/006/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 370,
+          "timestamp_ns": 460798976042,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 115.29685974121094,
+          "std_luma": 41.51203644518388
+        },
+        {
+          "sequence_id": 7,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/006/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 380,
+          "timestamp_ns": 461298307633,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 115.77079010009766,
+          "std_luma": 41.845512811974
+        },
+        {
+          "sequence_id": 7,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/006/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 390,
+          "timestamp_ns": 461798141308,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 115.83064270019531,
+          "std_luma": 41.764037791512706
+        },
+        {
+          "sequence_id": 8,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/012/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 560,
+          "timestamp_ns": 834084243664,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 123.2947998046875,
+          "std_luma": 45.141508168216234
+        },
+        {
+          "sequence_id": 8,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/012/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 570,
+          "timestamp_ns": 834584740999,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 123.40503692626953,
+          "std_luma": 45.06995887724182
+        },
+        {
+          "sequence_id": 8,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/012/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 580,
+          "timestamp_ns": 835085131132,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 123.67005157470703,
+          "std_luma": 45.15315308574792
+        },
+        {
+          "sequence_id": 8,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/012/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 590,
+          "timestamp_ns": 835586033497,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 123.95191192626953,
+          "std_luma": 45.11474001587245
+        },
+        {
+          "sequence_id": 9,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/017/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 160,
+          "timestamp_ns": 1116790324045,
+          "speed_kph": 51.375,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 135.5600357055664,
+          "std_luma": 40.614705687439596
+        },
+        {
+          "sequence_id": 9,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/017/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 170,
+          "timestamp_ns": 1117291906958,
+          "speed_kph": 51.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 133.47533416748047,
+          "std_luma": 37.98396005461635
+        },
+        {
+          "sequence_id": 9,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/017/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 180,
+          "timestamp_ns": 1117791634593,
+          "speed_kph": 50.625,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 125.5028305053711,
+          "std_luma": 37.29510091868789
+        },
+        {
+          "sequence_id": 9,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/017/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 190,
+          "timestamp_ns": 1118291485954,
+          "speed_kph": 50.25,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 124.51197814941406,
+          "std_luma": 37.82357663118738
+        },
+        {
+          "sequence_id": 10,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/023/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 360,
+          "timestamp_ns": 1491493217662,
+          "speed_kph": 36.25,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 112.53980255126953,
+          "std_luma": 45.4234683402715
+        },
+        {
+          "sequence_id": 10,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/023/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 370,
+          "timestamp_ns": 1491993399891,
+          "speed_kph": 38.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 110.0751953125,
+          "std_luma": 44.71901792903159
+        },
+        {
+          "sequence_id": 10,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/023/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 380,
+          "timestamp_ns": 1492492528640,
+          "speed_kph": 39.25,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 117.83905029296875,
+          "std_luma": 47.1157145050533
+        },
+        {
+          "sequence_id": 10,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/023/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 390,
+          "timestamp_ns": 1492991374036,
+          "speed_kph": 40.375,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 118.70355987548828,
+          "std_luma": 47.74133708075163
+        },
+        {
+          "sequence_id": 11,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/028/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 560,
+          "timestamp_ns": 1803190415096,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 133.23162078857422,
+          "std_luma": 56.613991530822126
+        },
+        {
+          "sequence_id": 11,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/028/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 570,
+          "timestamp_ns": 1803689173337,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 133.312744140625,
+          "std_luma": 56.39570227353984
+        },
+        {
+          "sequence_id": 11,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/028/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 580,
+          "timestamp_ns": 1804187898970,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 133.35303497314453,
+          "std_luma": 56.7523729954258
+        },
+        {
+          "sequence_id": 11,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/028/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+          "frame": 590,
+          "timestamp_ns": 1804721245576,
+          "speed_kph": 0.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0265707821,
+            0.00174541934
+          ],
+          "mean_luma": 132.98294830322266,
+          "std_luma": 56.22484184636119
+        },
+        {
+          "sequence_id": 12,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/001/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 160,
+          "timestamp_ns": 524784392555,
+          "speed_kph": 51.75,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 147.40093994140625,
+          "std_luma": 57.55935920847741
+        },
+        {
+          "sequence_id": 12,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/001/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 170,
+          "timestamp_ns": 525284944379,
+          "speed_kph": 52.375,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 151.11861419677734,
+          "std_luma": 58.98835218541658
+        },
+        {
+          "sequence_id": 12,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/001/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 180,
+          "timestamp_ns": 525784825836,
+          "speed_kph": 52.625,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 143.22333526611328,
+          "std_luma": 61.87672581012564
+        },
+        {
+          "sequence_id": 12,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/001/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 190,
+          "timestamp_ns": 526287582042,
+          "speed_kph": 53.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 147.9515609741211,
+          "std_luma": 66.8186749115082
+        },
+        {
+          "sequence_id": 13,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/009/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 360,
+          "timestamp_ns": 1017001997295,
+          "speed_kph": 77.125,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 137.75305938720703,
+          "std_luma": 46.05398677779334
+        },
+        {
+          "sequence_id": 13,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/009/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 370,
+          "timestamp_ns": 1017534966947,
+          "speed_kph": 77.625,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 140.2174835205078,
+          "std_luma": 49.526754097664565
+        },
+        {
+          "sequence_id": 13,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/009/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 380,
+          "timestamp_ns": 1018034718879,
+          "speed_kph": 78.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 141.68286895751953,
+          "std_luma": 47.66811478311894
+        },
+        {
+          "sequence_id": 13,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/009/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 390,
+          "timestamp_ns": 1018534912031,
+          "speed_kph": 78.625,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 145.4681396484375,
+          "std_luma": 46.17241358935057
+        },
+        {
+          "sequence_id": 14,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/017/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 560,
+          "timestamp_ns": 1508726952448,
+          "speed_kph": 91.375,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 132.12470245361328,
+          "std_luma": 42.736864424391555
+        },
+        {
+          "sequence_id": 14,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/017/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 570,
+          "timestamp_ns": 1509261090834,
+          "speed_kph": 90.625,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 129.73507690429688,
+          "std_luma": 41.616332912915304
+        },
+        {
+          "sequence_id": 14,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/017/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 580,
+          "timestamp_ns": 1509760486788,
+          "speed_kph": 90.5,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 127.2626953125,
+          "std_luma": 40.899690957522374
+        },
+        {
+          "sequence_id": 14,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/017/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 590,
+          "timestamp_ns": 1510292501218,
+          "speed_kph": 90.625,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 126.90132141113281,
+          "std_luma": 41.270688105969356
+        },
+        {
+          "sequence_id": 15,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/026/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 160,
+          "timestamp_ns": 2029631508661,
+          "speed_kph": 58.375,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 131.39705657958984,
+          "std_luma": 49.93068658972295
+        },
+        {
+          "sequence_id": 15,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/026/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 170,
+          "timestamp_ns": 2030130125096,
+          "speed_kph": 57.75,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 130.39736938476562,
+          "std_luma": 49.77291353283089
+        },
+        {
+          "sequence_id": 15,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/026/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 180,
+          "timestamp_ns": 2030663868592,
+          "speed_kph": 57.25,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 143.58311462402344,
+          "std_luma": 52.90665987124621
+        },
+        {
+          "sequence_id": 15,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/026/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 190,
+          "timestamp_ns": 2031163151877,
+          "speed_kph": 57.0,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 139.51361083984375,
+          "std_luma": 49.80993168762137
+        },
+        {
+          "sequence_id": 16,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/034/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 360,
+          "timestamp_ns": 2524422109948,
+          "speed_kph": 39.25,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 135.0476837158203,
+          "std_luma": 35.42387717404132
+        },
+        {
+          "sequence_id": 16,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/034/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 370,
+          "timestamp_ns": 2524954661362,
+          "speed_kph": 39.875,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 134.9650650024414,
+          "std_luma": 33.64920171696517
+        },
+        {
+          "sequence_id": 16,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/034/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 380,
+          "timestamp_ns": 2525457554929,
+          "speed_kph": 40.25,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 129.42247009277344,
+          "std_luma": 33.93478221272975
+        },
+        {
+          "sequence_id": 16,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/034/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 390,
+          "timestamp_ns": 2525956602486,
+          "speed_kph": 40.5,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 130.22635650634766,
+          "std_luma": 35.066939208313485
+        },
+        {
+          "sequence_id": 17,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/042/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 560,
+          "timestamp_ns": 3014785929351,
+          "speed_kph": 47.875,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 127.80339050292969,
+          "std_luma": 44.769690704645775
+        },
+        {
+          "sequence_id": 17,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/042/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 570,
+          "timestamp_ns": 3015317216817,
+          "speed_kph": 48.75,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 129.1595687866211,
+          "std_luma": 43.40112763261246
+        },
+        {
+          "sequence_id": 17,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/042/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 580,
+          "timestamp_ns": 3015884720918,
+          "speed_kph": 49.625,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 129.2964630126953,
+          "std_luma": 42.71179562671963
+        },
+        {
+          "sequence_id": 17,
+          "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/042/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660",
+          "frame": 590,
+          "timestamp_ns": 3016384055086,
+          "speed_kph": 50.375,
+          "desire": 0,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0219921097,
+            0.00713543873
+          ],
+          "mean_luma": 131.8979263305664,
+          "std_luma": 42.82238916889753
+        }
+      ],
+      "sha256": "43083a9cf7e970568bb140d173f0b0f7fc780aa3e6ded45f092a21a62d65a10e"
+    },
+    {
+      "path": "quantization_work/pulses_k230.npz",
+      "samples": 24,
+      "manifest": "verification/quantization_20260903/pulses_manifest.json",
+      "warmup": 40,
+      "frames": 12,
+      "stride": 1,
+      "metadata": [
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/003/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 147,
+          "timestamp_ns": 1458248660056,
+          "speed_kph": 45.375,
+          "desire": 3,
+          "desire_pulse": 3,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 92.1169204711914,
+          "std_luma": 39.2265359701837
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/003/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 148,
+          "timestamp_ns": 1458282166352,
+          "speed_kph": 45.5,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 92.81273651123047,
+          "std_luma": 38.75272075504491
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/003/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 149,
+          "timestamp_ns": 1458349264315,
+          "speed_kph": 45.75,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 95.55753326416016,
+          "std_luma": 37.484067878348945
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/003/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 150,
+          "timestamp_ns": 1458382961611,
+          "speed_kph": 45.875,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 97.66859436035156,
+          "std_luma": 37.047917489671946
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/003/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 151,
+          "timestamp_ns": 1458449092056,
+          "speed_kph": 46.25,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 104.5867691040039,
+          "std_luma": 35.30122356671452
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/003/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 152,
+          "timestamp_ns": 1458481690833,
+          "speed_kph": 46.375,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 106.08611297607422,
+          "std_luma": 35.2393749313731
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/003/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 153,
+          "timestamp_ns": 1458549737611,
+          "speed_kph": 46.625,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 106.69444274902344,
+          "std_luma": 35.02565353100764
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/003/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 154,
+          "timestamp_ns": 1458583399537,
+          "speed_kph": 46.75,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 105.77523040771484,
+          "std_luma": 35.19802845971894
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/003/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 155,
+          "timestamp_ns": 1458649336092,
+          "speed_kph": 47.125,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 100.7254867553711,
+          "std_luma": 37.63729827116765
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/003/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 156,
+          "timestamp_ns": 1458682014018,
+          "speed_kph": 47.125,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 99.66057586669922,
+          "std_luma": 38.140015729725256
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/003/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 157,
+          "timestamp_ns": 1458749184537,
+          "speed_kph": 47.375,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 99.84492492675781,
+          "std_luma": 37.618975889640204
+        },
+        {
+          "sequence_id": 0,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/003/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 158,
+          "timestamp_ns": 1458781246166,
+          "speed_kph": 47.625,
+          "desire": 3,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 100.12419891357422,
+          "std_luma": 37.167621759855386
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/004/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 150,
+          "timestamp_ns": 1518609162316,
+          "speed_kph": 62.5,
+          "desire": 4,
+          "desire_pulse": 4,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 146.31803131103516,
+          "std_luma": 38.08965184860573
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/004/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 151,
+          "timestamp_ns": 1518673858168,
+          "speed_kph": 62.5,
+          "desire": 4,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 141.700927734375,
+          "std_luma": 37.71232456622287
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/004/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 152,
+          "timestamp_ns": 1518707149983,
+          "speed_kph": 62.5,
+          "desire": 4,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 142.80165100097656,
+          "std_luma": 38.11829788309893
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/004/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 153,
+          "timestamp_ns": 1518773807834,
+          "speed_kph": 62.375,
+          "desire": 4,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 139.02748107910156,
+          "std_luma": 38.079504566210744
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/004/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 154,
+          "timestamp_ns": 1518807748723,
+          "speed_kph": 62.375,
+          "desire": 4,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 138.12866973876953,
+          "std_luma": 38.09381018240458
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/004/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 155,
+          "timestamp_ns": 1518874525094,
+          "speed_kph": 62.375,
+          "desire": 4,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 137.05123901367188,
+          "std_luma": 38.5363366082909
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/004/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 156,
+          "timestamp_ns": 1518908248279,
+          "speed_kph": 62.375,
+          "desire": 4,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 136.32717895507812,
+          "std_luma": 38.827418926876284
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/004/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 157,
+          "timestamp_ns": 1518974277723,
+          "speed_kph": 62.375,
+          "desire": 4,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 137.95539093017578,
+          "std_luma": 40.49623468775671
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/004/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 158,
+          "timestamp_ns": 1519009457686,
+          "speed_kph": 62.25,
+          "desire": 4,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 138.51388549804688,
+          "std_luma": 40.740348443219965
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/004/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 159,
+          "timestamp_ns": 1519074475019,
+          "speed_kph": 62.25,
+          "desire": 4,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 139.0179443359375,
+          "std_luma": 40.9368698695877
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/004/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 160,
+          "timestamp_ns": 1519108295353,
+          "speed_kph": 62.125,
+          "desire": 4,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 138.1891326904297,
+          "std_luma": 41.20595121276596
+        },
+        {
+          "sequence_id": 1,
+          "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/004/road.hevc",
+          "route": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+          "frame": 161,
+          "timestamp_ns": 1519174194612,
+          "speed_kph": 62.125,
+          "desire": 4,
+          "desire_pulse": 0,
+          "rpy_rad": [
+            0.0,
+            -0.0325273573,
+            -0.00447250623
+          ],
+          "mean_luma": 139.25165557861328,
+          "std_luma": 41.65113062069216
+        }
+      ],
+      "sha256": "bb246ae45e54aae0740c23a7dfac66322c78162a4d762fe6452b2be023be2c21"
+    }
+  ],
+  "purpose": "PTQ only; the merged samples are not one continuous recurrent sequence",
+  "original_onnx_sha256": "50c7fc8565ac69a4b9a0de122e961326820e78bf13659255a89d0ed04be030d5"
+}

@@ -75,10 +75,21 @@ def random_calibration(specs: list[tuple[str, tuple[int, ...], np.dtype]], sampl
 
 
 def npz_calibration(path: Path, specs: list[tuple[str, tuple[int, ...], np.dtype]], samples: int | None = None) -> list[list[np.ndarray]]:
-  loaded = np.load(path)
+  loaded = np.load(path, allow_pickle=False)
   arrays = []
+  counts = set()
   for name, shape, dtype in specs:
-    arr = loaded[name].astype(dtype)
+    arr = loaded[name]
+    counts.add(len(arr))
+    if arr.shape[1:] not in (shape, shape[1:]):
+      raise ValueError(f"invalid calibration shape for {name}: {arr.shape}, expected [N,{shape}]")
+    if not np.isfinite(arr).all():
+      raise ValueError(f"nonfinite calibration input: {name}")
+    if np.issubdtype(dtype, np.integer):
+      limits = np.iinfo(dtype)
+      if arr.min() < limits.min or arr.max() > limits.max or not np.array_equal(arr, np.round(arr)):
+        raise ValueError(f"lossy calibration cast to {dtype}: {name}")
+    arr = arr.astype(dtype)
     if samples is not None:
       arr = arr[:samples]
     sample_list = []
@@ -87,6 +98,11 @@ def npz_calibration(path: Path, specs: list[tuple[str, tuple[int, ...], np.dtype
         x = x.reshape(shape)
       sample_list.append(np.ascontiguousarray(x))
     arrays.append(sample_list)
+  loaded.close()
+  if len(counts) != 1 or not arrays or not arrays[0]:
+    raise ValueError(f"empty or mismatched calibration counts: {counts}")
+  if samples is not None and samples > next(iter(counts)):
+    raise ValueError(f"requested {samples} calibration samples but only {next(iter(counts))} exist")
   return arrays
 
 
@@ -110,12 +126,25 @@ def main() -> None:
   parser.add_argument("--use-mse-quant-w", action="store_true")
   parser.add_argument("--dump-quant-error", action="store_true")
   parser.add_argument("--export-quant-scheme", action="store_true")
+  parser.add_argument("--export-weight-range-by-channel", action="store_true")
+  parser.add_argument("--finetune-weights-method", choices=("NoFineTuneWeights", "UseSquant"), default="NoFineTuneWeights")
   args = parser.parse_args()
+  if args.samples <= 0:
+    parser.error("--samples must be positive")
+  if args.target == 'k230' and args.quant_type == args.w_quant_type == 'int16':
+    parser.error("K230 does not support INT16 activations and INT16 weights together")
+  if args.no_dump_ir and (args.export_quant_scheme or args.dump_quant_error):
+    parser.error("quantization diagnostics require IR dumping; omit --no-dump-ir")
 
   args.out.parent.mkdir(parents=True, exist_ok=True)
   args.dump_dir.mkdir(parents=True, exist_ok=True)
 
   import nncase
+  if args.use_mse_quant_w:
+    import inspect
+    if 'use_mse_quant_w' not in inspect.getsource(nncase.Compiler.use_ptq):
+      raise RuntimeError("This nncase Python binding silently ignores use_mse_quant_w; "
+                         "choose a supported option instead of producing an unchanged model")
 
   compile_options = nncase.CompileOptions()
   compile_options.target = args.target
@@ -139,6 +168,8 @@ def main() -> None:
     ptq_options.use_mse_quant_w = args.use_mse_quant_w
     ptq_options.dump_quant_error = args.dump_quant_error
     ptq_options.export_quant_scheme = args.export_quant_scheme
+    ptq_options.export_weight_range_by_channel = args.export_weight_range_by_channel
+    ptq_options.finetune_weights_method = args.finetune_weights_method
     if args.quant_scheme is not None:
       ptq_options.quant_scheme = str(args.quant_scheme)
     ptq_options.quant_scheme_strict_mode = args.quant_scheme_strict
@@ -146,6 +177,10 @@ def main() -> None:
     compiler.use_ptq(ptq_options)
 
   start = time.monotonic()
+  print(f"compiling {args.model} target={args.target} "
+        f"PTQ={args.ptq} samples={len(cali_data[0]) if args.ptq else 0} "
+        f"activation={args.quant_type} weights={args.w_quant_type} "
+        f"calibration={args.calibrate_method} finetune={args.finetune_weights_method}", flush=True)
   compiler.compile()
   elapsed = time.monotonic() - start
 

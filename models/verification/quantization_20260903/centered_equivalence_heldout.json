@@ -1,0 +1,111 @@
+{
+  "samples": 240,
+  "non_plan_logits": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "state": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "pose": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "lane_geometry": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "plan_logits_delta": {
+    "mae": 8.286883433659871e-06,
+    "rmse": 1.1346849173615866e-05,
+    "p95": 2.3126602172851562e-05,
+    "max": 3.0040740966796875e-05
+  },
+  "plan_matches": 240,
+  "plan_match_rate": 1.0,
+  "candidate_top_ties": 0,
+  "mismatch_reference_margin": null,
+  "selected_path_x_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "same_hypothesis_path_x_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "selected_path_y_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "same_hypothesis_path_y_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "selected_path_z_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "same_hypothesis_path_z_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "selected_path_y_first_17_knots_m": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "lane_means": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "lane_logits": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "road_edges": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "lead": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "desire_logits": {
+    "mae": 0.0,
+    "rmse": 0.0,
+    "p95": 0.0,
+    "max": 0.0
+  },
+  "reference": "models/quantization_work/heldout_k230.reference.npy",
+  "candidate": "models/quantization_work/centered_fp32_heldout.npy"
+}

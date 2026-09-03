@@ -1,0 +1,74 @@
+[
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/001/road.hevc",
+    "start_frame": 120
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/006/road.hevc",
+    "start_frame": 320
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/010/road.hevc",
+    "start_frame": 520
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/015/road.hevc",
+    "start_frame": 120
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/019/road.hevc",
+    "start_frame": 320
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654/segments/024/road.hevc",
+    "start_frame": 520
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/001/road.hevc",
+    "start_frame": 120
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/006/road.hevc",
+    "start_frame": 320
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/012/road.hevc",
+    "start_frame": 520
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/017/road.hevc",
+    "start_frame": 120
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/023/road.hevc",
+    "start_frame": 320
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534/segments/028/road.hevc",
+    "start_frame": 520
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/001/road.hevc",
+    "start_frame": 120
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/009/road.hevc",
+    "start_frame": 320
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/017/road.hevc",
+    "start_frame": 520
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/026/road.hevc",
+    "start_frame": 120
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/034/road.hevc",
+    "start_frame": 320
+  },
+  {
+    "video": "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660/segments/042/road.hevc",
+    "start_frame": 520
+  }
+]

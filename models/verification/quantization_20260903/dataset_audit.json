@@ -1,0 +1,64 @@
+{
+  "train": {
+    "samples": 72,
+    "routes": [
+      "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654",
+      "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--00-51-57-534",
+      "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--20-58-46-660"
+    ],
+    "mean_luma_min": 110.0751953125,
+    "mean_luma_max": 151.11861419677734,
+    "minimum_spatial_luma_std": 30.834719865778546,
+    "capture_gap_p50_ms": 64.21186,
+    "capture_gap_max_ms": 101.904712,
+    "gaps_over_100ms": 4
+  },
+  "pulses": {
+    "samples": 24,
+    "routes": [
+      "/Users/chan/Documents/k230/driving_data_20260816/2026-08-16--11-51-52-654"
+    ],
+    "mean_luma_min": 92.1169204711914,
+    "mean_luma_max": 146.31803131103516,
+    "minimum_spatial_luma_std": 35.02565353100764,
+    "capture_gap_p50_ms": 64.126574,
+    "capture_gap_max_ms": 69.660889,
+    "gaps_over_100ms": 0
+  },
+  "validation": {
+    "samples": 160,
+    "routes": [
+      "/Users/chan/Documents/k230/driving_data_20260830/2026-08-30--01-24-02-971"
+    ],
+    "mean_luma_min": 106.68502807617188,
+    "mean_luma_max": 147.2138214111328,
+    "minimum_spatial_luma_std": 32.91591168955754,
+    "capture_gap_p50_ms": 64.219689,
+    "capture_gap_max_ms": 71.158913,
+    "gaps_over_100ms": 0
+  },
+  "heldout": {
+    "samples": 240,
+    "routes": [
+      "/Users/chan/Documents/k230/driving_data_20260903/2026-09-03--21-08-52-823"
+    ],
+    "mean_luma_min": 112.6294174194336,
+    "mean_luma_max": 159.80443572998047,
+    "minimum_spatial_luma_std": 32.59092129316001,
+    "capture_gap_p50_ms": 64.0796905,
+    "capture_gap_max_ms": 78.880657,
+    "gaps_over_100ms": 0
+  },
+  "long_heldout": {
+    "samples": 400,
+    "routes": [
+      "/Users/chan/Documents/k230/driving_data_20260903/2026-09-03--21-08-52-823"
+    ],
+    "mean_luma_min": 103.72476959228516,
+    "mean_luma_max": 142.58250427246094,
+    "minimum_spatial_luma_std": 31.366711776564397,
+    "capture_gap_p50_ms": 64.049786,
+    "capture_gap_max_ms": 100.145856,
+    "gaps_over_100ms": 1
+  }
+}

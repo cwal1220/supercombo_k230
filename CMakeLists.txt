@@ -264,6 +264,14 @@ if(SUPERCOMBO_BUILD_RUNTIME)
 endif()
 
 if(SUPERCOMBO_BUILD_BENCHMARKS)
+  add_executable(warp_recording
+    tools/model/warp_recording.cc
+    src/model_input_transform.cc
+    src/projection.cc
+  )
+  target_include_directories(warp_recording PRIVATE ${PROJECT_LOCAL_INCLUDES})
+  target_compile_options(warp_recording PRIVATE ${PROJECT_WARNINGS})
+
   add_executable(check_model_output_parser
     benchmarks/check_model_output_parser.cc
     src/model_output.cc
@@ -369,6 +377,6 @@ if(SUPERCOMBO_BUILD_RUNTIME)
   install(PROGRAMS scripts/k230_manager.py scripts/param_server.py
     scripts/k230_display_control.py DESTINATION .)
   install(FILES scripts/requirements-param-server.txt DESTINATION .)
-  install(DIRECTORY models DESTINATION . OPTIONAL FILES_MATCHING PATTERN "*.kmodel")
+  install(FILES models/supercombo.kmodel DESTINATION model)
   install(DIRECTORY params DESTINATION . FILES_MATCHING PATTERN "*.json")
 endif()
