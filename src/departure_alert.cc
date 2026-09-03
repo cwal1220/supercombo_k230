@@ -19,7 +19,9 @@ constexpr double kLeadConfirmTimeS = 0.3;
 
 constexpr float kMinimumStoppedPlanDistanceM = -5.0f;
 constexpr float kStoppedPlanDistanceM = 5.0f;
-constexpr float kOpenPlanDistanceM = 25.0f;
+// 094 plan은 정차 중 중앙 1.3 m로 붕괴하고 출발 예고 시 10 m를 넘긴 뒤 25 m까지
+// 0.8 s 더 걸린다(09-01 루트 13회 정차, 오경보 차이 없음).
+constexpr float kOpenPlanDistanceM = 10.0f;
 constexpr double kTrafficSignalDisplayStopTimeS = 3.0;
 constexpr double kGreenLightConfirmTimeS = 0.3;
 constexpr double kAlertDisplayTimeS = 3.0;
@@ -111,16 +113,11 @@ DepartureAlertOutput DepartureAlertDetector::update(
           input.plan_distance_m > kMinimumStoppedPlanDistanceM &&
           input.plan_distance_m < kStoppedPlanDistanceM;
 
-      /* 앞차가 없는데도 모델이 여기서 멈추겠다고 계획하면 신호 대기로 본다.
-       * 앞차가 있으면 그건 정체이고 lead_departed가 담당한다. 발동 조건은
-       * plan이 25 m 넘게 열리는 것이라, 무장이 헛나가도 길이 실제로 열리지
-       * 않는 한 알림은 뜨지 않는다.
-       * 무장 뒤에 앞차가 끼어들면 그 정차는 더 이상 신호 대기가 아니므로
-       * 무장을 푼다. 안 그러면 그 앞차가 출발할 때 lead_departed 대신
-       * green_light가 떠서 알림 사유가 틀린다. */
-      if (lead_present) {
-        reset_green_light();
-      } else if (!green_light_armed_) {
+      /* 모델이 여기서 멈추겠다고 계획한 채 3 s가 지나면 무장한다. vision lead는
+       * 무장을 막지 않는다: 094 lead 확률은 상수 0.6에 가까워 앞차 유무를
+       * 가르지 못하고(drive15: 9회 정차 중 4회가 가짜 lead로 무장 실패),
+       * 앞차가 출발해도 plan이 같은 식으로 열려 출발 알림으로는 옳다. */
+      if (!green_light_armed_) {
         green_light_armed_ =
             model_stopped && elapsed(input.now_s, stopped_since_s_,
                                      kTrafficSignalDisplayStopTimeS);
@@ -139,10 +136,11 @@ DepartureAlertOutput DepartureAlertDetector::update(
       }
     }
 
-    if (green_light_changed) {
-      trigger(DepartureAlertType::green_light, input.now_s);
-    } else if (lead_departed) {
+    // 둘이 같은 프레임에 성립하면 더 구체적인 사유(앞차 출발)를 쓴다.
+    if (lead_departed) {
       trigger(DepartureAlertType::lead_departed, input.now_s);
+    } else if (green_light_changed) {
+      trigger(DepartureAlertType::green_light, input.now_s);
     }
   }
 

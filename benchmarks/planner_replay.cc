@@ -86,7 +86,20 @@ int main(int argc, char **argv) {
                  rh.payload_size >= sizeof(K230ModelState)) {
         if (!have_cs) continue;
         K230ModelState ms{};
-        std::memcpy(&ms, buf.data(), sizeof(ms));
+        /* v4 이하 녹화는 plan 뒤에 stds/orientations(792 B), v3 이하는 lead 뒤에
+         * stop_line(28 B)이 더 있다(구 페이로드 4080 B, 꼬리 패딩 4 B 포함).
+         * 통째로 복사하면 차선 필드가 792 B 어긋난다. */
+        const size_t plan_extra = hdr.version <= 4 ? 2 * sizeof(ms.plan) : 0;
+        const size_t lead_extra = hdr.version <= 3 ? 28 : 0;
+        if (rh.payload_size < sizeof(ms) + plan_extra + lead_extra) continue;
+        const char *src = buf.data();
+        const size_t lanes_off = offsetof(K230ModelState, lanes);
+        const size_t pose_off = offsetof(K230ModelState, pose);
+        std::memcpy(&ms, src, lanes_off);
+        std::memcpy(reinterpret_cast<char *>(&ms) + lanes_off, src + lanes_off + plan_extra,
+                    pose_off - lanes_off);
+        std::memcpy(reinterpret_cast<char *>(&ms) + pose_off,
+                    src + pose_off + plan_extra + lead_extra, sizeof(ms) - pose_off);
         const float v = v_kph / 3.6f;
         LateralTarget t = planner.update(ms, vehicle, v, measured, true, 0.0f);
         const float des = lag_adjusted(t, v, steering.steer_actuator_delay, 0.05f);

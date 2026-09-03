@@ -57,8 +57,8 @@ void verify_lead_departure() {
           "one stop cycle must not trigger duplicate lead alerts");
 }
 
-/* 앞차 없이 정차하고 모델이 여기서 멈추겠다고 계획하면 신호 대기로 보고
- * 무장한다. 길이 열리면(plan > 25 m) 알림이 뜬다. */
+/* 정차하고 모델이 여기서 멈추겠다고 계획하면 3 s 뒤 무장한다. 길이
+ * 열리면(plan > 10 m, 0.3 s) 알림이 뜬다. */
 void verify_green_light() {
   DepartureAlertDetector detector;
   DepartureAlertOutput output;
@@ -85,7 +85,17 @@ void verify_green_light() {
     DepartureAlertInput input = stopped_input(i * 0.05);
     input.model_updated = true;
     input.model_valid = true;
-    input.plan_distance_m = 26.0f;
+    input.plan_distance_m = 9.0f;
+    output = detector.update(input);
+  }
+  require(output.type == DepartureAlertType::none,
+          "a plan below the open threshold must not trigger");
+
+  for (int i = 69; i <= 76; ++i) {
+    DepartureAlertInput input = stopped_input(i * 0.05);
+    input.model_updated = true;
+    input.model_valid = true;
+    input.plan_distance_m = 11.0f;
     output = detector.update(input);
   }
   require(output.type == DepartureAlertType::green_light,
@@ -109,8 +119,8 @@ void verify_three_second_display_uses_total_stop_time() {
           "traffic signal must display after three seconds of total stop time");
 }
 
-/* 정체(앞차 있음)에서는 신호 대기로 오인해 무장하면 안 되고, lead_departed
- * 알림이 그대로 살아 있어야 한다. */
+/* 정체(앞차 있음)에서도 무장은 된다(094 lead 확률은 앞차 유무를 가르지
+ * 못한다). plan이 닫힌 채 앞차만 출발하면 lead_departed가 뜬다. */
 void verify_queue_keeps_lead_alert() {
   DepartureAlertDetector detector;
   DepartureAlertOutput output;
@@ -125,8 +135,8 @@ void verify_queue_keeps_lead_alert() {
     input.plan_distance_m = 3.0f;
     output = detector.update(input);
   }
-  require(!output.green_light_armed,
-          "a lead in front must not arm the signal alert");
+  require(output.green_light_armed,
+          "a lead in front must not block arming");
 
   for (int i = 61; i <= 70; ++i) {
     DepartureAlertInput input = stopped_input(i * 0.05);
@@ -143,10 +153,9 @@ void verify_queue_keeps_lead_alert() {
           "lead departure must still alert without stop lines");
 }
 
-/* 신호 대기로 무장한 뒤 앞차가 끼어들면 그 정차는 더 이상 신호 대기가
- * 아니다. 무장이 풀려야 그 앞차가 출발할 때 green_light가 아니라
- * lead_departed가 뜬다. */
-void verify_lead_cut_in_disarms_green_light() {
+/* 무장 뒤 앞차가 끼어들어도 무장은 유지된다. 그 앞차가 출발하며 plan도
+ * 같은 프레임에 열리면 더 구체적인 사유인 lead_departed가 뜬다. */
+void verify_lead_departure_wins_when_plan_opens() {
   DepartureAlertDetector detector;
   DepartureAlertOutput output;
 
@@ -170,8 +179,8 @@ void verify_lead_cut_in_disarms_green_light() {
     input.plan_distance_m = 4.0f;
     output = detector.update(input);
   }
-  require(!output.green_light_armed,
-          "a lead cutting in must disarm the signal alert");
+  require(output.green_light_armed,
+          "a lead cutting in must keep the signal alert armed");
 
   for (int i = 91; i <= 100; ++i) {
     DepartureAlertInput input = stopped_input(i * 0.05);
@@ -185,7 +194,7 @@ void verify_lead_cut_in_disarms_green_light() {
     output = detector.update(input);
   }
   require(output.type == DepartureAlertType::lead_departed,
-          "the cut-in lead departing must report a lead alert, not a signal");
+          "a departing lead must win over the plan opening in the same frame");
 }
 
 }  // namespace
@@ -195,6 +204,6 @@ int main() {
   verify_green_light();
   verify_three_second_display_uses_total_stop_time();
   verify_queue_keeps_lead_alert();
-  verify_lead_cut_in_disarms_green_light();
+  verify_lead_departure_wins_when_plan_opens();
   return 0;
 }

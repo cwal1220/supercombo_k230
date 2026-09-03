@@ -21,6 +21,10 @@ namespace {
 constexpr int kMpcN = LAT_N;
 constexpr int kMpcNodes = LAT_N + 1;
 constexpr double kDtModel = 0.05;
+// 이웃 plan 점 사이 최소 전진 거리. 이보다 짧으면 기하학적 heading이 무의미하다.
+constexpr double kMinHeadingDx = 0.5;
+// plan 끝점이 이보다 가까우면 plan이 붕괴한 것(정지: 실측 5.6 m, 주행: 60 m+).
+constexpr double kMinPlanReachM = 10.0;
 
 double interp(double x, const double *xp, const double *fp, size_t count) {
   if (count == 0) return 0.0;
@@ -229,8 +233,7 @@ public:
   }
 
   void run(const std::array<double, LAT_NX> &x0,
-           const std::array<double, kMpcNodes> &v_plan,
-           double factor1, double factor2,
+           const std::array<double, LAT_NP> &params,
            const std::array<double, kMpcNodes> &y,
            const std::array<double, kMpcNodes> &heading,
            double heading_weight) {
@@ -249,8 +252,7 @@ public:
 
     set_initial_state(x0);
     for (int i = 0; i <= kMpcN; ++i) {
-      // openpilot: p = [v_plan, lateral_factor]를 노드별로 공급한다
-      const double velocity_cost = v_plan[i] + 5.0;
+      const double velocity_cost = params[0] + 5.0;
       if (i < kMpcN) {
         std::array<double, LAT_NY> yref = {y[i], heading[i] * velocity_cost, 0.0};
         ocp_nlp_cost_model_set(capsule_->nlp_config, capsule_->nlp_dims,
@@ -260,9 +262,6 @@ public:
         ocp_nlp_cost_model_set(capsule_->nlp_config, capsule_->nlp_dims,
                                capsule_->nlp_in, i, "yref", yref.data());
       }
-      const std::array<double, LAT_NP> params = {
-          v_plan[i],
-          std::max(0.0, factor1 - factor2 * v_plan[i] * v_plan[i])};
       lat_acados_update_params(capsule_, i, const_cast<double *>(params.data()), LAT_NP);
     }
 
@@ -373,6 +372,7 @@ struct OpenpilotLateralPlanner::Impl {
     std::array<double, kTrajectorySize> distance{};
     std::array<double, kTrajectorySize> path_y{};
     std::array<double, kTrajectorySize> path_heading{};
+    const bool plan_collapsed = path[kTrajectorySize - 1][0] < kMinPlanReachM;
     for (int i = 0; i < kTrajectorySize; ++i) {
       distance[i] = std::sqrt(path[i][0] * path[i][0] + path[i][1] * path[i][1] +
                               path[i][2] * path[i][2]);
@@ -381,46 +381,35 @@ struct OpenpilotLateralPlanner::Impl {
       // 경로 오프셋 뒤에 모델 원본 heading을 재사용하면 좌우 곡률 부호가
       // 서로 달라져 한쪽 커브에서 경로를 안쪽으로 자를 수 있다.
       path_heading[i] = path_heading_at(path, i);
+      /* 정지 부근에서는 plan 전체가 몇 m로 붕괴해 이웃 점 dx가 사실상 0이
+       * 되고, 기하학적 heading은 차선 오프셋 dy를 ±90도로 부풀린다(정차 중
+       * des -0.16 → 출발 시 좌측 급조향). 차가 못 움직인 구간이라 목표
+       * heading은 현재 방위(0)가 맞다. 주행 중 knot 0~1의 짧은 간격은 제외. */
+      const int prev = std::max(0, i - 1), next = std::min(kTrajectorySize - 1, i + 1);
+      if (plan_collapsed && std::fabs(path[next][0] - path[prev][0]) < kMinHeadingDx)
+        path_heading[i] = 0.0;
     }
 
-    /* openpilot처럼 plan의 시간 인덱스 목표를 그대로 쓴다. 휠속도x시간
-     * 거리 질의는 정지에서 0에 고정돼 근거리 차선 오프셋이 상수 목표로 남는다. */
+    /* MPC 노드 시각의 목표를 차속 x 시간 거리로 보간한다. knot을 직접
+     * 인덱싱하면 모델 knot의 프레임 간 노이즈가 그대로 들어가 des가 2~3배
+     * 떨리고 토크 슬루 리미터가 요구 토크의 절반을 잘라낸다(0.8.x 재생 실측). */
     std::array<double, kMpcNodes> y_pts{};
     std::array<double, kMpcNodes> heading_pts{};
     for (int i = 0; i < kMpcNodes; ++i) {
-      y_pts[i] = path_y[i];
-      heading_pts[i] = path_heading[i];
+      const double query = std::max(0.0f, v_ego) * path_t[i];
+      y_pts[i] = interp(query, distance.data(), path_y.data(), distance.size());
+      heading_pts[i] = interp(query, distance.data(), path_heading.data(), distance.size());
     }
 
-    /* openpilot lateral_planner: MPC 속도는 모델 예측 속도 궤적을 MIN_SPEED로
-     * 클립해 쓴다 — v~0이 들어가면 MPC가 비정칙해져 psi가 폭주한다.
-     * 모델 속도 출력이 IPC에 없어 plan 위치의 시간 미분으로 대신한다. */
-    constexpr double kMinPlanSpeed = 1.0;  // openpilot drive_helpers.MIN_SPEED
-    std::array<double, kMpcNodes> plan_speed{};
-    for (int i = 0; i < kMpcNodes; ++i) {
-      // 노드 단위 유한차분은 노이즈가 커서 ±2 knot 중앙차분을 쓴다
-      const int lo = std::max(0, i - 2);
-      const int hi = std::min(kTrajectorySize - 1, i + 2);
-      const double dt = path_t[hi] - path_t[lo];
-      plan_speed[i] = dt > 1e-6 ? (distance[hi] - distance[lo]) / dt : 0.0;
-      if (!std::isfinite(plan_speed[i])) plan_speed[i] = 0.0;
-    }
-    constexpr double kMaxVelErr = 5.0;  // openpilot drive_helpers.MAX_VEL_ERR
-    const double vel_err = std::clamp(
-        plan_speed[0] - static_cast<double>(std::max(0.0f, v_ego)),
-        -kMaxVelErr, kMaxVelErr);
-    std::array<double, kMpcNodes> v_plan{};
-    for (int i = 0; i < kMpcNodes; ++i)
-      v_plan[i] = std::max(plan_speed[i] - vel_err, kMinPlanSpeed);
+    const double lateral_factor = std::max(0.0, factor1 - factor2 * v_ego * v_ego);
     /* lane 모드도 laneless와 같은 스케줄. heading은 차선 경로에서 나오므로
      * 고속에서 heading 고정 1.0이면 횡 offset에 대한 DC 강성이 0이 되어
      * 커브에서 바깥쪽 0.3~0.5m 평형이 생긴다(2026-08-25 실측: 요구곡률
      * 3.4% 부족 + 바깥 offset +0.375m). */
-    const double v_mpc = v_plan[0];
     const double heading_weight =
-        v_mpc <= 5.0 ? 1.0 : v_mpc >= 10.0 ? 0.15
-                                           : 1.0 - (v_mpc - 5.0) * 0.17;
-    mpc.run(x0, v_plan, factor1, factor2, y_pts, heading_pts,
+        v_ego <= 5.0f ? 1.0 : v_ego >= 10.0f ? 0.15
+                                             : 1.0 - (v_ego - 5.0) * 0.17;
+    mpc.run(x0, {std::max(0.0f, v_ego), lateral_factor}, y_pts, heading_pts,
             heading_weight);
     bool has_nan = false;
     for (const auto &state : mpc.states()) has_nan = has_nan || !std::isfinite(state[3]);

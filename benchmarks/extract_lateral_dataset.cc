@@ -170,10 +170,15 @@ int main(int argc, char **argv) {
         float yaw[kTrajectorySize];
         float plan_roll[kTrajectorySize];
         const bool grid_valid = model.model_t[kTrajectorySize - 1] > 0.0f;
+        /* v5 녹화에는 plan orientation이 없다. 요각은 plan 위치의 중앙차분으로,
+         * 롤은 0으로 대신한다(전진 0.5 m 미만이면 heading이 무의미해 0). */
         for (int i = 0; i < kTrajectorySize; ++i) {
           grid[i] = grid_valid ? model.model_t[i] : model_t_idx(i);
-          yaw[i] = model.plan_orientations[i].z;
-          plan_roll[i] = model.plan_orientations[i].x;
+          const int prev = std::max(0, i - 1), next = std::min(kTrajectorySize - 1, i + 1);
+          const float dx = model.plan[next].x - model.plan[prev].x;
+          const float dy = model.plan[next].y - model.plan[prev].y;
+          yaw[i] = std::fabs(dx) >= 0.5f ? std::atan2(dy, dx) : 0.0f;
+          plan_roll[i] = 0.0f;
         }
         for (int i = 0; i < kFutureCount; ++i) {
           const float t = kFutureTimes[i];
