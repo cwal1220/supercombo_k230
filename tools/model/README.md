@@ -1,9 +1,10 @@
 # Model tools
 
-For the 2026-09-03 quantization experiments, real K230 driving-data loader,
+For the quantization experiments, real K230 driving-data loader,
 independent/recurrent board comparisons, and candidate build workflow, see
-[QUANTIZATION.md](QUANTIZATION.md) and
-[the measured report](../../models/verification/quantization_20260903.md).
+[QUANTIZATION.md](QUANTIZATION.md) and the measured reports
+([2026-09-03](../../models/verification/quantization_20260903.md),
+[2026-09-04](../../models/verification/quantization_20260904.md)).
 
 This directory contains the scripts used to rewrite openpilot `supercombo.onnx`
 and compile a K230 `.kmodel`.
@@ -20,9 +21,16 @@ the current full dual-image-input K230 model with the original GRU update expres
 
 - `rewrite_supercombo_onnx.py`
   - Applies graph rewrites such as Gemm/Split replacement, plan-output split,
-    plan probability delta output, optional GRU update rewrite, and the
-    identity depthwise Conv before `Elu_223`.
+    plan probability delta output, optional GRU update rewrite, the
+    identity depthwise Conv before `Elu_223`, and `--tanh-via-sigmoid`
+    (Tanh as `2*Sigmoid(2x)-1`, avoiding the biased KPU int16 Tanh table).
   - The current final model intentionally omits `--gru-update`.
+
+- `prequant_bias_correct.py`
+  - Rounds Conv/Gemm weights onto nncase's per-channel uint8 grid inside the
+    ONNX graph and cancels the resulting per-channel output mean shift in the
+    biases (sequential, ONNX Runtime on calibration samples). Needs the
+    by-channel `QuantScheme.json` for an exact grid.
 
 - `make_supercombo_calibration.py`
   - Builds PTQ NPZ data from local driving logs.

@@ -426,6 +426,32 @@ def rewrite_gru_update(model: onnx.ModelProto) -> int:
   return rewritten
 
 
+def rewrite_tanh_via_sigmoid(model: onnx.ModelProto) -> int:
+  # KPU int16 Tanh LUT은 |x|<2에서 최대 0.038의 체계적 편향(0쪽으로 눌림)을 가진다.
+  # tanh(x) = 2*sigmoid(2x) - 1 은 FP32 항등이고 Sigmoid LUT 오차는 0.006 수준이다.
+  existing = {t.name for t in model.graph.initializer}
+  for name, value in (("k230_tanh_two", 2.0), ("k230_tanh_one", 1.0)):
+    if name not in existing:
+      model.graph.initializer.append(numpy_helper.from_array(np.array(value, dtype=np.float32), name))
+  nodes = []
+  rewritten = 0
+  for node in model.graph.node:
+    if node.op_type != "Tanh":
+      nodes.append(node)
+      continue
+    base = node.name or f"Tanh_{rewritten}"
+    nodes.extend([
+      helper.make_node("Mul", [node.input[0], "k230_tanh_two"], [f"{base}__2x"], name=f"{base}__Mul2x"),
+      helper.make_node("Sigmoid", [f"{base}__2x"], [f"{base}__sig"], name=f"{base}__Sigmoid"),
+      helper.make_node("Mul", [f"{base}__sig", "k230_tanh_two"], [f"{base}__2sig"], name=f"{base}__Mul2sig"),
+      helper.make_node("Sub", [f"{base}__2sig", "k230_tanh_one"], [node.output[0]], name=f"{base}__SubOne"),
+    ])
+    rewritten += 1
+  del model.graph.node[:]
+  model.graph.node.extend(nodes)
+  return rewritten
+
+
 def split_final_plan_output(model: onnx.ModelProto, plan_prob_shift: float = 0.0,
                             plan_prob_delta: bool = False,
                             plan_prob_delta_after_gemm: bool = False,
@@ -554,6 +580,8 @@ def main() -> None:
   parser.add_argument("--identity-dw-before-elu-names", default="", help="comma-separated Elu node names to wrap with an identity depthwise 1x1 Conv")
   parser.add_argument("--summarizer-infeats-as-conv", action="store_true")
   parser.add_argument("--gru-update", action="store_true")
+  parser.add_argument("--tanh-via-sigmoid", action="store_true",
+                      help="Tanh -> 2*Sigmoid(2x)-1; avoids the biased KPU int16 Tanh LUT")
   parser.add_argument("--split-plan-output", action="store_true")
   parser.add_argument("--plan-prob-shift", default=0.0, type=float)
   parser.add_argument("--plan-prob-delta", action="store_true")
@@ -578,6 +606,8 @@ def main() -> None:
     counts["summarizer_infeats_as_conv"] = rewrite_summarizer_infeats_as_conv(model)
   if args.gru_update:
     counts["gru_update"] = rewrite_gru_update(model)
+  if args.tanh_via_sigmoid:
+    counts["tanh_via_sigmoid"] = rewrite_tanh_via_sigmoid(model)
   if args.split_plan_output:
     counts["split_plan_output"] = split_final_plan_output(
       model,

@@ -1,0 +1,1276 @@
+{
+ "description": "127 native K230 samples (10 routes, held-in segments idx%3!=1, FP32 20-frame warm state), appended to supercombo_calib_mixed173.npz for the 300-sample set",
+ "generator": "models/work/qexp/make_k230_calib.py calib --per-route 32 --seed 7 (287-sample pool) -> linspace 127",
+ "samples": [
+  {
+   "route": "driving_data_20260816/2026-08-16--11-51-52-654",
+   "tag": "day_0816",
+   "segment": "000",
+   "frame": 964,
+   "speed_kph": 12.0,
+   "brightness": 138.65884399414062,
+   "motion": 4.175018310546875,
+   "pool_index": 0
+  },
+  {
+   "route": "driving_data_20260816/2026-08-16--11-51-52-654",
+   "tag": "day_0816",
+   "segment": "003",
+   "frame": 944,
+   "speed_kph": 62.5,
+   "brightness": 114.81253051757812,
+   "motion": 14.207855224609375,
+   "pool_index": 2
+  },
+  {
+   "route": "driving_data_20260816/2026-08-16--11-51-52-654",
+   "tag": "day_0816",
+   "segment": "008",
+   "frame": 966,
+   "speed_kph": 44.5,
+   "brightness": 137.32821655273438,
+   "motion": 5.99505615234375,
+   "pool_index": 5
+  },
+  {
+   "route": "driving_data_20260816/2026-08-16--11-51-52-654",
+   "tag": "day_0816",
+   "segment": "011",
+   "frame": 409,
+   "speed_kph": 36.125,
+   "brightness": 136.5244140625,
+   "motion": 10.429168701171875,
+   "pool_index": 7
+  },
+  {
+   "route": "driving_data_20260816/2026-08-16--11-51-52-654",
+   "tag": "day_0816",
+   "segment": "014",
+   "frame": 868,
+   "speed_kph": 0.0,
+   "brightness": 140.75653076171875,
+   "motion": 1.570953369140625,
+   "pool_index": 9
+  },
+  {
+   "route": "driving_data_20260816/2026-08-16--11-51-52-654",
+   "tag": "day_0816",
+   "segment": "018",
+   "frame": 487,
+   "speed_kph": 52.125,
+   "brightness": 152.13070678710938,
+   "motion": 8.598297119140625,
+   "pool_index": 11
+  },
+  {
+   "route": "driving_data_20260816/2026-08-16--11-51-52-654",
+   "tag": "day_0816",
+   "segment": "023",
+   "frame": 679,
+   "speed_kph": 17.25,
+   "brightness": 118.02383422851562,
+   "motion": 17.241729736328125,
+   "pool_index": 14
+  },
+  {
+   "route": "driving_data_20260816/2026-08-16--11-51-52-654",
+   "tag": "day_0816",
+   "segment": "024",
+   "frame": 621,
+   "speed_kph": 0.0,
+   "brightness": 147.30783081054688,
+   "motion": 2.235809326171875,
+   "pool_index": 16
+  },
+  {
+   "route": "driving_data_20260816/2026-08-16--11-51-52-654",
+   "tag": "day_0816",
+   "segment": "017",
+   "frame": 806,
+   "speed_kph": 50.625,
+   "brightness": 135.44400024414062,
+   "motion": 7.877349853515625,
+   "pool_index": 18
+  },
+  {
+   "route": "driving_data_20260816/2026-08-16--11-51-52-654",
+   "tag": "day_0816",
+   "segment": "014",
+   "frame": 845,
+   "speed_kph": 0.0,
+   "brightness": 140.5675048828125,
+   "motion": 2.4180908203125,
+   "pool_index": 20
+  },
+  {
+   "route": "driving_data_20260816/2026-08-16--11-51-52-654",
+   "tag": "day_0816",
+   "segment": "000",
+   "frame": 556,
+   "speed_kph": 43.75,
+   "brightness": 137.86004638671875,
+   "motion": 6.0985107421875,
+   "pool_index": 23
+  },
+  {
+   "route": "driving_data_20260816/2026-08-16--11-51-52-654",
+   "tag": "day_0816",
+   "segment": "006",
+   "frame": 986,
+   "speed_kph": 46.25,
+   "brightness": 147.04595947265625,
+   "motion": 5.0533447265625,
+   "pool_index": 25
+  },
+  {
+   "route": "driving_data_20260816/2026-08-16--11-51-52-654",
+   "tag": "day_0816",
+   "segment": "023",
+   "frame": 990,
+   "speed_kph": 25.75,
+   "brightness": 138.9442138671875,
+   "motion": 17.658233642578125,
+   "pool_index": 27
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "000",
+   "frame": 1171,
+   "speed_kph": null,
+   "brightness": 119.74520874023438,
+   "motion": 6.65826416015625,
+   "pool_index": 30
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "003",
+   "frame": 133,
+   "speed_kph": null,
+   "brightness": 124.85675048828125,
+   "motion": 4.76153564453125,
+   "pool_index": 32
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "006",
+   "frame": 1104,
+   "speed_kph": null,
+   "brightness": 130.96087646484375,
+   "motion": 5.91229248046875,
+   "pool_index": 34
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "009",
+   "frame": 1042,
+   "speed_kph": null,
+   "brightness": 124.80804443359375,
+   "motion": 5.595611572265625,
+   "pool_index": 36
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "014",
+   "frame": 448,
+   "speed_kph": null,
+   "brightness": 146.1378173828125,
+   "motion": 7.950836181640625,
+   "pool_index": 39
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "017",
+   "frame": 25,
+   "speed_kph": null,
+   "brightness": 141.90719604492188,
+   "motion": 11.492919921875,
+   "pool_index": 41
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "020",
+   "frame": 982,
+   "speed_kph": null,
+   "brightness": 133.28317260742188,
+   "motion": 13.617462158203125,
+   "pool_index": 43
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "009",
+   "frame": 199,
+   "speed_kph": null,
+   "brightness": 122.78713989257812,
+   "motion": 4.84246826171875,
+   "pool_index": 45
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "011",
+   "frame": 1138,
+   "speed_kph": null,
+   "brightness": 105.88772583007812,
+   "motion": 5.90478515625,
+   "pool_index": 48
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "018",
+   "frame": 236,
+   "speed_kph": null,
+   "brightness": 130.87548828125,
+   "motion": 6.70159912109375,
+   "pool_index": 50
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "018",
+   "frame": 1109,
+   "speed_kph": null,
+   "brightness": 77.57046508789062,
+   "motion": 7.38824462890625,
+   "pool_index": 52
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "009",
+   "frame": 840,
+   "speed_kph": null,
+   "brightness": 105.83126831054688,
+   "motion": 7.72943115234375,
+   "pool_index": 54
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "011",
+   "frame": 879,
+   "speed_kph": null,
+   "brightness": 116.77426147460938,
+   "motion": 7.422271728515625,
+   "pool_index": 57
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--10-25-34-526",
+   "tag": "day_0819a",
+   "segment": "005",
+   "frame": 126,
+   "speed_kph": null,
+   "brightness": 135.328369140625,
+   "motion": 6.9288330078125,
+   "pool_index": 59
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--11-07-38-187",
+   "tag": "day_0819b",
+   "segment": "006",
+   "frame": 647,
+   "speed_kph": 90.5,
+   "brightness": 135.40875244140625,
+   "motion": 8.536376953125,
+   "pool_index": 61
+  },
+  {
+   "route": "driving_data_20260819/2026-08-19--11-07-38-187",
+   "tag": "day_0819b",
+   "segment": "026",
+   "frame": 730,
+   "speed_kph": 98.75,
+   "brightness": 133.23269653320312,
+   "motion": 6.66619873046875,
+   "pool_index": 64
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "000",
+   "frame": 470,
+   "speed_kph": 11.375,
+   "brightness": 153.95889282226562,
+   "motion": 23.444793701171875,
+   "pool_index": 66
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "003",
+   "frame": 493,
+   "speed_kph": 0.0,
+   "brightness": 113.71652221679688,
+   "motion": 2.22271728515625,
+   "pool_index": 68
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "006",
+   "frame": 698,
+   "speed_kph": 0.0,
+   "brightness": 116.42459106445312,
+   "motion": 2.478271484375,
+   "pool_index": 70
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "011",
+   "frame": 704,
+   "speed_kph": 35.625,
+   "brightness": 129.63967895507812,
+   "motion": 5.96661376953125,
+   "pool_index": 73
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "014",
+   "frame": 733,
+   "speed_kph": 33.625,
+   "brightness": 131.76974487304688,
+   "motion": 4.740478515625,
+   "pool_index": 75
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "017",
+   "frame": 772,
+   "speed_kph": 0.0,
+   "brightness": 145.81396484375,
+   "motion": 1.388671875,
+   "pool_index": 77
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "020",
+   "frame": 817,
+   "speed_kph": 37.625,
+   "brightness": 143.55831909179688,
+   "motion": 8.74444580078125,
+   "pool_index": 79
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "024",
+   "frame": 671,
+   "speed_kph": 80.0,
+   "brightness": 137.37905883789062,
+   "motion": 8.17388916015625,
+   "pool_index": 82
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "027",
+   "frame": 414,
+   "speed_kph": 16.5,
+   "brightness": 132.88824462890625,
+   "motion": 14.27838134765625,
+   "pool_index": 84
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "020",
+   "frame": 82,
+   "speed_kph": 0.0,
+   "brightness": 128.32211303710938,
+   "motion": 2.44061279296875,
+   "pool_index": 86
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "017",
+   "frame": 134,
+   "speed_kph": 52.125,
+   "brightness": 145.28695678710938,
+   "motion": 11.48126220703125,
+   "pool_index": 89
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "002",
+   "frame": 1141,
+   "speed_kph": 35.375,
+   "brightness": 124.65560913085938,
+   "motion": 8.828460693359375,
+   "pool_index": 91
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "011",
+   "frame": 269,
+   "speed_kph": 48.5,
+   "brightness": 138.944580078125,
+   "motion": 7.053863525390625,
+   "pool_index": 93
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--00-51-57-534",
+   "tag": "night_0830a",
+   "segment": "009",
+   "frame": 798,
+   "speed_kph": 0.0,
+   "brightness": 94.41256713867188,
+   "motion": 3.12860107421875,
+   "pool_index": 95
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "000",
+   "frame": 192,
+   "speed_kph": 0.0,
+   "brightness": 125.9044189453125,
+   "motion": 2.066650390625,
+   "pool_index": 98
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "003",
+   "frame": 247,
+   "speed_kph": 0.0,
+   "brightness": 126.14657592773438,
+   "motion": 2.010101318359375,
+   "pool_index": 100
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "006",
+   "frame": 1114,
+   "speed_kph": 53.75,
+   "brightness": 130.681640625,
+   "motion": 3.25103759765625,
+   "pool_index": 102
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "009",
+   "frame": 660,
+   "speed_kph": 41.0,
+   "brightness": 143.64471435546875,
+   "motion": 7.903778076171875,
+   "pool_index": 104
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "014",
+   "frame": 465,
+   "speed_kph": 0.0,
+   "brightness": 140.52975463867188,
+   "motion": 4.30413818359375,
+   "pool_index": 107
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "017",
+   "frame": 1163,
+   "speed_kph": 0.0,
+   "brightness": 132.08499145507812,
+   "motion": 2.607574462890625,
+   "pool_index": 109
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "020",
+   "frame": 696,
+   "speed_kph": 68.75,
+   "brightness": 114.86325073242188,
+   "motion": 11.809600830078125,
+   "pool_index": 111
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "023",
+   "frame": 91,
+   "speed_kph": 54.125,
+   "brightness": 127.36181640625,
+   "motion": 13.18865966796875,
+   "pool_index": 113
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "021",
+   "frame": 496,
+   "speed_kph": 58.875,
+   "brightness": 127.135009765625,
+   "motion": 7.50616455078125,
+   "pool_index": 116
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "017",
+   "frame": 303,
+   "speed_kph": 0.0,
+   "brightness": 129.965087890625,
+   "motion": 3.46112060546875,
+   "pool_index": 118
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "003",
+   "frame": 65,
+   "speed_kph": 0.0,
+   "brightness": 125.85745239257812,
+   "motion": 2.104400634765625,
+   "pool_index": 120
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "012",
+   "frame": 678,
+   "speed_kph": 59.375,
+   "brightness": 96.47488403320312,
+   "motion": 6.727783203125,
+   "pool_index": 123
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "015",
+   "frame": 902,
+   "speed_kph": 64.75,
+   "brightness": 151.106201171875,
+   "motion": 6.617523193359375,
+   "pool_index": 125
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "024",
+   "frame": 583,
+   "speed_kph": 0.0,
+   "brightness": 141.14413452148438,
+   "motion": 2.74298095703125,
+   "pool_index": 127
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--01-24-02-971",
+   "tag": "night_0830b",
+   "segment": "006",
+   "frame": 547,
+   "speed_kph": 38.75,
+   "brightness": 108.66372680664062,
+   "motion": 12.885284423828125,
+   "pool_index": 129
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "003",
+   "frame": 146,
+   "speed_kph": 59.375,
+   "brightness": 120.20614624023438,
+   "motion": 7.06640625,
+   "pool_index": 132
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "006",
+   "frame": 863,
+   "speed_kph": 58.625,
+   "brightness": 87.34939575195312,
+   "motion": 7.44415283203125,
+   "pool_index": 134
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "009",
+   "frame": 112,
+   "speed_kph": 74.5,
+   "brightness": 87.15457153320312,
+   "motion": 4.81451416015625,
+   "pool_index": 136
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "012",
+   "frame": 522,
+   "speed_kph": 102.25,
+   "brightness": 91.60128784179688,
+   "motion": 4.4468994140625,
+   "pool_index": 138
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "017",
+   "frame": 419,
+   "speed_kph": 82.875,
+   "brightness": 125.63510131835938,
+   "motion": 2.813720703125,
+   "pool_index": 141
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "020",
+   "frame": 704,
+   "speed_kph": 103.75,
+   "brightness": 80.66281127929688,
+   "motion": 3.52520751953125,
+   "pool_index": 143
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "023",
+   "frame": 812,
+   "speed_kph": 88.25,
+   "brightness": 71.64053344726562,
+   "motion": 2.733154296875,
+   "pool_index": 145
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "027",
+   "frame": 1067,
+   "speed_kph": 105.0,
+   "brightness": 101.29559326171875,
+   "motion": 6.396575927734375,
+   "pool_index": 148
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "030",
+   "frame": 635,
+   "speed_kph": 52.625,
+   "brightness": 64.59967041015625,
+   "motion": 7.179412841796875,
+   "pool_index": 150
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "033",
+   "frame": 950,
+   "speed_kph": 0.0,
+   "brightness": 103.6512451171875,
+   "motion": 0.7073974609375,
+   "pool_index": 152
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "002",
+   "frame": 1178,
+   "speed_kph": 54.125,
+   "brightness": 96.76071166992188,
+   "motion": 3.820465087890625,
+   "pool_index": 154
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "012",
+   "frame": 1101,
+   "speed_kph": 104.25,
+   "brightness": 92.7921142578125,
+   "motion": 3.039642333984375,
+   "pool_index": 157
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "000",
+   "frame": 26,
+   "speed_kph": 64.625,
+   "brightness": 99.05816650390625,
+   "motion": 8.900604248046875,
+   "pool_index": 159
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--09-16-34-717",
+   "tag": "day_0830hw",
+   "segment": "003",
+   "frame": 892,
+   "speed_kph": 89.375,
+   "brightness": 79.51852416992188,
+   "motion": 3.17388916015625,
+   "pool_index": 161
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "002",
+   "frame": 1001,
+   "speed_kph": 79.875,
+   "brightness": 129.88568115234375,
+   "motion": 10.15875244140625,
+   "pool_index": 163
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "006",
+   "frame": 965,
+   "speed_kph": 81.25,
+   "brightness": 143.54666137695312,
+   "motion": 5.03973388671875,
+   "pool_index": 166
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "009",
+   "frame": 37,
+   "speed_kph": 78.0,
+   "brightness": 148.22244262695312,
+   "motion": 7.785797119140625,
+   "pool_index": 168
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "012",
+   "frame": 748,
+   "speed_kph": 91.5,
+   "brightness": 122.9293212890625,
+   "motion": 2.684539794921875,
+   "pool_index": 170
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "017",
+   "frame": 1123,
+   "speed_kph": 74.125,
+   "brightness": 139.918701171875,
+   "motion": 5.742706298828125,
+   "pool_index": 173
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "020",
+   "frame": 122,
+   "speed_kph": 74.5,
+   "brightness": 125.32162475585938,
+   "motion": 6.44500732421875,
+   "pool_index": 175
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "023",
+   "frame": 269,
+   "speed_kph": 65.875,
+   "brightness": 107.58880615234375,
+   "motion": 9.23895263671875,
+   "pool_index": 177
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "026",
+   "frame": 244,
+   "speed_kph": 57.0,
+   "brightness": 148.21337890625,
+   "motion": 6.63818359375,
+   "pool_index": 179
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "030",
+   "frame": 441,
+   "speed_kph": 56.375,
+   "brightness": 136.93780517578125,
+   "motion": 12.430511474609375,
+   "pool_index": 182
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "033",
+   "frame": 228,
+   "speed_kph": 49.0,
+   "brightness": 128.319091796875,
+   "motion": 5.983367919921875,
+   "pool_index": 184
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "036",
+   "frame": 428,
+   "speed_kph": 0.0,
+   "brightness": 154.15756225585938,
+   "motion": 1.222808837890625,
+   "pool_index": 186
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "039",
+   "frame": 1137,
+   "speed_kph": 56.875,
+   "brightness": 136.92324829101562,
+   "motion": 12.1895751953125,
+   "pool_index": 188
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "032",
+   "frame": 1163,
+   "speed_kph": 55.5,
+   "brightness": 113.98037719726562,
+   "motion": 3.728179931640625,
+   "pool_index": 191
+  },
+  {
+   "route": "driving_data_20260830/2026-08-30--20-58-46-660",
+   "tag": "eve_0830",
+   "segment": "027",
+   "frame": 180,
+   "speed_kph": 66.0,
+   "brightness": 145.83175659179688,
+   "motion": 6.357818603515625,
+   "pool_index": 193
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "003",
+   "frame": 126,
+   "speed_kph": 0.0,
+   "brightness": 10.022125244140625,
+   "motion": 2.146728515625,
+   "pool_index": 195
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "008",
+   "frame": 278,
+   "speed_kph": 0.0,
+   "brightness": 10.244049072265625,
+   "motion": 2.268768310546875,
+   "pool_index": 197
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "015",
+   "frame": 1175,
+   "speed_kph": 0.0,
+   "brightness": 10.14483642578125,
+   "motion": 2.147308349609375,
+   "pool_index": 200
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "020",
+   "frame": 628,
+   "speed_kph": 0.0,
+   "brightness": 9.964874267578125,
+   "motion": 2.140380859375,
+   "pool_index": 202
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "024",
+   "frame": 634,
+   "speed_kph": 0.0,
+   "brightness": 10.161834716796875,
+   "motion": 2.053009033203125,
+   "pool_index": 204
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "032",
+   "frame": 925,
+   "speed_kph": 0.0,
+   "brightness": 19.810302734375,
+   "motion": 3.07110595703125,
+   "pool_index": 207
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "036",
+   "frame": 700,
+   "speed_kph": 0.0,
+   "brightness": 20.11700439453125,
+   "motion": 4.725616455078125,
+   "pool_index": 209
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "041",
+   "frame": 983,
+   "speed_kph": 0.0,
+   "brightness": 23.75732421875,
+   "motion": 2.761474609375,
+   "pool_index": 211
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "047",
+   "frame": 1135,
+   "speed_kph": 0.0,
+   "brightness": 20.156829833984375,
+   "motion": 2.818359375,
+   "pool_index": 213
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "053",
+   "frame": 505,
+   "speed_kph": 0.0,
+   "brightness": 67.2476806640625,
+   "motion": 4.983978271484375,
+   "pool_index": 216
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "059",
+   "frame": 1108,
+   "speed_kph": 0.0,
+   "brightness": 21.570648193359375,
+   "motion": 2.453948974609375,
+   "pool_index": 218
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "063",
+   "frame": 101,
+   "speed_kph": 0.0,
+   "brightness": 21.411468505859375,
+   "motion": 4.8656005859375,
+   "pool_index": 220
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "068",
+   "frame": 527,
+   "speed_kph": 0.0,
+   "brightness": 19.847503662109375,
+   "motion": 2.755706787109375,
+   "pool_index": 222
+  },
+  {
+   "route": "driving_data_20260903/2026-09-01--23-36-59-089",
+   "tag": "night_0901",
+   "segment": "075",
+   "frame": 469,
+   "speed_kph": 0.0,
+   "brightness": 19.802703857421875,
+   "motion": 2.682861328125,
+   "pool_index": 225
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--02-34-38-801",
+   "tag": "night_0903a",
+   "segment": "002",
+   "frame": 260,
+   "speed_kph": 67.625,
+   "brightness": 141.57778930664062,
+   "motion": 11.3590087890625,
+   "pool_index": 227
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--02-34-38-801",
+   "tag": "night_0903a",
+   "segment": "005",
+   "frame": 80,
+   "speed_kph": 69.25,
+   "brightness": 131.95440673828125,
+   "motion": 7.6175537109375,
+   "pool_index": 229
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--02-34-38-801",
+   "tag": "night_0903a",
+   "segment": "009",
+   "frame": 373,
+   "speed_kph": 67.125,
+   "brightness": 131.50689697265625,
+   "motion": 7.966094970703125,
+   "pool_index": 232
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--02-34-38-801",
+   "tag": "night_0903a",
+   "segment": "012",
+   "frame": 947,
+   "speed_kph": 65.25,
+   "brightness": 133.88519287109375,
+   "motion": 7.982757568359375,
+   "pool_index": 234
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--02-34-38-801",
+   "tag": "night_0903a",
+   "segment": "015",
+   "frame": 707,
+   "speed_kph": 53.125,
+   "brightness": 131.73135375976562,
+   "motion": 5.041259765625,
+   "pool_index": 236
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--02-34-38-801",
+   "tag": "night_0903a",
+   "segment": "018",
+   "frame": 885,
+   "speed_kph": 64.875,
+   "brightness": 139.21856689453125,
+   "motion": 9.06707763671875,
+   "pool_index": 238
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--02-34-38-801",
+   "tag": "night_0903a",
+   "segment": "005",
+   "frame": 585,
+   "speed_kph": 0.0,
+   "brightness": 133.47183227539062,
+   "motion": 2.61346435546875,
+   "pool_index": 241
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--02-34-38-801",
+   "tag": "night_0903a",
+   "segment": "018",
+   "frame": 709,
+   "speed_kph": 61.875,
+   "brightness": 134.440673828125,
+   "motion": 9.613616943359375,
+   "pool_index": 243
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--02-34-38-801",
+   "tag": "night_0903a",
+   "segment": "015",
+   "frame": 784,
+   "speed_kph": 54.375,
+   "brightness": 136.4359130859375,
+   "motion": 6.001800537109375,
+   "pool_index": 245
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--02-34-38-801",
+   "tag": "night_0903a",
+   "segment": "015",
+   "frame": 376,
+   "speed_kph": 50.5,
+   "brightness": 126.45587158203125,
+   "motion": 9.474578857421875,
+   "pool_index": 247
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--02-34-38-801",
+   "tag": "night_0903a",
+   "segment": "020",
+   "frame": 910,
+   "speed_kph": 30.25,
+   "brightness": 114.0946044921875,
+   "motion": 7.218719482421875,
+   "pool_index": 250
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--02-34-38-801",
+   "tag": "night_0903a",
+   "segment": "006",
+   "frame": 297,
+   "speed_kph": 0.0,
+   "brightness": 132.31784057617188,
+   "motion": 2.321685791015625,
+   "pool_index": 252
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--02-34-38-801",
+   "tag": "night_0903a",
+   "segment": "008",
+   "frame": 498,
+   "speed_kph": 44.375,
+   "brightness": 141.43484497070312,
+   "motion": 7.545684814453125,
+   "pool_index": 254
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "002",
+   "frame": 982,
+   "speed_kph": 0.0,
+   "brightness": 113.83001708984375,
+   "motion": 2.25225830078125,
+   "pool_index": 256
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "006",
+   "frame": 75,
+   "speed_kph": 69.125,
+   "brightness": 137.13943481445312,
+   "motion": 8.504119873046875,
+   "pool_index": 259
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "009",
+   "frame": 56,
+   "speed_kph": 64.625,
+   "brightness": 141.06668090820312,
+   "motion": 6.90753173828125,
+   "pool_index": 261
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "012",
+   "frame": 44,
+   "speed_kph": 61.25,
+   "brightness": 142.40139770507812,
+   "motion": 5.9993896484375,
+   "pool_index": 263
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "000",
+   "frame": 839,
+   "speed_kph": 6.25,
+   "brightness": 142.04507446289062,
+   "motion": 20.710601806640625,
+   "pool_index": 266
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "011",
+   "frame": 1120,
+   "speed_kph": 65.125,
+   "brightness": 131.12350463867188,
+   "motion": 14.49530029296875,
+   "pool_index": 268
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "009",
+   "frame": 1146,
+   "speed_kph": 64.125,
+   "brightness": 135.93551635742188,
+   "motion": 8.205078125,
+   "pool_index": 270
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "000",
+   "frame": 303,
+   "speed_kph": 0.0,
+   "brightness": 147.02606201171875,
+   "motion": 1.65740966796875,
+   "pool_index": 272
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "012",
+   "frame": 704,
+   "speed_kph": 37.0,
+   "brightness": 157.44525146484375,
+   "motion": 10.30487060546875,
+   "pool_index": 275
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "011",
+   "frame": 213,
+   "speed_kph": 74.25,
+   "brightness": 133.345947265625,
+   "motion": 12.089569091796875,
+   "pool_index": 277
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "002",
+   "frame": 819,
+   "speed_kph": 0.0,
+   "brightness": 112.22900390625,
+   "motion": 1.94903564453125,
+   "pool_index": 279
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "014",
+   "frame": 33,
+   "speed_kph": 0.0,
+   "brightness": 135.17269897460938,
+   "motion": 1.085052490234375,
+   "pool_index": 281
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "011",
+   "frame": 681,
+   "speed_kph": 65.625,
+   "brightness": 146.28158569335938,
+   "motion": 12.075897216796875,
+   "pool_index": 284
+  },
+  {
+   "route": "driving_data_20260903/2026-09-03--21-08-52-823",
+   "tag": "eve_0903",
+   "segment": "012",
+   "frame": 1014,
+   "speed_kph": 30.0,
+   "brightness": 142.3370361328125,
+   "motion": 10.190704345703125,
+   "pool_index": 286
+  }
+ ]
+}

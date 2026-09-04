@@ -1,44 +1,53 @@
 # K230 supercombo model
 
-`supercombo.kmodel` is the quantization candidate selected in the
-[2026-09-03 K230 measurements](verification/quantization_20260903.md), now promoted
-as this branch's default model. It combines common plan-bias centering,
-INT16 activations / UINT8 weights, NoClip, SQuant, and 173 mixed C2/K230
-calibration samples. Both image towers and the original GRU expression remain.
+`supercombo.kmodel` is the 2026-09-04 candidate selected in
+[the K230 measurements](verification/quantization_20260904.md), built on the
+2026-09-03 model (common plan-bias centering, INT16 activations / UINT8 weights,
+NoClip, 173 mixed C2/K230 calibration samples). It adds three changes that target
+the error sources measured on the board:
 
-On 640 held-out recurrent frames, plan agreement with the original FP32 model
-improved from 555/640 to 590/640, selected-path y MAE from 8.03 to 6.94 cm,
-and non-plan-logit RMSE from 0.3144 to 0.2705. Pure inference remained about
-27.8 ms. Pose and desire errors regressed slightly, pose maximum error increased,
-and recurrent-state error remains; see the report for all methods and limits.
+- the GRU `Tanh` is computed as `2*Sigmoid(2x)-1` (the KPU int16 Tanh table is
+  biased toward zero by up to 0.038, the Sigmoid table by at most 0.006),
+- Conv/Gemm weights are pre-rounded onto nncase's per-channel uint8 grid and the
+  biases are corrected for the resulting per-channel output mean shift,
+- the PTQ set is extended with 127 native K230 samples (300 total).
+
+`SQuant` is no longer used: the pre-rounded weights leave nothing for it to tune.
+Both image towers and the original GRU expression remain.
+
+On six held-out K230 routes (1,320 recurrent frames, independent of the
+calibration data) plan agreement with the FP32 model went from 87.5 % to
+94.5 %, selected-path y MAE from 15.6 cm to 11.3 cm, non-plan-logit MAE from
+0.093 to 0.062 and recurrent-state MAE from 0.0184 to 0.0075; pose MAE moved
+from 0.041 to 0.047. Pure inference time is unchanged. See the report for every metric, the rejected alternatives and limits.
 These are conversion-error measurements, not vehicle tracking accuracy.
 
 ## Preserved artifacts
 
 - `supercombo.kmodel`: selected K230 model, uploaded to `model/supercombo.kmodel`.
-- `ptq/supercombo_calib_mixed173.npz`: exact compilation inputs, committed with
-  the model. The order is 77 C2 + 72 native K230 + 24 lane-change samples.
-- `ptq/supercombo_calib_mixed173_metadata.json`: source hashes, clip parameters,
-  and native sample provenance.
-- `onnx/supercombo_base.onnx` and `onnx/supercombo_uint8.onnx`: generated ONNX
-  artifacts, excluded from Git and reproducible from the source model.
-- `manifest.sha256`: hashes of the current model, generated graphs, calibration
-  NPZ and metadata. Run `shasum -a 256 -c manifest.sha256` in `models/` after build.
-- `verification/quantization_20260903.{md,json}` and its manifest directory:
-  measured comparisons, including the old branch model at commit `6c86a4a`.
-- `ptq/supercombo_calib.npz` and its original metadata: preserved legacy 77-sample
-  C2 data, used as part of the mixed set and for historical comparisons.
+- `ptq/supercombo_calib_mixed173.npz` and metadata: the 2026-09-03 mix
+  (77 C2 + 72 native K230 + 24 lane-change samples).
+- `ptq/supercombo_calib_k230_127.npz` and metadata: 127 native K230 samples from
+  ten routes (2026-08-16 to 2026-09-03, held-in segments only), appended to the
+  mix at build time to form the 300-sample PTQ set.
+- `ptq/supercombo_quant_scheme_bychannel.json`: nncase `QuantScheme.json` exported
+  with `export_weight_range_by_channel`; provides the exact per-channel weight
+  grid for `tools/model/prequant_bias_correct.py`.
+- `onnx/supercombo_rewritten.onnx`, `onnx/supercombo_base.onnx` (after bias
+  correction) and `onnx/supercombo_uint8.onnx`: generated ONNX artifacts,
+  excluded from Git and reproducible from the source model.
+- `manifest.sha256`: hashes of the current model, generated graphs and PTQ
+  inputs. Run `shasum -a 256 -c manifest.sha256` in `models/` after a build.
+- `verification/quantization_20260904.{md,json}` and
+  `verification/quantization_20260903.{md,json}`: measured comparisons.
 
 The older `openpilot_c2_master_comparison.json` and
 `full_big_input_board_verification_summary.json` describe earlier artifacts.
-Their model hashes and timing results do not describe the current binary.
-The board's pre-deployment model came from a different branch; its hash is
-recorded in the quantization report.
 
 Current model SHA-256:
 
 ```text
-3bc1c91da706f99245168a6e231d17609a5b1b8b23d7ad1aabb70b749293d8a9
+2e9759c73001e587aebdc66d7473479a9752ba9bbb7d67a3744347675b7ade99
 ```
 
 ## Runtime contract
@@ -67,28 +76,31 @@ claim pixel identity with the original C2 OpenCL preprocessing.
 From the repository root:
 
 ```sh
-scripts/build_supercombo_model.sh
+PYTHON_BIN=../.model-venv/bin/python scripts/build_supercombo_model.sh
 ```
 
 Required inputs:
 
 - The original `openpilot_c2/selfdrive/modeld/models/supercombo.onnx`, by default
   under `/Users/chan/Documents/openpilot_c2`; override `SOURCE_ONNX` if needed.
-- Original ONNX SHA-256:
+  Original ONNX SHA-256:
   `50c7fc8565ac69a4b9a0de122e961326820e78bf13659255a89d0ed04be030d5`.
 - Docker image `supercombo-nncase-k230:2.11.0-sdk`, buildable from
   `tools/model/docker/Dockerfile`.
-- The committed 173-sample NPZ and metadata in `ptq/`.
+- A host Python with `numpy`, `onnx` and `onnxruntime` (`PYTHON_BIN`) for the
+  bias correction step; the Docker image has no ONNX Runtime.
+- The committed PTQ NPZ files and the quant scheme in `ptq/`.
 
 The build applies Gemm splitting, common plan-bias centering followed by plan-0
-subtraction, identity depthwise Conv before `Elu_223`, and uint8 image input
-retyping. It retains the original GRU expression and compiles with NoClip and
-`UseSquant`. The script replaces the default local model only after compilation
-succeeds and regenerates its artifact manifest.
+subtraction, the identity depthwise Conv before `Elu_223`, the Tanh rewrite,
+weight pre-quantization with bias correction (48 calibration samples), and uint8
+image input retyping. It compiles with NoClip, INT16/UINT8 and no weight
+fine-tuning on the merged 300-sample set, retrying the compiler up to three
+times because nncase 2.11 occasionally dies at startup. The script replaces the
+default local model only after compilation succeeds and regenerates its manifest.
 
-`REGEN_PTQ=1` from the old 77-sample workflow is rejected because it cannot
-reproduce the mixed set. Native data generation, exact merge order and evaluation
-commands are documented in [QUANTIZATION.md](../tools/model/QUANTIZATION.md).
+`REGEN_PTQ=1` is rejected; native data generation and the evaluation workflow are
+documented in [QUANTIZATION.md](../tools/model/QUANTIZATION.md).
 Use `scripts/build_quantization_candidate.sh` for a separate experimental build.
 
 For runtime cross-build and upload, see [build and deploy](../docs/build-and-deploy.md).

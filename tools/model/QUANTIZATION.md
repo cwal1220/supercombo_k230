@@ -175,3 +175,48 @@ with IR dumping can subsequently fail in the Flatten metric evaluator; use
 Official references: [nncase mixed quantization](https://github.com/kendryte/nncase/blob/master/docs/MixQuant.md),
 [K230 PTQ options and precision constraints](https://www.kendryte.com/k230_rtos/en/v0.8/app_develop_guide/ai/nncase.html),
 [simulator PATH troubleshooting](https://github.com/kendryte/nncase/blob/master/docs/FAQ_EN.md).
+
+## 2026-09-04: KPU activation tables and bias correction
+
+Measured details are in
+[`models/verification/quantization_20260904.md`](../../models/verification/quantization_20260904.md).
+With the 053837e model as the baseline, emulating every quantization stage of the
+compiled graph in FP32 showed that weight rounding explains only about a quarter of
+the on-board output error and int16 activation quantization or FP16 rounding almost
+none of it. Single-node probe models compiled for K230 and run in the simulator
+(bit-exact with the board) located the rest in the KPU activation tables:
+
+| function | mean abs error | max abs error | behaviour |
+|---|---:|---:|---|
+| `Elu` | 0.0020 | 0.031 | +0.012 mean bias on x in [-2, 0), independent of the tensor range |
+| `Relu(x) + Exp(-Relu(-x)) - 1` | 0.0004 | 0.0020 | exact `Exp`, but 4.6x slower for all 79 ELUs |
+| `Tanh` | 0.0108 | 0.038 | squashed toward zero for |x| < 2 |
+| `2*Sigmoid(2x) - 1` | 0.0016 | 0.013 | |
+| `Sigmoid` | 0.0008 | 0.0064 | unbiased |
+
+Three changes are in the default build:
+
+- `rewrite_supercombo_onnx.py --tanh-via-sigmoid` rewrites the GRU candidate
+  Tanh. The recurrent state error fell by more than half in recurrent board runs.
+- `prequant_bias_correct.py` rounds the weights onto nncase's per-channel uint8
+  grid before compilation (so the compiler's weight quantization is lossless) and
+  corrects each layer's bias for the per-channel mean shift, measured with ONNX
+  Runtime on 48 calibration samples. Use the committed
+  `models/ptq/supercombo_quant_scheme_bychannel.json` (exported with
+  `export_weight_range_by_channel`) so the grid matches the compiler exactly; the
+  34 depthwise convolutions use ranges wider than their min/max there.
+  `SQuant` is left off because the pre-rounded weights have nothing left to tune.
+- The PTQ set is the 173-sample mix plus 127 committed native K230 samples
+  (`models/ptq/supercombo_calib_k230_127.npz`, 10 routes, 36 % standstill, 30 %
+  night), merged to 300 at build time.
+
+Rejected on measurement: `UseAdaRound` is a silent no-op in this binding (same
+kmodel hash as no fine-tuning); per-layer int16 weights through a quant scheme
+compile but produce invalid outputs and run 15-40x slower while leaking CMA on
+the board; re-importing the exported by-channel scheme changes nothing (the
+compiler already quantizes weights per channel); clipping dead negative ranges
+before ELU/ReLU cannot help because the ELU error does not depend on the range;
+cross-layer equalization through the 20 ReLU-separated Gemm pairs gave nothing;
+decomposing all ELUs is accurate but not real-time. Running a partially-int16
+kmodel, or killing `sequence_runner` mid-run, leaves the KPU CMA pool exhausted
+(`CmaFree` in `/proc/meminfo`) and stalls `k230_modeld`; reboot before driving.
