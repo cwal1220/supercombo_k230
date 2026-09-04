@@ -22,23 +22,24 @@
 - `signal_changed`: 선행 차량 출발 또는 신호 변경
 - `engage`: 제어 engage 성공
 - `disengage`: 제어 disengage 또는 fault에 의한 해제
-- `activated`/`deactivated`: engage 상태는 유지되지만 조향 active gate가 바뀐 경우
 - `unavailable`: 제어/Panda 상태가 stale이 되거나 Panda/조향 fault가 검출됨
 - `unable`: engage 조건을 만족하지 못한 상태에서 engage 명령을 거부할 때
 
 `engage`는 안정적인 상승 다중음, `disengage`는 하강 다중음으로 재생한다.
 둘 다 보드 Python 알람과 같은 고정 50% PWM 시퀀스를 공유하므로, PWM duty를
-짧게 반복 변경할 때 생기는 클릭/찌그러짐이 없다. `activated`/`deactivated`는
-engage 상태를 유지한 active gate 전이에만 사용한다.
+짧게 반복 변경할 때 생기는 클릭/찌그러짐이 없다. 조향 active gate의 전이
+(정차 대기 `stopped`/`path_invalid` 등 가용성 상태)는 소리내지 않는다. 정차
+부근에서는 모델 plan이 몇 m로 붕괴해 경로 유효성이 프레임마다 뒤집히므로,
+전이마다 울리면 정차 내내 부저가 반복된다.
 
 실제 차량/제어 조건으로 engage가 거부되면 LCD 하단에
 `UNABLE TO ENGAGE: <사유>`를 3초간 표시하고, openpilot의 refuse 알림에
 대응하는 `unable` 피에조 시퀀스를 재생한다. Panda의 `not ready`/`controls off`는
 SET edge와 health 응답 사이의 정상적인 비동기 구간이므로 최대 1초 동안 대기한다.
-그 사이 Panda 허가가 들어오면 `engage`만 한 번 알리고, 잠깐 뒤의 active 전이에는
-중복 `activated` 차임을 붙이지 않는다. 허가가 끝내 오지 않거나 Panda 회복 뒤
-다른 정적 조건이 남아 있으면 그때 `UNABLE`로 거부한다. 이미 engage된 상태에서
-active gate가 나중에 풀리는 전이만 `activated`로 알린다.
+그 사이 Panda 허가가 들어오면 `engage`만 한 번 알린다. 허가가 끝내 오지 않거나
+Panda 회복 뒤 다른 정적 조건이 남아 있으면 그때 `UNABLE`로 거부한다. 정차
+대기(`stopped`)나 경로 부재(`path_invalid`)는 가용성 상태라 engage를 거부하지
+않고 조향만 쉰다.
 
 주행 중 Panda health 스냅샷이 한 번 비거나 지연되는 경우에는 직전 정상
 스냅샷을 최대 100 ms만 유지해 LKAS active 아이콘이 한 프레임 깜박이지 않게

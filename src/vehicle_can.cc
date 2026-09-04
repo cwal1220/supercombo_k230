@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include "hyundai_can.h"
 
@@ -401,7 +402,10 @@ bool vehicle_state_fresh(const VehicleCanState &state, double now_s,
          signal_time_fresh(state.e_ems11_time_s, now_s, timeout_s) &&
          signal_time_fresh(state.elect_gear_time_s, now_s, timeout_s) &&
          signal_time_fresh(state.cgw1_time_s, now_s, timeout_s) &&
-         signal_time_fresh(state.cgw2_time_s, now_s, timeout_s);
+         signal_time_fresh(state.cgw2_time_s, now_s, timeout_s) &&
+         /* 휠 속도는 제어의 모든 속도 임계값 기준이다. 낡으면 대체하지 않고
+          * 제어를 막는다(vehicle_speed_kph는 NaN을 돌려준다). */
+         signal_time_fresh(state.whl_spd11_time_s, now_s, timeout_s);
 }
 
 bool seed_frames_ready(const VehicleCanState &state) {
@@ -443,8 +447,7 @@ float vehicle_speed_kph(const VehicleCanState &state, double now_s,
     if (wheel_speed_valid) return wheel_speed_sum * 0.25f;
   }
 
-  const float unit_scale = state.speed_unit_mph ? kMphToKph : 1.0f;
-  if (!std::isfinite(state.cluster_speed_raw) || state.cluster_speed_raw < 0.0f)
-    return 0.0f;
-  return state.cluster_speed_raw * unit_scale;
+  /* 클러스터 속도로 대체하지 않는다. 도메인이 달라(저속에서 1.2배) 조용히
+   * 단위가 바뀌면 최소 조향 속도 게이트가 뒤집힌다. */
+  return std::numeric_limits<float>::quiet_NaN();
 }

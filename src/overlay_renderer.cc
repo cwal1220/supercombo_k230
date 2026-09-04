@@ -38,6 +38,7 @@ constexpr EngageBlockLabel kEngageBlockLabels[] = {
     {"seatbelt_unlatched", "SEATBELT"},
     {"seeds_missing", "CAN SEEDS"},
     {"speed_invalid", "SPEED INVALID"},
+    {"stopped", "STOPPED"},
     {"steering_angle_limit", "ANGLE LIMIT"},
     {"vehicle_state_stale", "CAR STALE"},
     {"yaw_rate_invalid", "YAW INVALID"},

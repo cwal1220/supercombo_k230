@@ -21,6 +21,8 @@ namespace {
 constexpr int kMpcN = LAT_N;
 constexpr int kMpcNodes = LAT_N + 1;
 constexpr double kDtModel = 0.05;
+// plan 끝점이 이보다 가까우면 plan이 붕괴한 것(정지: 실측 5.6 m, 주행: 60 m+).
+constexpr double kMinPlanReachM = 10.0;
 
 double interp(double x, const double *xp, const double *fp, size_t count) {
   if (count == 0) return 0.0;
@@ -368,6 +370,7 @@ struct OpenpilotLateralPlanner::Impl {
     std::array<double, kTrajectorySize> distance{};
     std::array<double, kTrajectorySize> path_y{};
     std::array<double, kTrajectorySize> path_heading{};
+    const bool plan_collapsed = path[kTrajectorySize - 1][0] < kMinPlanReachM;
     for (int i = 0; i < kTrajectorySize; ++i) {
       distance[i] = std::sqrt(path[i][0] * path[i][0] + path[i][1] * path[i][1] +
                               path[i][2] * path[i][2]);
@@ -376,8 +379,19 @@ struct OpenpilotLateralPlanner::Impl {
       // 경로 오프셋 뒤에 모델 원본 heading을 재사용하면 좌우 곡률 부호가
       // 서로 달라져 한쪽 커브에서 경로를 안쪽으로 자를 수 있다.
       path_heading[i] = path_heading_at(path, i);
+      /* 정지 부근에서는 plan 전체가 몇 m로 붕괴해 기하학적 heading이 dy를
+       * ±90도로 부풀리고, 양자화된 모델은 먼 knot이 0.5 m 이상 뒤로도 뛴다
+       * (±180도 → 출발 시 좌측 급조향). 차가 못 움직인 구간이라 목표
+       * heading은 현재 방위(0)가 맞다. 주행 중에도 역방향 step은 물리적으로
+       * 불가능한 기하이므로 0으로 둔다. */
+      const int prev = std::max(0, i - 1), next = std::min(kTrajectorySize - 1, i + 1);
+      if (plan_collapsed || path[next][0] <= path[prev][0])
+        path_heading[i] = 0.0;
     }
 
+    /* MPC 노드 시각의 목표를 차속 x 시간 거리로 보간한다. knot을 직접
+     * 인덱싱하면 모델 knot의 프레임 간 노이즈가 그대로 들어가 des가 2~3배
+     * 떨리고 토크 슬루 리미터가 요구 토크의 절반을 잘라낸다(0.8.x 재생 실측). */
     std::array<double, kMpcNodes> y_pts{};
     std::array<double, kMpcNodes> heading_pts{};
     for (int i = 0; i < kMpcNodes; ++i) {

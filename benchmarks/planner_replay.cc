@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
   VehicleCanState vehicle{};   // 블링커/개입 없음
   std::FILE *out = std::fopen(argv[1], "w");
   std::fprintf(out, "t,v_kph,measured,des_rec,des_replay,target_curv,target_y,"
-                    "lane_l,lane_r,prob_l,prob_r,d_prob,laneless,lane_w\n");
+                    "lane_l,lane_r,prob_l,prob_r,d_prob,laneless,lane_w,mpc_valid,heading0,heading_target\n");
 
   float v_kph = 0.0f, measured = 0.0f, des_rec = 0.0f;
   bool have_cs = false;
@@ -91,12 +91,13 @@ int main(int argc, char **argv) {
         LateralTarget t = planner.update(ms, vehicle, v, measured, true, 0.0f);
         const float des = lag_adjusted(t, v, steering.steer_actuator_delay, 0.05f);
         std::fprintf(out, "%.3f,%.1f,%.6f,%.6f,%.6f,%.6f,%.3f,"
-                          "%.3f,%.3f,%.2f,%.2f,%.2f,%d,%.2f\n",
+                          "%.3f,%.3f,%.2f,%.2f,%.2f,%d,%.2f,%d,%.4f,%.4f\n",
                      rh.timestamp_ns * 1e-9, v_kph, measured, des_rec, des,
                      t.curvature, t.target_y_m,
                      t.lane_left_y_m, t.lane_right_y_m,
                      t.lane_left_prob, t.lane_right_prob, t.lane_d_prob,
-                     t.laneless_mode ? 1 : 0, t.lane_width_m);
+                     t.laneless_mode ? 1 : 0, t.lane_width_m,
+                     t.mpc_solution_valid ? 1 : 0, t.heading_rad, t.psis[kLateralControlN - 1]);
       }
     }
   }

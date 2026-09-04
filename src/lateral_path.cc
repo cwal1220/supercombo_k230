@@ -56,7 +56,11 @@ LateralPath path_from_model_state(const K230ModelState &state,
     path.points.push_back({x, -y, path.confidence});
   }
 
-  path.usable_for_steering = path.points.size() >= 4;
+  /* 점 개수만 보면 몇 미터짜리 경로도 통과한다. 그런 경로의 psi는 무의미하고
+   * 저속 토크 보정이 그걸 상한까지 키운다. */
+  constexpr float kMinPathReachM = 5.0f;
+  path.usable_for_steering = path.points.size() >= 4 &&
+                             path.points.back().forward_m >= kMinPathReachM;
   if (!path.usable_for_steering) path.invalid_reason = "path_invalid";
   return path;
 }

@@ -37,6 +37,6 @@
   "steer_ratio_rear": 0.0,
   "camera_offset_m": 0.0,
   "path_offset_m": 0.0,
-  "min_steer_speed_mps": 0.3,
+  "min_steer_speed_mps": 1.0,
   "live_bank_compensation": true
 }

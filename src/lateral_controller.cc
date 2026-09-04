@@ -20,6 +20,8 @@ constexpr float kCurvatureDeviationWindowS = 0.05f;
  * 별도로 차단한다. */
 constexpr float kMaxPlanAgeCompS = 0.25f;
 constexpr float kMaxCurvature = 0.3f;
+// openpilot drive_helpers.MIN_SPEED
+constexpr float kMinCurvatureSpeedMps = 1.0f;
 // EU 안전 한계(openpilot MAX_LATERAL_JERK/ACCEL). accel 3.3은 K7 실측 기준.
 constexpr float kMaxLateralJerk = 5.0f;
 constexpr float kMaxLateralAccel = 3.3f;
@@ -44,6 +46,13 @@ bool is_hard_disengage_block(const std::string &block) {
 // 정적 gate는 여전히 SET을 거부한다.
 bool is_transient_engage_block(const std::string &block) {
   return block == "panda_not_ready" || block == "panda_controls_off";
+}
+
+/* 고장이 아니라 가용성 상태다. openpilot처럼 engage는 허용하고 조향만
+ * 쉰다 — 정차에서는 plan 도달거리가 짧아 path가 상시 무효라, 이걸 거부로
+ * 치면 정차 중 engage가 불가능해진다. */
+bool is_availability_engage_block(const std::string &block) {
+  return block == "path_invalid" || block == "stopped";
 }
 
 float cluster_speed_kph(const VehicleCanState &vehicle_state) {
@@ -104,7 +113,21 @@ LateralControlResult LateralController::update(const LateralPath &path,
 
   LateralControlResult result;
   result.engaged = logical_engaged;
-  result.path_usable = path.usable_for_steering;
+  // path 복귀 디바운스: 무효는 즉시 반영, 무효를 겪은 뒤의 복귀는 0.5s
+  // 연속 유효를 요구한다(경계 깜빡임 차단). 최초 유효는 바로 통과.
+  if (!path.usable_for_steering) {
+    path_valid_since_s_ = -1.0;
+    path_usable_debounced_ = false;
+    path_seen_invalid_ = true;
+  } else if (!path_usable_debounced_) {
+    if (path_valid_since_s_ < 0.0) path_valid_since_s_ = now_s;
+    if (!path_seen_invalid_ || now_s - path_valid_since_s_ >= 0.5)
+      path_usable_debounced_ = true;
+  }
+  LateralPath gated_path = path;
+  gated_path.usable_for_steering = path_usable_debounced_;
+  if (!path_usable_debounced_) gated_path.invalid_reason = "path_invalid";
+  result.path_usable = gated_path.usable_for_steering;
   result.left_lane = path.left_valid;
   result.right_lane = path.right_valid;
   result.seeds_ready = seed_frames_ready(vehicle_state);
@@ -132,7 +155,7 @@ LateralControlResult LateralController::update(const LateralPath &path,
   }
   result.desired_curvature =
       lag_adjusted_desired_curvature(target, speed_mps, plan_age_s);
-  result.active_block = active_block_reason(path, target, vehicle_state, now_s,
+  result.active_block = active_block_reason(gated_path, target, vehicle_state, now_s,
                                             result.seeds_ready, result.vehicle_fresh,
                                             panda_ready, panda_controls_allowed,
                                             result.control_speed_kph, plan_age_s);
@@ -154,7 +177,8 @@ LateralControlResult LateralController::update(const LateralPath &path,
   }
 
   if (engage_requested && !result.active_block.empty() &&
-      !is_transient_engage_block(result.active_block)) {
+      !is_transient_engage_block(result.active_block) &&
+      !is_availability_engage_block(result.active_block)) {
     // 차량/컨트롤러의 정적 gate는 실제 engage 요청 실패로 처리한다.
     engaged_ = false;
     reset_control_state();
@@ -166,8 +190,9 @@ LateralControlResult LateralController::update(const LateralPath &path,
   if (panda_engage_pending_) {
     const bool panda_waiting = is_transient_engage_block(result.active_block);
     const bool grace_elapsed = now_s - panda_engage_pending_s_ >= kPandaEngageGraceS;
-    if (result.active_block.empty()) {
-      // Panda 허가가 도착했고 다른 engage gate도 모두 해소되었다.
+    if (result.active_block.empty() ||
+        is_availability_engage_block(result.active_block)) {
+      // Panda 허가가 도착했고 나머지는 가용성 상태뿐이면 engage를 유지한다.
       panda_engage_pending_ = false;
     } else if (!panda_waiting || grace_elapsed) {
       /* 정적 실패를 저장했다가 gate가 해소되면 조용히 engage하지 않는다. Panda에는
@@ -182,6 +207,13 @@ LateralControlResult LateralController::update(const LateralPath &path,
     }
   }
   result.active = result.active_block.empty();
+  /* 가용성 대기 중에는 토크만 0으로 하고 steer_req/MDPS 속도 스푸프는
+   * 유지한다 — 매 정차마다 끊기면 MDPS/클러스터가 천이 경보를 낸다.
+   * 결함/해제는 즉시 끊는다. */
+  steer_availability_hold_ = logical_engaged && !result.active &&
+      (result.active_block == "stopped" ||
+       result.active_block == "path_invalid" ||
+       result.active_block == "lateral_plan_invalid");
   result.cut_steer_temp = update_cut_steer_state(result.active, vehicle_state);
 
   const bool steering_pressed = update_steering_pressed(vehicle_state.driver_torque);
@@ -450,26 +482,23 @@ std::string LateralController::active_block_reason(
     bool panda_controls_allowed,
     float speed_kph,
     float plan_age_s) const {
+  /* 순서 규칙: 데이터 유효성 -> 차량 결함(hard disengage) -> 가용성 대기.
+   * 결함이 가용성에 가려지면 정차 중 문 열림/MDPS 폴트가 disengage를
+   * 건너뛰므로, 결함 검사가 path/plan 대기보다 먼저 와야 한다. */
   if (!config_.force_engaged && !engaged_) return "not_engaged";
   if (!config_.enabled || !config_.steering_params.enabled) return "controller_disabled";
   if (!panda_ready) return "panda_not_ready";
   if (!panda_controls_allowed) return "panda_controls_off";
-  if (!path.usable_for_steering) return "path_invalid";
-  if (!target.valid || !target.mpc_solution_valid) return "lateral_plan_invalid";
-  /* 모델 경로 gate는 모델 발행 시각만 본다. 플래너 스레드가 멈춰 target이
-   * 갱신되지 않는 경우까지 근거 프레임 캡처 시각으로 함께 막는다. */
-  if (target.capture_timestamp_ns != 0 &&
-      plan_age_s > static_cast<float>(config_.driving_params.model_timeout_ms) /
-                       1000.0f) {
-    return "lateral_plan_stale";
-  }
   if (!seeds_ready) return "seeds_missing";
   if (!vehicle_fresh) return "vehicle_state_stale";
+  if (!std::isfinite(speed_kph)) return "speed_invalid";
   if (vehicle_state.door_open) return "door_open";
   if (vehicle_state.seatbelt_unlatched) return "seatbelt_unlatched";
   if (vehicle_state.esp_disabled) return "esp_disabled";
   if (vehicle_state.park_brake) return "park_brake";
   if (vehicle_state.brake_error) return "brake_error";
+  if (vehicle_state.gear != kGearDrive) return "gear_not_drive";
+  if (vehicle_state.steering_fault) return "mdps_fault";
   if (!config_.steering_params.torque_use_angle) {
     if (!signal_time_fresh(vehicle_state.esp12_time_s, now_s,
                       static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) /
@@ -478,17 +507,29 @@ std::string LateralController::active_block_reason(
     }
     if (!vehicle_state.yaw_rate_valid) return "yaw_rate_invalid";
   }
-  if (vehicle_state.gear != kGearDrive) return "gear_not_drive";
+  if (!path.usable_for_steering) {
+    /* 정지에서는 plan이 원래 짧아 path 무효가 정상이다. 오류가 아니라
+     * 대기로 보고한다. 이 속도 밑은 min_steer_speed로 토크도 0이다. */
+    if (speed_kph / 3.6f < config_.steering_params.min_steer_speed_mps)
+      return "stopped";
+    return "path_invalid";
+  }
+  if (!target.valid || !target.mpc_solution_valid) return "lateral_plan_invalid";
+  /* 모델 경로 gate는 모델 발행 시각만 본다. 플래너 스레드가 멈춰 target이
+   * 갱신되지 않는 경우까지 근거 프레임 캡처 시각으로 함께 막는다. */
+  if (target.capture_timestamp_ns != 0 &&
+      plan_age_s > static_cast<float>(config_.driving_params.model_timeout_ms) /
+                       1000.0f) {
+    return "lateral_plan_stale";
+  }
   if (config_.steering_params.no_smart_mdps &&
       speed_kph / 3.6f < config_.steering_params.min_steer_speed_mps) {
     return "no_smart_mdps_low_speed";
   }
   const std::string angle_block = steering_angle_block(vehicle_state, speed_kph);
   if (!angle_block.empty()) return angle_block;
-  if (vehicle_state.steering_fault) return "mdps_fault";
   const std::string manual_block = manual_blinker_block_reason();
   if (!manual_block.empty()) return manual_block;
-  if (!std::isfinite(speed_kph)) return "speed_invalid";
   return "";
 }
 
@@ -502,7 +543,9 @@ float LateralController::lag_adjusted_desired_curvature(
       clamp_float(plan_age_s, 0.0f, kMaxPlanAgeCompS);
   const float current_curvature = target.curvatures[0];
   const float psi = interp_lateral(delay, target.psis);
-  const float speed = std::max(speed_mps, 0.1f);
+  // openpilot drive_helpers.MIN_SPEED. 하한이 낮으면 psi/(v*delay)가 정지
+  // 부근에서 발산해 작은 plan 오차가 곡률 상한까지 증폭된다.
+  const float speed = std::max(speed_mps, kMinCurvatureSpeedMps);
   const float curvature_from_psi = psi / (speed * delay);
   float desired_curvature = current_curvature +
       2.0f * (curvature_from_psi - current_curvature);
@@ -542,9 +585,12 @@ std::vector<CanFrame> LateralController::build_frames(
     int frame) {
   HyundaiLkasCommand command;
   command.apply_steer = result.apply_torque;
-  command.steer_req = result.active;
+  command.steer_req = result.active || steer_availability_hold_;
   command.cut_steer_temp = result.cut_steer_temp;
-  command.sys_state = lkas_sys_state(result.active, true, true);
+  /* 클러스터는 sys_state 천이마다 부저를 울린다. active(정차 대기 등
+   * 가용성)가 아니라 engaged를 따르게 해 enable/disable에서만 울린다.
+   * steer_req는 별도 비트로 매 프레임 정확히 나간다. */
+  command.sys_state = lkas_sys_state(result.engaged, true, true);
   command.sys_warning = false;
   command.left_lane = result.left_lane;
   command.right_lane = result.right_lane;
@@ -554,7 +600,8 @@ std::vector<CanFrame> LateralController::build_frames(
   const HyundaiLkas11Values lkas_seed = decode_lkas11(vehicle_state.lkas11_seed);
   const HyundaiClu11Values clu_seed = decode_clu11(vehicle_state.clu11_seed);
   std::vector<CanFrame> frames = build_lateral_can_frames(
-      lkas_seed, clu_seed, command, config_.can_config, result.active,
+      lkas_seed, clu_seed, command, config_.can_config,
+      result.active || steer_availability_hold_,
       clu_seed.speed, vehicle_state.speed_unit_mph, frame);
   if (vehicle_state.has_mdps12_seed &&
       config_.can_config.mdps_bus != config_.can_config.main_bus) {
