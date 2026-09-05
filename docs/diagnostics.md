@@ -58,9 +58,10 @@ positions) rather than on the raw vector, and check that the feature/hidden
 slice evolves smoothly — a dead temporal buffer still produces plausible
 single-frame output.
 
-Measured for the v0.9.4 swap (100 night-highway frames, int16 PTQ, uint8
-image inputs): plan lateral 0.024 m mean / 0.062 m max at 2 s, lane position
-0.048 m mean, feature buffer frame-to-frame correlation 0.77.
+Measured for the current v0.9.4 build (100 evening city frames, int16 PTQ with
+pre-quantized weights, uint8 image inputs): plan lateral 0.029 m mean / 0.183 m
+max at 2 s, lane position 0.102 m mean, feature buffer frame-to-frame
+correlation 0.60 against 0.62 for the fp32 reference on the same frames.
 
 ## Lateral bias
 

@@ -12,6 +12,13 @@ verification numbers.
     (the PTQ path needs an fp32 graph), duplicate opset entries merged, empty
     node names filled, and `Reshape` `allowzero` removed. Values are unchanged.
 
+- `prequant_bias_correct.py`
+  - Rounds every Conv/Gemm weight onto the per-channel uint8 grid nncase will
+    use (taken from an exported `QuantScheme.json`), so the compiler's weight
+    quantization becomes lossless, then runs calibration inputs through ONNX
+    Runtime layer by layer and cancels the mean output shift in each bias.
+    Activations are untouched; the KPU still quantizes them to int16.
+
 - `retype_image_inputs_uint8.py`
   - Retypes the image inputs to uint8 and inserts `DequantizeLinear(scale=1)`.
     Bit-identical outputs, but the runtime writes a quarter of the bytes and
@@ -43,6 +50,9 @@ runtime keeps).
 - `make_calibration.py`
   - captures PTQ samples across routes; each sample carries the feature buffer
     the model itself produced, so calibration sees the real activation ranges.
+    The build uses two sets: the original 60 (`ptq/supercombo_calib.npz`) and
+    120 native K230 samples from seven later routes
+    (`ptq/supercombo_calib_k230_120.npz`, routes listed in its metadata).
 
 - `make_replay.py`
   - writes an `SCNV12R1` replay plus host reference outputs for the board
