@@ -21,8 +21,6 @@ namespace {
 constexpr int kMpcN = LAT_N;
 constexpr int kMpcNodes = LAT_N + 1;
 constexpr double kDtModel = 0.05;
-// 이웃 plan 점 사이 최소 전진 거리. 이보다 짧으면 기하학적 heading이 무의미하다.
-constexpr double kMinHeadingDx = 0.5;
 // plan 끝점이 이보다 가까우면 plan이 붕괴한 것(정지: 실측 5.6 m, 주행: 60 m+).
 constexpr double kMinPlanReachM = 10.0;
 
@@ -381,12 +379,13 @@ struct OpenpilotLateralPlanner::Impl {
       // 경로 오프셋 뒤에 모델 원본 heading을 재사용하면 좌우 곡률 부호가
       // 서로 달라져 한쪽 커브에서 경로를 안쪽으로 자를 수 있다.
       path_heading[i] = path_heading_at(path, i);
-      /* 정지 부근에서는 plan 전체가 몇 m로 붕괴해 이웃 점 dx가 사실상 0이
-       * 되고, 기하학적 heading은 차선 오프셋 dy를 ±90도로 부풀린다(정차 중
-       * des -0.16 → 출발 시 좌측 급조향). 차가 못 움직인 구간이라 목표
-       * heading은 현재 방위(0)가 맞다. 주행 중 knot 0~1의 짧은 간격은 제외. */
+      /* 정지 부근에서는 plan 전체가 몇 m로 붕괴해 기하학적 heading이 dy를
+       * ±90도로 부풀리고, 양자화된 모델은 먼 knot이 0.5 m 이상 뒤로도 뛴다
+       * (±180도 → 출발 시 좌측 급조향). 차가 못 움직인 구간이라 목표
+       * heading은 현재 방위(0)가 맞다. 주행 중에도 역방향 step은 물리적으로
+       * 불가능한 기하이므로 0으로 둔다. */
       const int prev = std::max(0, i - 1), next = std::min(kTrajectorySize - 1, i + 1);
-      if (plan_collapsed && std::fabs(path[next][0] - path[prev][0]) < kMinHeadingDx)
+      if (plan_collapsed || path[next][0] <= path[prev][0])
         path_heading[i] = 0.0;
     }
 
