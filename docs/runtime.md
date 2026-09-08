@@ -57,6 +57,11 @@ minimal passive overlay subscriber.
 - fills that layout with camera/model/display FPS, inference time,
   CPU/temperature/memory/storage, process health, Panda state, vehicle speed,
   steering torque, and K7 control state
+- redraws when a new model, control, panda, or manager snapshot arrives and once
+  a second, at most every 45 ms; the turn-signal animation advances on its own
+  50 ms clock, so neither depends on the model rate
+- loads the traffic-signal PNG sprites once at start-up from `assets/ui` next to
+  the executable
 - writes `/tmp/k230_display_ready` after preview/display setup is complete and
   several preview frames have actually been displayed
 

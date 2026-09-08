@@ -67,9 +67,13 @@ released after that short hold if they persist.
     process; `k230_camerad` and `k230_modeld` keep the camera/model path
     independent.
 - `src/overlay_renderer.*`
-  - draws plan/lane/road-edge/lead overlay with OpenCV into the CPU ARGB8888
-    buffer used by the split DRM overlay process. Owns the engage-block label
-    table shared with `k230_overlayd`.
+  - draws the HUD (panels, plan/lane/road-edge ribbons, lead marker, turn
+    signals, alerts, traffic-signal sprites) with OpenCV into the CPU ARGB8888
+    buffer used by the split DRM overlay process. Stateless apart from the
+    preloaded sprites; the turn-signal phase comes from `k230_overlayd`. Also
+    owns the `K230*State` → `OverlayHudState` mapping shared with
+    `hud_snapshot` and the engage-block label table shared with
+    `k230_overlayd`.
 - `src/k230_recordd.cc`, `src/mvx_v4l2_encoder.*`, `src/recording_writer.*`
   - low-priority data recorder, direct MVX V4L2 M2M encoder, timestamp index,
     compact event log, route segmentation, and storage-reserve guard.

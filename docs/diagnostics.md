@@ -20,6 +20,26 @@ cmake --build build/host-checks --target check_panda_can_codec -j2
 ./build/host-checks/bin/check_panda_can_codec
 ```
 
+## HUD snapshots
+
+`hud_snapshot` renders the overlay renderer off-line for the idle / standby /
+drive / busy / depart / fault scenarios, writes each `480x800` frame as a
+`K230ARGB` file and prints draw timings. It links OpenCV like `k230_overlayd`,
+so build it where OpenCV is installed: the board-native CMake build with
+`-DSUPERCOMBO_BUILD_BENCHMARKS=ON`, or a Linux host.
+
+```sh
+./hud_snapshot --assets assets/ui --out /tmp/hud
+python3 tools/ui/hud_tools.py compose /tmp/hud [camera.png]
+```
+
+`hud_snapshot --model model.bin --control control.bin` replays a recorded
+`K230ModelState` / `K230ControlState` pair instead of the synthetic scene;
+`python3 tools/ui/hud_tools.py inputs <route_dir> <out_dir>` extracts such a
+pair, plus the matching camera frame, from a `recordd` route. The `compose`
+command rotates each frame back to the `800x480` view and, with a camera frame,
+composites it the way the panel shows it.
+
 ## NV12 replay
 
 To run an existing `SCNV12R1` replay through the split model process on the
@@ -50,9 +70,9 @@ SUPERCOMBO_CALIB_AUTO=0 \
   ./k230_modeld model/<candidate>.kmodel 0
 ```
 
-The `--rpy` value must be the board's stored calibration, because the
-calibration service overrides `SUPERCOMBO_INPUT_WARP_*` on every frame:
-those variables only seed the first warp. Compare `board_raw.bin` against
+The `--rpy` value must be the board's stored calibration, because on the board
+the calibration service feeds the input warp on every frame. Compare
+`board_raw.bin` against
 `host_ref.npy` on the slices that drive control (plan lateral offset, lane
 positions) rather than on the raw vector, and check that the feature/hidden
 slice evolves smoothly — a dead temporal buffer still produces plausible

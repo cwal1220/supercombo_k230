@@ -25,13 +25,12 @@
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 
 namespace {
 
 constexpr unsigned kSensorWidth = 1920;
 constexpr unsigned kSensorHeight = 1080;
-constexpr unsigned kLogicalDisplayWidth = 800;
-constexpr unsigned kLogicalDisplayHeight = 480;
 
 volatile sig_atomic_t g_stop = 0;
 
@@ -43,6 +42,26 @@ constexpr unsigned kOverlayBufferCount = 2;
 constexpr uint64_t kStateFreshNs = 2000000000ULL;
 // Leave margin below three 60 Hz display callbacks so redraws do not slip to 15 Hz.
 constexpr uint64_t kOverlayIntervalNs = 45000000ULL;
+// engage 거부 토스트 표시 시간.
+constexpr uint64_t kEngageAlertNs = 3000000000ULL;
+// 깜빡이 애니메이션 한 단계. 모델 갱신(≈20 Hz)마다 한 단계씩 나가던 속도를 유지한다.
+constexpr uint64_t kTurnSignalStepNs = 50000000ULL;
+
+std::string executable_dir()
+{
+    char path[512];
+    const ssize_t length = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (length <= 0) return ".";
+    path[length] = '\0';
+    const std::string full(path);
+    const size_t slash = full.rfind('/');
+    return slash == std::string::npos ? "." : full.substr(0, slash);
+}
+
+OverlayTarget overlay_target(const display_buffer *buffer)
+{
+    return OverlayTarget{buffer->map, buffer->width, buffer->height, buffer->stride};
+}
 
 // 라벨 표는 overlay_renderer가 소유한다. 여기서는 토스트용 기본값만 얹는다.
 const char *engage_block_text(const char *block)
@@ -87,6 +106,7 @@ public:
         default_projection_ = make_projection_state(config.manual_roll,
                                                     config.manual_pitch,
                                                     config.manual_yaw);
+        overlay_.load_assets(executable_dir() + "/assets/ui");
     }
 
     ~OverlayDisplay()
@@ -109,6 +129,8 @@ public:
 
         display_ = display_init(0);
         if (!display_) throw std::runtime_error("display_init error");
+        // 프리뷰 플레인과 같은 기준: 세로 패널이면 800x480 논리 화면을 회전해 그린다.
+        rotate_landscape_ = display_->width < display_->height;
 
         v4l2_drm_context context {};
         v4l2_drm_default_context(&context);
@@ -142,14 +164,16 @@ public:
             clean(buffer);
         }
         overlay_buffer_ = overlay_buffers_[0];
-        overlay_.draw(overlay_buffer_, ParsedModelOutput{}, default_projection_, hud_, true);
+        overlay_.draw(overlay_target(overlay_buffer_), ParsedModelOutput{},
+                      default_projection_, hud_, rotate_landscape_);
         clean(overlay_buffer_);
         display_->osd_disp_buffer = overlay_buffer_;
 
         std::fprintf(stderr,
                      "k230_overlayd: display=%ux%u logical=%ux%u preview=/dev/video%d %ux%u buffers=%u rotation=%d overlay=native-direct\n",
                      display_->width, display_->height,
-                     kLogicalDisplayWidth, kLogicalDisplayHeight, kPreviewVideoDevice,
+                     rotate_landscape_ ? display_->height : display_->width,
+                     rotate_landscape_ ? display_->width : display_->height, kPreviewVideoDevice,
                      context.width, context.height, context.buffer_num,
                      static_cast<int>(context.drm_rotation));
         std::fprintf(stderr,
@@ -176,7 +200,8 @@ private:
     {
         ++poll_count_;
         pending_redraw_ = update_model() || pending_redraw_;
-        update_aux_state();
+        pending_redraw_ = update_aux_state() || pending_redraw_;
+        pending_redraw_ = update_turn_signal(k230_now_ns()) || pending_redraw_;
 
         if (displayed && overlay_buffer_) {
             display_buffer *current = nullptr;
@@ -220,25 +245,17 @@ private:
             system_monitor_.sample(&hud_);
             refresh_hud_state();
             pending_redraw_ = true;
+            char profile_text[64] = "";
             if (profile_) {
-                std::fprintf(stderr,
-                             "overlay: poll=%.2f display=%.2f preview=%.2f model=%.2f overlay=%.2f model_seq=%llu draw=%.2fms present=%.2fms cpu=%.1f%% mem=%.1f%% disk=%.1f%% temp=%.1fC errors=%u          \r",
-                             poll_fps, display_fps, camera_fps, model_fps, overlay_fps,
-                             static_cast<unsigned long long>(latest_model_seq_),
-                             overlay_stats_.avg_ms_and_reset(),
-                             present_stats_.avg_ms_and_reset(),
-                             hud_.cpu_percent, hud_.memory_percent, hud_.storage_percent,
-                             hud_.cpu_temp_c,
-                             errors_);
-            } else {
-                std::fprintf(stderr,
-                             "overlay: poll=%.2f display=%.2f preview=%.2f model=%.2f overlay=%.2f model_seq=%llu cpu=%.1f%% mem=%.1f%% disk=%.1f%% temp=%.1fC errors=%u          \r",
-                             poll_fps, display_fps, camera_fps, model_fps, overlay_fps,
-                             static_cast<unsigned long long>(latest_model_seq_),
-                             hud_.cpu_percent, hud_.memory_percent, hud_.storage_percent,
-                             hud_.cpu_temp_c,
-                             errors_);
+                std::snprintf(profile_text, sizeof(profile_text), " draw=%.2fms present=%.2fms",
+                              overlay_stats_.avg_ms_and_reset(), present_stats_.avg_ms_and_reset());
             }
+            std::fprintf(stderr,
+                         "overlay: poll=%.2f display=%.2f preview=%.2f model=%.2f overlay=%.2f model_seq=%llu%s cpu=%.1f%% mem=%.1f%% disk=%.1f%% temp=%.1fC errors=%u          \r",
+                         poll_fps, display_fps, camera_fps, model_fps, overlay_fps,
+                         static_cast<unsigned long long>(latest_model_seq_), profile_text,
+                         hud_.cpu_percent, hud_.memory_percent, hud_.storage_percent,
+                         hud_.cpu_temp_c, errors_);
             std::fflush(stderr);
             poll_count_ = 0;
             display_frames_ = 0;
@@ -285,272 +302,193 @@ private:
         thead_csi_dcache_clean_invalid_range(buffer->map, buffer->size);
     }
 
-    bool update_model()
+    /* 새 스냅샷이면 저장하고 true. */
+    template <typename State>
+    static bool poll(K230LatestChannel &channel, State *state, uint64_t *seq)
     {
-        K230ModelState state;
-        uint64_t seq = latest_model_seq_;
-        if (!model_state_sub_.read(&state, sizeof(state), &seq) || seq == latest_model_seq_)
+        State candidate;
+        uint64_t candidate_seq = *seq;
+        if (!channel.read(&candidate, sizeof(candidate), &candidate_seq) || candidate_seq == *seq)
             return false;
-        latest_model_seq_ = seq;
-        latest_model_state_ = state;
-        ++model_updates_;
-        const uint64_t now = k230_now_ns();
-        const bool model_fresh = state.model_timestamp_ns != 0 &&
-            now >= state.model_timestamp_ns && now - state.model_timestamp_ns <= kStateFreshNs;
-        have_model_state_ = state.valid != 0 && model_fresh;
-        latest_output_ = k230_parsed_from_model_state(state);
-        latest_projection_ = k230_projection_from_model_state(state);
+        *state = candidate;
+        *seq = candidate_seq;
         return true;
     }
 
-    void update_aux_state()
+    bool update_model()
     {
-        uint64_t seq = latest_panda_seq_;
-        if (panda_state_sub_.read(&latest_panda_state_, sizeof(latest_panda_state_), &seq) &&
-            seq != latest_panda_seq_) {
-            latest_panda_seq_ = seq;
-        }
-
-        seq = latest_control_seq_;
-        if (control_state_sub_.read(&latest_control_state_, sizeof(latest_control_state_), &seq) &&
-            seq != latest_control_seq_) {
-            latest_control_seq_ = seq;
-        }
-
-        seq = latest_manager_seq_;
-        if (manager_state_sub_.read(&latest_manager_state_, sizeof(latest_manager_state_), &seq) &&
-            seq != latest_manager_seq_) {
-            latest_manager_seq_ = seq;
-        }
-        refresh_hud_state();
+        if (!poll(model_state_sub_, &latest_model_state_, &latest_model_seq_)) return false;
+        ++model_updates_;
+        have_model_state_ = latest_model_state_.valid != 0 &&
+            fresh(latest_model_state_.model_timestamp_ns, k230_now_ns());
+        latest_output_ = k230_parsed_from_model_state(latest_model_state_);
+        latest_projection_ = k230_projection_from_model_state(latest_model_state_);
+        return true;
     }
 
+    /* 새 panda/control/manager 스냅샷이 있으면 true. 모델이 멈춰도 속도·토스트가
+     * 제어 상태를 따라가도록 재그리기 트리거가 된다. */
+    /* 새 panda/control/manager 스냅샷이 있으면 true. 모델이 멈춰도 속도·토스트가
+     * 제어 상태를 따라가도록 재그리기 트리거가 된다. */
+    bool update_aux_state()
+    {
+        bool changed = poll(panda_state_sub_, &latest_panda_state_, &latest_panda_seq_);
+        changed = poll(control_state_sub_, &latest_control_state_, &latest_control_seq_) || changed;
+        changed = poll(manager_state_sub_, &latest_manager_state_, &latest_manager_seq_) || changed;
+        refresh_hud_state();
+        return changed;
+    }
+
+    /* 깜빡이 단계는 켜진 시각 기준으로 나간다. 단계가 바뀌면 true. */
+    bool update_turn_signal(uint64_t now_ns)
+    {
+        if (hud_.left_blinker != previous_left_blinker_ ||
+            hud_.right_blinker != previous_right_blinker_) {
+            previous_left_blinker_ = hud_.left_blinker;
+            previous_right_blinker_ = hud_.right_blinker;
+            turn_signal_start_ns_ = now_ns;
+        }
+        const bool blinking = hud_.left_blinker || hud_.right_blinker;
+        const int step = blinking
+            ? static_cast<int>(((now_ns - turn_signal_start_ns_) / kTurnSignalStepNs) %
+                               kTurnSignalSteps)
+            : 0;
+        const bool changed = step != hud_.turn_signal_step;
+        hud_.turn_signal_step = step;
+        return changed && blinking;
+    }
+
+    static bool fresh(uint64_t timestamp_ns, uint64_t now)
+    {
+        return timestamp_ns != 0 && now >= timestamp_ns && now - timestamp_ns <= kStateFreshNs;
+    }
+
+    struct Freshness {
+        bool model = false;
+        bool panda = false;
+        bool control = false;
+        bool manager = false;
+    };
+
+    Freshness freshness(uint64_t now) const
+    {
+        return {fresh(latest_model_state_.model_timestamp_ns, now),
+                fresh(latest_panda_state_.timestamp_ns, now),
+                fresh(latest_control_state_.timestamp_ns, now),
+                fresh(latest_manager_state_.timestamp_ns, now)};
+    }
+
+    /* 최신 스냅샷을 HUD 상태로 옮기고, control 이벤트 카운터로 토스트·부저를 낸다. */
     void refresh_hud_state()
     {
         const uint64_t now = k230_now_ns();
-        const bool model_fresh = latest_model_state_.model_timestamp_ns != 0 &&
-            now >= latest_model_state_.model_timestamp_ns &&
-            now - latest_model_state_.model_timestamp_ns <= kStateFreshNs;
-        const bool panda_fresh = latest_panda_state_.timestamp_ns != 0 &&
-            now >= latest_panda_state_.timestamp_ns &&
-            now - latest_panda_state_.timestamp_ns <= kStateFreshNs;
-        const bool control_fresh = latest_control_state_.timestamp_ns != 0 &&
-            now >= latest_control_state_.timestamp_ns &&
-            now - latest_control_state_.timestamp_ns <= kStateFreshNs;
-        const bool manager_fresh = latest_manager_state_.timestamp_ns != 0 &&
-            now >= latest_manager_state_.timestamp_ns &&
-            now - latest_manager_state_.timestamp_ns <= kStateFreshNs;
+        const Freshness f = freshness(now);
+        have_model_state_ = latest_model_state_.valid != 0 && f.model;
+        hud_apply_panda_state(latest_panda_state_, f.panda, &hud_);
+        hud_apply_control_state(latest_control_state_, f.control, &hud_);
+        hud_apply_model_state(latest_model_state_, f.model, &hud_);
+        hud_apply_manager_state(latest_manager_state_, f.manager, have_model_state_, &hud_);
+        process_alert_events(f, now);
+    }
 
-        have_model_state_ = latest_model_state_.valid != 0 && model_fresh;
+    /* 이벤트 카운터는 공유 제어 상태에 있다. overlay가 독립적으로 재시작될
+     * 수 있으므로 첫 번째 정상 스냅샷은 새 사용자 이벤트가 아니라 기준값으로
+     * 처리한다. controlsd 재시작으로 카운터가 0부터 다시 시작한 경우에도
+     * 전체 기준값을 다시 설정한다. 기준값을 잡은 프레임이면 true. */
+    bool baseline_event_counters()
+    {
+        const auto counter_reset = [](uint32_t current, uint32_t previous) {
+            return previous != 0 && current < previous;
+        };
+        const bool counters_reset =
+            event_ids_initialized_ &&
+            (counter_reset(latest_control_state_.engage_event_id, last_engage_event_id_) ||
+             counter_reset(latest_control_state_.disengage_event_id, last_disengage_event_id_) ||
+             counter_reset(latest_control_state_.engage_reject_event_id,
+                           last_engage_reject_event_id_) ||
+             counter_reset(latest_control_state_.departure_alert_event_id, last_departure_alert_event_id_));
+        if (event_ids_initialized_ && !counters_reset) return false;
+        last_engage_event_id_ = latest_control_state_.engage_event_id;
+        last_disengage_event_id_ = latest_control_state_.disengage_event_id;
+        last_engage_reject_event_id_ = latest_control_state_.engage_reject_event_id;
+        last_departure_alert_event_id_ = latest_control_state_.departure_alert_event_id;
+        event_ids_initialized_ = true;
+        return true;
+    }
 
-        hud_.panda_connected = panda_fresh && latest_panda_state_.connected != 0;
-        hud_.panda_healthy = panda_fresh && latest_panda_state_.comms_healthy != 0;
-        hud_.panda_tx_enabled = latest_panda_state_.tx_enabled != 0;
-        hud_.panda_controls_allowed = panda_fresh && latest_panda_state_.controls_allowed != 0;
-        hud_.panda_faults = panda_fresh ? latest_panda_state_.faults : 0;
-
-        hud_.controller_enabled = control_fresh && latest_control_state_.enabled != 0;
-        hud_.controller_engaged = control_fresh && latest_control_state_.engaged != 0;
-        hud_.controller_active = control_fresh && latest_control_state_.active != 0;
-        hud_.lateral_mode_available = control_fresh;
-        hud_.laneless_mode =
-            control_fresh &&
-            (latest_control_state_.hud_flags & kK230HudFlagLaneless) != 0;
-        hud_.vehicle_fresh = control_fresh && latest_control_state_.vehicle_fresh != 0;
-        hud_.steering_fault = control_fresh && latest_control_state_.steering_fault != 0;
-        hud_.left_blinker = control_fresh && latest_control_state_.left_blinker != 0;
-        hud_.right_blinker = control_fresh && latest_control_state_.right_blinker != 0;
-        hud_.cruise_active = control_fresh && latest_control_state_.cruise_active != 0;
-        hud_.brake_hold =
-            control_fresh &&
-            (latest_control_state_.hud_flags & kK230HudFlagBrakeHold) != 0;
-        hud_.gear = control_fresh ? latest_control_state_.gear : 0;
-        hud_.cluster_speed_kph = control_fresh ? latest_control_state_.cluster_speed_kph : 0.0f;
-        hud_.ego_speed_kph =
-            control_fresh ? latest_control_state_.ego_speed_kph : 0.0f;
-        hud_.cruise_max_speed_kph =
-            control_fresh ? latest_control_state_.cruise_max_speed_kph : 0.0f;
-        hud_.cruise_command_speed_kph =
-            control_fresh ? latest_control_state_.cruise_command_speed_kph
-                          : 0.0f;
-        hud_.radar_lead_valid =
-            control_fresh && latest_control_state_.radar_lead_valid != 0;
-        hud_.radar_lead_distance_m =
-            control_fresh ? latest_control_state_.radar_lead_distance_m : 0.0f;
-        hud_.radar_lead_relative_speed_mps =
-            control_fresh
-                ? latest_control_state_.radar_lead_relative_speed_mps
-                : 0.0f;
-        hud_.departure_alert_type = control_fresh
-            ? static_cast<DepartureAlertType>(
-                  latest_control_state_.departure_alert_type)
-            : DepartureAlertType::none;
-        hud_.departure_alert_event_id =
-            control_fresh ? latest_control_state_.departure_alert_event_id : 0;
-        hud_.green_light_alert_armed =
-            control_fresh &&
-            latest_control_state_.green_light_alert_armed != 0;
-        hud_.tpms_valid =
-            control_fresh && latest_control_state_.tpms_valid != 0;
-        hud_.tpms_unit =
-            control_fresh ? static_cast<int>(latest_control_state_.tpms_unit) : 0;
-        hud_.tpms_pressure_fl =
-            control_fresh ? latest_control_state_.tpms_pressure_fl : 0.0f;
-        hud_.tpms_pressure_fr =
-            control_fresh ? latest_control_state_.tpms_pressure_fr : 0.0f;
-        hud_.tpms_pressure_rl =
-            control_fresh ? latest_control_state_.tpms_pressure_rl : 0.0f;
-        hud_.tpms_pressure_rr =
-            control_fresh ? latest_control_state_.tpms_pressure_rr : 0.0f;
-        hud_.tpms_warning =
-            control_fresh && latest_control_state_.tpms_warning != 0;
-
-        /* 이벤트 카운터는 공유 제어 상태에 있다. overlay가 독립적으로 재시작될
-         * 수 있으므로 첫 번째 정상 스냅샷은 새 사용자 이벤트가 아니라 기준값으로
-         * 처리한다. controlsd 재시작으로 카운터가 0부터 다시 시작한 경우에도
-         * 전체 기준값을 다시 설정한다. */
-        bool event_id_baseline_this_frame = false;
-        if (control_fresh) {
-            const auto counter_reset = [](uint32_t current, uint32_t previous) {
-                return previous != 0 && current < previous;
-            };
-            const bool counters_reset =
-                event_ids_initialized_ &&
-                (counter_reset(latest_control_state_.engage_event_id,
-                               last_engage_event_id_) ||
-                 counter_reset(latest_control_state_.disengage_event_id,
-                               last_disengage_event_id_) ||
-                 counter_reset(latest_control_state_.engage_reject_event_id,
-                               last_engage_reject_event_id_) ||
-                 counter_reset(hud_.departure_alert_event_id,
-                               last_departure_alert_event_id_));
-            if (!event_ids_initialized_ || counters_reset) {
-                last_engage_event_id_ = latest_control_state_.engage_event_id;
-                last_disengage_event_id_ =
-                    latest_control_state_.disengage_event_id;
-                last_engage_reject_event_id_ =
-                    latest_control_state_.engage_reject_event_id;
-                last_departure_alert_event_id_ =
-                    hud_.departure_alert_event_id;
-                event_ids_initialized_ = true;
-                event_id_baseline_this_frame = true;
-            }
+    /* engage 거부 > engage > disengage 중 첫 새 이벤트 하나만. 울렸으면 true. */
+    bool play_engagement_alert(uint64_t now)
+    {
+        const K230ControlState &c = latest_control_state_;
+        if (c.engage_reject_event_id != 0 &&
+            c.engage_reject_event_id != last_engage_reject_event_id_) {
+            last_engage_reject_event_id_ = c.engage_reject_event_id;
+            std::snprintf(hud_.engage_alert_message, sizeof(hud_.engage_alert_message),
+                          "UNABLE TO ENGAGE: %s", engage_block_text(c.engage_reject_block));
+            engage_alert_until_ns_ = now + kEngageAlertNs;
+            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_UNABLE, last_engage_reject_event_id_);
+            std::fprintf(stderr, "k230_overlayd: piezo alert=unable event=%u block=%s\n",
+                         last_engage_reject_event_id_, c.engage_reject_block);
+            return true;
         }
-        const bool process_event_counters =
-            control_fresh && !event_id_baseline_this_frame;
-        bool engagement_alert_triggered = false;
-        if (process_event_counters &&
-            latest_control_state_.engage_reject_event_id != 0 &&
-            latest_control_state_.engage_reject_event_id !=
-                last_engage_reject_event_id_) {
-            last_engage_reject_event_id_ =
-                latest_control_state_.engage_reject_event_id;
-            std::snprintf(hud_.engage_alert_message,
-                          sizeof(hud_.engage_alert_message),
-                          "UNABLE TO ENGAGE: %s",
-                          engage_block_text(
-                              latest_control_state_.engage_reject_block));
-            engage_alert_until_ns_ = now + 3000000000ULL;
-            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_UNABLE,
-                              last_engage_reject_event_id_);
-            std::fprintf(stderr,
-                         "k230_overlayd: piezo alert=unable event=%u block=%s\n",
-                         last_engage_reject_event_id_,
-                         latest_control_state_.engage_reject_block);
-            engage_activation_suppress_until_ns_ = 0;
-            engagement_alert_triggered = true;
-        } else if (process_event_counters &&
-                   latest_control_state_.engage_event_id != 0 &&
-                   latest_control_state_.engage_event_id != last_engage_event_id_) {
-            last_engage_event_id_ = latest_control_state_.engage_event_id;
-            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_ENGAGE,
-                              last_engage_event_id_);
+        if (c.engage_event_id != 0 && c.engage_event_id != last_engage_event_id_) {
+            last_engage_event_id_ = c.engage_event_id;
+            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_ENGAGE, last_engage_event_id_);
             std::fprintf(stderr, "k230_overlayd: piezo alert=engage event=%u\n",
                          last_engage_event_id_);
-            engage_activation_suppress_until_ns_ = now + 1000000000ULL;
-            engagement_alert_triggered = true;
-        } else if (process_event_counters &&
-                   latest_control_state_.disengage_event_id != 0 &&
-                   latest_control_state_.disengage_event_id !=
-                       last_disengage_event_id_) {
-            last_disengage_event_id_ =
-                latest_control_state_.disengage_event_id;
-            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_DISENGAGE,
-                              last_disengage_event_id_);
-            std::fprintf(stderr,
-                         "k230_overlayd: piezo alert=disengage event=%u\n",
+            return true;
+        }
+        if (c.disengage_event_id != 0 && c.disengage_event_id != last_disengage_event_id_) {
+            last_disengage_event_id_ = c.disengage_event_id;
+            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_DISENGAGE, last_disengage_event_id_);
+            std::fprintf(stderr, "k230_overlayd: piezo alert=disengage event=%u\n",
                          last_disengage_event_id_);
-            engage_activation_suppress_until_ns_ = 0;
-            engagement_alert_triggered = true;
+            return true;
         }
-        if (now >= engage_alert_until_ns_) {
-            hud_.engage_alert_message[0] = '\0';
-        }
+        return false;
+    }
 
-        bool departure_alert_triggered = false;
-        if (process_event_counters &&
-            !engagement_alert_triggered &&
-            hud_.departure_alert_type != DepartureAlertType::none &&
-            hud_.departure_alert_event_id != 0 &&
-            hud_.departure_alert_event_id != last_departure_alert_event_id_) {
-            last_departure_alert_event_id_ = hud_.departure_alert_event_id;
-            /* 두 가지 출발 감지는 모두 도로 상황의 변화로 처리한다. */
-            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_SIGNAL_CHANGED,
-                              hud_.departure_alert_event_id);
-            std::fprintf(stderr,
-                         "k230_overlayd: piezo alert=signal_changed event=%u\n",
-                         hud_.departure_alert_event_id);
-            departure_alert_triggered = true;
-        }
+    /* 두 가지 출발 감지는 모두 도로 상황의 변화로 처리한다. 울렸으면 true. */
+    bool play_departure_alert()
+    {
+        if (hud_.departure_alert_type == DepartureAlertType::none ||
+            latest_control_state_.departure_alert_event_id == 0 ||
+            latest_control_state_.departure_alert_event_id == last_departure_alert_event_id_)
+            return false;
+        last_departure_alert_event_id_ = latest_control_state_.departure_alert_event_id;
+        piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_SIGNAL_CHANGED, latest_control_state_.departure_alert_event_id);
+        std::fprintf(stderr, "k230_overlayd: piezo alert=signal_changed event=%u\n",
+                     latest_control_state_.departure_alert_event_id);
+        return true;
+    }
 
+    /* 가용 → 불가용 천이에만 울린다. active 천이는 정차 부근 path 깜빡임마다
+     * 울리므로 소리내지 않는다. 같은 프레임에 다른 알림이 울렸으면 생략. */
+    void play_availability_alert(const Freshness &f, bool suppressed)
+    {
         const bool panda_unavailable =
             latest_panda_state_.timestamp_ns != 0 &&
-            (!panda_fresh || !hud_.panda_connected || !hud_.panda_healthy ||
+            (!f.panda || !hud_.panda_connected || !hud_.panda_healthy ||
              latest_panda_state_.faults != 0);
         const bool unavailable =
-            !control_fresh || panda_unavailable ||
-            latest_control_state_.steering_fault != 0;
+            !f.control || panda_unavailable || latest_control_state_.steering_fault != 0;
         if (!alert_state_initialized_) {
-            previous_controller_active_ = hud_.controller_active;
-            previous_unavailable_ = unavailable;
             alert_state_initialized_ = true;
-        } else if (unavailable && !previous_unavailable_) {
-            if (!engagement_alert_triggered && !departure_alert_triggered) {
-                const uint32_t event_id = next_piezo_event_id();
-                piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_UNAVAILABLE,
-                                  event_id);
-                std::fprintf(stderr,
-                             "k230_overlayd: piezo alert=unavailable event=%u\n",
-                             event_id);
-            }
+        } else if (unavailable && !previous_unavailable_ && !suppressed) {
+            const uint32_t event_id = next_piezo_event_id();
+            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_UNAVAILABLE, event_id);
+            std::fprintf(stderr, "k230_overlayd: piezo alert=unavailable event=%u\n", event_id);
         }
-        /* active(가용성) 천이는 소리내지 않는다 — 정차 부근 path 깜빡임마다
-         * 울린다. 부저는 engage/disengage/engage거부/가용성상실만. */
-        previous_controller_active_ = !unavailable && hud_.controller_active;
         previous_unavailable_ = unavailable;
-        hud_.steering_angle_deg = control_fresh ? latest_control_state_.steering_angle_deg : 0.0f;
-        hud_.normalized_output = control_fresh ? latest_control_state_.normalized_output : 0.0f;
-        hud_.desired_torque = control_fresh ? latest_control_state_.desired_torque : 0;
-        hud_.apply_torque = control_fresh ? latest_control_state_.apply_torque : 0;
-        hud_.driver_torque = control_fresh ? latest_control_state_.driver_torque : 0;
-        std::snprintf(hud_.active_block, sizeof(hud_.active_block), "%s",
-                      control_fresh ? latest_control_state_.active_block : "control_stale");
+    }
 
-        hud_.calibration_available = model_fresh;
-        hud_.calibration_status = latest_model_state_.calibration.status;
-        hud_.calibration_valid_blocks = latest_model_state_.calibration.valid_blocks;
-        hud_.calibration_roll_deg = rad_to_deg(latest_model_state_.calibration.roll);
-        hud_.calibration_pitch_deg = rad_to_deg(latest_model_state_.calibration.pitch);
-        hud_.calibration_yaw_deg = rad_to_deg(latest_model_state_.calibration.yaw);
-
-        const unsigned total_processes = manager_fresh
-            ? std::min<unsigned>(latest_manager_state_.process_count, kK230MaxProcesses)
-            : 0;
-        unsigned running_processes = 0;
-        for (unsigned i = 0; i < total_processes; ++i)
-            running_processes += latest_manager_state_.processes[i].running ? 1U : 0U;
-        hud_.services_healthy = manager_fresh && total_processes >= 3 &&
-            running_processes == total_processes && have_model_state_;
+    void process_alert_events(const Freshness &f, uint64_t now)
+    {
+        const bool process = f.control && !baseline_event_counters();
+        const bool engagement = process && play_engagement_alert(now);
+        if (now >= engage_alert_until_ns_) hud_.engage_alert_message[0] = '\0';
+        const bool departure = process && !engagement && play_departure_alert();
+        play_availability_alert(f, engagement || departure);
     }
 
     void redraw_overlay()
@@ -558,9 +496,10 @@ private:
         overlay_buffer_index_ = (overlay_buffer_index_ + 1) % kOverlayBufferCount;
         overlay_buffer_ = overlay_buffers_[overlay_buffer_index_];
         const uint64_t draw_start = profile_ ? k230_now_ns() : 0;
-        overlay_.draw(overlay_buffer_,
+        overlay_.draw(overlay_target(overlay_buffer_),
                       have_model_state_ ? latest_output_ : ParsedModelOutput{},
-                      have_model_state_ ? latest_projection_ : default_projection_, hud_, true);
+                      have_model_state_ ? latest_projection_ : default_projection_, hud_,
+                      rotate_landscape_);
         if (profile_) overlay_stats_.add(k230_now_ns() - draw_start);
 
         const uint64_t present_start = profile_ ? k230_now_ns() : 0;
@@ -585,6 +524,7 @@ private:
 
     OverlayRenderer overlay_;
     bool profile_ = false;
+    bool rotate_landscape_ = true;
 
     K230LatestChannel model_state_sub_;
     K230LatestChannel panda_state_sub_;
@@ -633,13 +573,11 @@ private:
     bool event_ids_initialized_ = false;
     uint32_t next_piezo_event_id_ = 0;
     bool alert_state_initialized_ = false;
-    bool previous_controller_active_ = false;
     bool previous_unavailable_ = false;
     uint64_t engage_alert_until_ns_ = 0;
-    // Panda 허가가 지연되면 engage 직후 active가 올라올 수 있다.
-    // engage 음이 이미 전이를 알렸으므로 active gate 음을 덧붙이지 않는다.
-    // 이후 active에 다시 진입하는 전이에는 activated 음을 재생한다.
-    uint64_t engage_activation_suppress_until_ns_ = 0;
+    bool previous_left_blinker_ = false;
+    bool previous_right_blinker_ = false;
+    uint64_t turn_signal_start_ns_ = 0;
     OverlayHudState hud_;
 };
 

@@ -17,6 +17,7 @@ k230_recordd
 check_k7_control_replay
 check_model_output_parser
 check_panda_can_codec
+hud_snapshot
 bench_input_warp_overhead
 bench_nv12_to_yuv6
 verify_calibration_equivalence
