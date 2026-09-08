@@ -45,6 +45,26 @@ set(PROJECT_LOCAL_INCLUDES
 )
 set(PROJECT_SYSTEM_INCLUDES)
 
+# 런타임(overlayd)에는 필수, 호스트 검사에서는 hud_snapshot만 쓴다.
+if(SUPERCOMBO_BUILD_RUNTIME)
+  find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
+else()
+  find_package(OpenCV QUIET COMPONENTS core imgproc imgcodecs)
+endif()
+
+# 프로세스 공용 코드. 호스트 검사도 쓴다. glibc는 shm_open이 librt에 있고 macOS는 libc에 있다.
+add_library(k230_common STATIC
+  src/app_config.cc
+  src/k230_ipc.cc
+  src/model_output.cc
+  src/projection.cc
+)
+target_include_directories(k230_common PUBLIC ${PROJECT_LOCAL_INCLUDES})
+target_compile_options(k230_common PRIVATE ${PROJECT_WARNINGS})
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  target_link_libraries(k230_common PUBLIC rt pthread)
+endif()
+
 add_library(control_core STATIC
   src/departure_alert.cc
   src/driving_params.cc
@@ -61,8 +81,14 @@ add_library(control_core STATIC
 target_include_directories(control_core PUBLIC ${PROJECT_LOCAL_INCLUDES})
 target_compile_options(control_core PRIVATE ${PROJECT_WARNINGS})
 
+# 호스트 검사·도구: 로컬 헤더와 경고만 붙인 일반 실행 파일.
+function(add_host_tool target)
+  add_executable(${target} ${ARGN})
+  target_include_directories(${target} PRIVATE ${PROJECT_LOCAL_INCLUDES})
+  target_compile_options(${target} PRIVATE ${PROJECT_WARNINGS})
+endfunction()
+
 if(SUPERCOMBO_BUILD_RUNTIME)
-  find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
   find_package(PkgConfig QUIET)
   if(SUPERCOMBO_BUILD_PANDA)
     if(PkgConfig_FOUND)
@@ -106,6 +132,7 @@ if(SUPERCOMBO_BUILD_RUNTIME)
   target_include_directories(mmz SYSTEM PUBLIC ${PROJECT_SYSTEM_INCLUDES})
   target_compile_options(mmz PRIVATE ${PROJECT_WARNINGS})
 
+  # 보드 실행 파일: 시스템 헤더, 링크 경로, 공용 시스템 라이브러리.
   function(configure_k230_target target)
     target_include_directories(${target} PRIVATE ${PROJECT_LOCAL_INCLUDES})
     target_include_directories(${target} SYSTEM PRIVATE ${PROJECT_SYSTEM_INCLUDES})
@@ -126,69 +153,38 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     )
   endfunction()
 
-  set(COMMON_SOURCES
-    src/app_config.cc
-    src/k230_ipc.cc
-    src/model_output.cc
-    src/projection.cc
+  add_executable(k230_camerad
+    src/k230_camerad.cc
+    src/input_source.cc
   )
+  configure_k230_target(k230_camerad k230_common mmz ${K230_SHARED_LIBS})
 
-  set(MODEL_SOURCES
+  add_executable(k230_modeld
+    src/k230_modeld.cc
     src/ai_base.cc
     src/calibration_service.cc
     src/input_source.cc
     src/json_utils.cc
-    src/k230_ipc.cc
     src/model_input_transform.cc
     src/online_calibrator.cc
     src/supercombo_model.cc
   )
-
-  add_executable(k230_camerad
-    src/k230_camerad.cc
-    src/input_source.cc
-    src/k230_ipc.cc
-    ${COMMON_SOURCES}
-  )
-  configure_k230_target(k230_camerad
-    mmz
-    ${K230_SHARED_LIBS}
-  )
-
-  add_executable(k230_modeld
-    src/k230_modeld.cc
-    ${COMMON_SOURCES}
-    ${MODEL_SOURCES}
-  )
-  configure_k230_target(k230_modeld
-    ${NNCASE_STATIC_LIBS}
-    mmz
-    ${K230_SHARED_LIBS}
-  )
+  configure_k230_target(k230_modeld k230_common ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
 
   add_executable(k230_overlayd
     src/k230_overlayd.cc
     src/piezo_buzzer.c
-    src/k230_ipc.cc
     src/overlay_renderer.cc
-    ${COMMON_SOURCES}
   )
-  configure_k230_target(k230_overlayd
-    mmz
-    ${K230_SHARED_LIBS}
-    ${OpenCV_LIBS}
-  )
+  configure_k230_target(k230_overlayd k230_common mmz ${K230_SHARED_LIBS} ${OpenCV_LIBS})
 
   add_executable(k230_recordd
     src/k230_recordd.cc
     src/json_utils.cc
-    src/k230_ipc.cc
-    src/model_output.cc
     src/mvx_v4l2_encoder.cc
-    src/projection.cc
     src/recording_writer.cc
   )
-  configure_k230_target(k230_recordd)
+  configure_k230_target(k230_recordd k230_common)
 
   if(SUPERCOMBO_BUILD_PANDA)
     set(ACADOS_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/acados/include")
@@ -207,139 +203,95 @@ if(SUPERCOMBO_BUILD_RUNTIME)
       endif()
     endforeach()
 
+    # Acados 횡방향 MPC를 쓰는 실행 파일: 헤더, $ORIGIN/lib rpath, 런타임 .so.
+    function(configure_acados_target target)
+      target_include_directories(${target} SYSTEM PRIVATE
+        "${ACADOS_INCLUDE_DIR}"
+        "${ACADOS_INCLUDE_DIR}/blasfeo/include"
+        "${ACADOS_INCLUDE_DIR}/hpipm/include"
+        "${ACADOS_SOLVER_DIR}"
+      )
+      set_target_properties(${target} PROPERTIES
+        BUILD_RPATH "\$ORIGIN/lib"
+        INSTALL_RPATH "\$ORIGIN/lib"
+      )
+      configure_k230_target(${target} k230_common control_core ${ACADOS_RUNTIME_LIBS})
+    endfunction()
+
     add_executable(k230_pandad
       src/k230_pandad.cc
       src/panda_client.cc
       src/panda_can_codec.cc
-      src/k230_ipc.cc
-      src/model_output.cc
-      src/projection.cc
-      )
-    configure_k230_target(k230_pandad ${LIBUSB_LIBRARIES})
+    )
+    configure_k230_target(k230_pandad k230_common ${LIBUSB_LIBRARIES})
 
     add_executable(k230_controlsd
       src/k230_controlsd.cc
-      src/k230_ipc.cc
-      src/model_output.cc
-      src/projection.cc
       src/openpilot_lateral_planner.cc
     )
-    target_include_directories(k230_controlsd SYSTEM PRIVATE
-      "${ACADOS_INCLUDE_DIR}"
-      "${ACADOS_INCLUDE_DIR}/blasfeo/include"
-      "${ACADOS_INCLUDE_DIR}/hpipm/include"
-      "${ACADOS_SOLVER_DIR}"
-    )
-    set_target_properties(k230_controlsd PROPERTIES
-      BUILD_RPATH "\$ORIGIN/lib"
-      INSTALL_RPATH "\$ORIGIN/lib"
-    )
-    configure_k230_target(k230_controlsd
-      control_core
-      ${ACADOS_RUNTIME_LIBS}
-    )
+    configure_acados_target(k230_controlsd)
 
     add_executable(planner_replay
       benchmarks/planner_replay.cc
-      src/k230_ipc.cc
-      src/model_output.cc
-      src/projection.cc
       src/openpilot_lateral_planner.cc
     )
-    target_include_directories(planner_replay SYSTEM PRIVATE
-      "${ACADOS_INCLUDE_DIR}"
-      "${ACADOS_INCLUDE_DIR}/blasfeo/include"
-      "${ACADOS_INCLUDE_DIR}/hpipm/include"
-      "${ACADOS_SOLVER_DIR}"
-    )
-    set_target_properties(planner_replay PROPERTIES
-      BUILD_RPATH "\$ORIGIN/lib"
-      INSTALL_RPATH "\$ORIGIN/lib"
-    )
-    configure_k230_target(planner_replay
-      control_core
-      ${ACADOS_RUNTIME_LIBS}
-    )
+    configure_acados_target(planner_replay)
   endif()
 endif()
 
 if(SUPERCOMBO_BUILD_BENCHMARKS)
-  add_executable(check_model_output_parser
-    benchmarks/check_model_output_parser.cc
-    src/model_output.cc
-  )
-  target_include_directories(check_model_output_parser PRIVATE ${PROJECT_LOCAL_INCLUDES})
-  target_include_directories(check_model_output_parser SYSTEM PRIVATE ${PROJECT_SYSTEM_INCLUDES})
-  target_compile_options(check_model_output_parser PRIVATE ${PROJECT_WARNINGS})
+  add_host_tool(check_model_output_parser benchmarks/check_model_output_parser.cc)
+  target_link_libraries(check_model_output_parser PRIVATE k230_common)
 
-  add_executable(bench_nv12_to_yuv6 benchmarks/bench_nv12_to_yuv6.cc)
-  target_compile_options(bench_nv12_to_yuv6 PRIVATE ${PROJECT_WARNINGS})
+  add_host_tool(bench_nv12_to_yuv6 benchmarks/bench_nv12_to_yuv6.cc)
 
-  add_executable(check_panda_can_codec
+  add_host_tool(check_panda_can_codec
     benchmarks/check_panda_can_codec.cc
     src/panda_can_codec.cc
   )
-  target_include_directories(check_panda_can_codec PRIVATE ${PROJECT_LOCAL_INCLUDES})
-  target_compile_options(check_panda_can_codec PRIVATE ${PROJECT_WARNINGS})
 
-  add_executable(check_k230_can_queue
-    benchmarks/check_k230_can_queue.cc
-    src/k230_ipc.cc
-    src/model_output.cc
-    src/projection.cc
-  )
-  target_include_directories(check_k230_can_queue PRIVATE ${PROJECT_LOCAL_INCLUDES})
-  target_compile_options(check_k230_can_queue PRIVATE ${PROJECT_WARNINGS})
-  # common_utils opens POSIX shared memory; glibc keeps shm_open in librt, while
-  # macOS has it in libc. configure_k230_target() links these for the runtime
-  # binaries, but the checks are plain executables so they need it here.
-  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_libraries(check_k230_can_queue PRIVATE rt pthread)
-  endif()
+  add_host_tool(check_k230_can_queue benchmarks/check_k230_can_queue.cc)
+  target_link_libraries(check_k230_can_queue PRIVATE k230_common)
 
-  add_executable(check_control_replay
+  add_host_tool(check_control_replay
     benchmarks/check_control_replay.cc
     benchmarks/can_replay.cc
   )
   target_link_libraries(check_control_replay PRIVATE control_core)
-  target_include_directories(check_control_replay PRIVATE ${PROJECT_LOCAL_INCLUDES})
-  target_compile_options(check_control_replay PRIVATE ${PROJECT_WARNINGS})
 
-  add_executable(extract_lateral_dataset benchmarks/extract_lateral_dataset.cc)
+  add_host_tool(extract_lateral_dataset benchmarks/extract_lateral_dataset.cc)
   target_link_libraries(extract_lateral_dataset PRIVATE control_core)
-  target_include_directories(extract_lateral_dataset PRIVATE ${PROJECT_LOCAL_INCLUDES})
-  target_compile_options(extract_lateral_dataset PRIVATE ${PROJECT_WARNINGS})
 
-  add_executable(check_departure_alert benchmarks/check_departure_alert.cc)
+  add_host_tool(check_departure_alert benchmarks/check_departure_alert.cc)
   target_link_libraries(check_departure_alert PRIVATE control_core)
-  target_include_directories(check_departure_alert PRIVATE ${PROJECT_LOCAL_INCLUDES})
-  target_compile_options(check_departure_alert PRIVATE ${PROJECT_WARNINGS})
 
-  add_executable(check_adaptive_cruise benchmarks/check_adaptive_cruise.cc)
+  add_host_tool(check_adaptive_cruise benchmarks/check_adaptive_cruise.cc)
   target_link_libraries(check_adaptive_cruise PRIVATE control_core)
-  target_include_directories(check_adaptive_cruise PRIVATE ${PROJECT_LOCAL_INCLUDES})
-  target_compile_options(check_adaptive_cruise PRIVATE ${PROJECT_WARNINGS})
 
-  add_executable(bench_input_warp_overhead
+  add_host_tool(bench_input_warp_overhead
     benchmarks/bench_input_warp_overhead.cc
-    src/app_config.cc
     src/model_input_transform.cc
-    src/projection.cc
   )
-  target_include_directories(bench_input_warp_overhead PRIVATE ${PROJECT_LOCAL_INCLUDES})
-  target_compile_options(bench_input_warp_overhead PRIVATE ${PROJECT_WARNINGS})
+  target_link_libraries(bench_input_warp_overhead PRIVATE k230_common)
 
-  add_executable(verify_calibration_equivalence
+  add_host_tool(verify_calibration_equivalence
     benchmarks/verify_calibration_equivalence.cc
-    src/app_config.cc
     src/calibration_service.cc
     src/json_utils.cc
     src/model_input_transform.cc
     src/online_calibrator.cc
-    src/projection.cc
   )
-  target_include_directories(verify_calibration_equivalence PRIVATE ${PROJECT_LOCAL_INCLUDES})
-  target_compile_options(verify_calibration_equivalence PRIVATE ${PROJECT_WARNINGS})
+  target_link_libraries(verify_calibration_equivalence PRIVATE k230_common)
+
+  # HUD 스냅샷·타이밍 도구. 렌더러가 OpenCV를 쓰므로 OpenCV가 있는 곳에서만 만든다.
+  if(OpenCV_FOUND)
+    add_host_tool(hud_snapshot
+      benchmarks/hud_snapshot.cc
+      src/overlay_renderer.cc
+    )
+    target_include_directories(hud_snapshot SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(hud_snapshot PRIVATE k230_common ${OpenCV_LIBS})
+  endif()
 
   if(SUPERCOMBO_BUILD_RUNTIME)
     add_executable(bench_capture_nv12 benchmarks/bench_capture_nv12.cc)

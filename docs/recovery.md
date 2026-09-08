@@ -22,8 +22,7 @@ tracked in this repository; see `tools/model/` for the scripts and
 - `src/`: C++ app, camera input, YUV6 preprocessing, nncase runtime wrapper, overlay drawing
 - `include/`: K230 display/v4l2/mmz headers copied from the K230 Linux SDK
 - `deps/`: nncase K230 runtime headers and static libraries
-- `CMakeLists.txt`: primary board-native build recipe
-- `Makefile`: rollback board-native build recipe
+- `CMakeLists.txt`: board-native and cross build recipe
 - `k230_manager.py`: minimal openpilot-style process supervisor
 - `scripts/fetch_nncase_runtime.sh`: recreates `deps/` from Kendryte nncase v2.11.0 release
 
@@ -104,11 +103,12 @@ The expected output is:
 - `/root/supercombo_k230/k230_camerad`
 - `/root/supercombo_k230/k230_modeld`
 
-The Makefile remains available as a rollback build path:
+If a build directory is suspect, start it over:
 
 ```sh
-make clean
-make -j2
+rm -rf build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j2
 ```
 
 ## Run
