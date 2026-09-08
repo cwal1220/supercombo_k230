@@ -32,9 +32,9 @@ matches the K7 branch in the reference openpilot controller.
 
 Runtime parameters are stored in:
 
-- `params/yg_steering.json`: torque PID, steering limits, vehicle geometry,
+- `params/steering.json`: torque PID, steering limits, vehicle geometry,
   angle offset, and low-speed steering settings.
-- `params/yg_driving.json`: model/CAN freshness, inactive release duration,
+- `params/driving.json`: model/CAN freshness, inactive release duration,
   MDPS speed spoof, and lateral motion limits.
 - `params/calibration.json`: generated camera calibration state. This file is
   preserved across application and board restarts.

@@ -6,12 +6,6 @@
 #include <cstring>
 #include <stdexcept>
 
-namespace {
-
-constexpr float kPi = 3.14159265358979323846f;
-
-} // namespace
-
 std::string AppConfig::usage(const char *program_name)
 {
     return std::string("Usage: ") + (program_name ? program_name : "k230_modeld") +

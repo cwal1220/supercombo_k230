@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -186,7 +186,6 @@ def decode_route_yuv(segments: list[SegmentInfo]):
     """
     import av
     import re
-    from collections import deque
 
     codec = av.CodecContext.create("hevc", "r")
 

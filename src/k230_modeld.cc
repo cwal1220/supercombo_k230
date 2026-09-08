@@ -93,15 +93,12 @@ bool publish_output(K230LatestChannel &model_pub, SupercomboModel &model, const 
 int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
 {
     ReplayNv12Source source(config.replay_nv12_path);
+    /* 재생 소스 해상도에 맞춘 기본 워프. */
     AppConfig replay_config = config;
-    if (!env_present("SUPERCOMBO_INPUT_WARP_FX"))
-        replay_config.input_warp_fx = default_input_warp_fx(source.width());
-    if (!env_present("SUPERCOMBO_INPUT_WARP_FY"))
-        replay_config.input_warp_fy = default_input_warp_fy(source.height());
-    if (!env_present("SUPERCOMBO_INPUT_WARP_CX"))
-        replay_config.input_warp_cx = default_input_warp_cx(source.width());
-    if (!env_present("SUPERCOMBO_INPUT_WARP_CY"))
-        replay_config.input_warp_cy = default_input_warp_cy(source.height());
+    replay_config.input_warp_fx = default_input_warp_fx(source.width());
+    replay_config.input_warp_fy = default_input_warp_fy(source.height());
+    replay_config.input_warp_cx = default_input_warp_cx(source.width());
+    replay_config.input_warp_cy = default_input_warp_cy(source.height());
     const unsigned target_frames = config.max_frames > 0
         ? std::min(config.max_frames, source.frame_count())
         : source.frame_count();

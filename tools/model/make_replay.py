@@ -36,9 +36,9 @@ def main() -> None:
                         help="ONNX for the host reference outputs")
     parser.add_argument("--rpy", default=None,
                         help="roll,pitch,yaw in radians. Use the board's "
-                             "params/calibration.json so both warps match; the "
-                             "calibration service overrides the "
-                             "SUPERCOMBO_INPUT_WARP_* variables every frame.")
+                             "params/calibration.json so both warps match; on "
+                             "the board the calibration service feeds the "
+                             "input warp every frame.")
     args = parser.parse_args()
 
     route = Path(args.route)

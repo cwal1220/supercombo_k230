@@ -488,18 +488,9 @@ void test_calibration_service()
 
 void test_app_config_env_feedback()
 {
-    unsetenv("SUPERCOMBO_NV12_WIDTH");
-    unsetenv("SUPERCOMBO_NV12_HEIGHT");
     unsetenv("SUPERCOMBO_CALIB_ROLL_DEG");
     unsetenv("SUPERCOMBO_CALIB_PITCH_DEG");
     unsetenv("SUPERCOMBO_CALIB_YAW_DEG");
-    unsetenv("SUPERCOMBO_INPUT_WARP_ROLL_DEG");
-    unsetenv("SUPERCOMBO_INPUT_WARP_PITCH_DEG");
-    unsetenv("SUPERCOMBO_INPUT_WARP_YAW_DEG");
-    unsetenv("SUPERCOMBO_INPUT_WARP_FX");
-    unsetenv("SUPERCOMBO_INPUT_WARP_FY");
-    unsetenv("SUPERCOMBO_INPUT_WARP_CX");
-    unsetenv("SUPERCOMBO_INPUT_WARP_CY");
 
     setenv("SUPERCOMBO_CALIB_PITCH_DEG", "1.25", 1);
     setenv("SUPERCOMBO_CALIB_YAW_DEG", "-0.75", 1);
@@ -526,10 +517,6 @@ void test_app_config_env_feedback()
     unsetenv("SUPERCOMBO_CALIB_ROLL_DEG");
     unsetenv("SUPERCOMBO_CALIB_PITCH_DEG");
     unsetenv("SUPERCOMBO_CALIB_YAW_DEG");
-    unsetenv("SUPERCOMBO_INPUT_WARP_ROLL_DEG");
-    unsetenv("SUPERCOMBO_INPUT_WARP_PITCH_DEG");
-    unsetenv("SUPERCOMBO_INPUT_WARP_YAW_DEG");
-    unsetenv("SUPERCOMBO_INPUT_WARP_FX");
 
     std::printf("app_config: input-warp/manual calibration env precedence OK\n");
 }

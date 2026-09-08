@@ -136,7 +136,7 @@ batch는 현재 버리도록 되어 있으나, 연속 오류와 물리적 discon
 대상:
 
 - `src/k230_ipc.h`
-- `src/common_utils.cc`
+- `src/common_utils.h`
 - `src/k230_pandad.cc`
 - `src/k230_controlsd.cc`
 - `CMakeLists.txt`

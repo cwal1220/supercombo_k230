@@ -25,8 +25,6 @@ created.
 The source intrinsics are scaled from the measured `1920x1080` K230 camera
 matrix in `assets/calibration/intrinsics_20260822.json`, so the default
 `1280x720` path uses `fx=1055.60`, `fy=1055.84`, `cx=636.63`, and `cy=363.45`.
-`SUPERCOMBO_INPUT_WARP_FX/FY/CX/CY` can override these values for a separately
-measured camera pipeline.
 
 That matrix comes from a 23-view checkerboard solve (0.36 px reprojection RMS,
 bootstrap sigma 4.4 px on `fx`). It replaces an earlier matrix whose `fx/fy`
