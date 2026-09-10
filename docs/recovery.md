@@ -21,14 +21,17 @@ tracked in this repository; see `tools/model/` for the scripts and
 
 - `src/`: C++ app, camera input, YUV6 preprocessing, nncase runtime wrapper, overlay drawing
 - `include/`: K230 display/v4l2/mmz headers copied from the K230 Linux SDK
-- `deps/`: nncase K230 runtime headers and static libraries
+- `deps/`: not tracked. `scripts/fetch_nncase_runtime.sh` recreates it
 - `CMakeLists.txt`: board-native and cross build recipe
 - `k230_manager.py`: minimal openpilot-style process supervisor
-- `scripts/fetch_nncase_runtime.sh`: recreates `deps/` from Kendryte nncase v2.11.0 release
+- `scripts/fetch_nncase_runtime.sh`: recreates `deps/` from the Kendryte nncase
+  v2.11.0 release plus gsl-lite 0.37.0, both pinned by SHA256
 
-Important files inside `deps/`:
+Files the build requires inside `deps/`, all produced by that script:
 
 - `deps/include/nncase/runtime/interpreter.h`
+- `deps/include/gsl/gsl-lite.hpp` (27 nncase headers include it; the nncase
+  tarball does not ship it)
 - `deps/lib/libNncase.Runtime.Native.a`
 - `deps/lib/libnncase.rt_modules.k230.a`
 - `deps/lib/libfunctional_k230.a`

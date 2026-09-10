@@ -3,7 +3,9 @@
 /build/
 /build-*/
 /cmake-build-*/
-deps/k230_sysroot/
+# nncase 런타임과 gsl-lite는 scripts/fetch_nncase_runtime.sh가 버전과 SHA256을
+# 고정해 받는다. 추적하면 스크립트의 rm -rf와 출처가 둘로 갈린다.
+/deps/
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake

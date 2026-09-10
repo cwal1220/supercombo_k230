@@ -43,7 +43,8 @@ k230/
 └── tools/target-pkg-config
 ```
 
-The nncase runtime libraries are tracked under `supercombo_k230/deps/`.
+The nncase runtime libraries and gsl-lite live under `supercombo_k230/deps/`,
+which is not tracked; run `scripts/fetch_nncase_runtime.sh` to create it.
 
 If the workspace is elsewhere, set `K230_WORKSPACE_DIR` or override the
 individual `K230_*` variables used by the configuration script.
