@@ -44,6 +44,120 @@ cmake --build /tmp/supercombo_k230_verify \
 /tmp/supercombo_k230_verify/bin/bench_input_warp_overhead 3000
 ```
 
+## Lateral MPC solver
+
+`src/lateral_mpc.*` replaces the prebuilt riscv64 acados/HPIPM runtime that used
+to live in `deps/acados`. It solves the same OCP as openpilot 0.8.16's
+`lateral_mpc_lib`. The problem was recovered from the generated solver's own
+`.rodata` and cross-checked against openpilot's `lat_mpc.py`: T_IDXS shooting
+nodes (16 intervals, 2.5 s), `idxbx=[2,3]` bounded at radians(90)/radians(50),
+NONLINEAR_LS residuals `(y, (v+5)*psi, (v+5)*4*rate)`, ERK4 with one step per
+interval, Gauss-Newton Hessian, and per-stage cost scaling by the time step.
+
+Two deliberate reductions:
+
+- The `x_ego` state is dropped. It appears in no cost term, no constraint, and no
+  other state's dynamics, so the solver state is `(y, psi, curvature)`.
+- One Gauss-Newton SQP iteration per call, with the LQ subproblem solved exactly
+  by a backward Riccati recursion. This is the same real-time-iteration structure
+  as acados' `SQP_RTI` with `qp_solver_iter_max = 1`, but the subproblem is
+  solved to optimality instead of by a single interior-point step.
+
+### Optimality (host, no second solver)
+
+`benchmarks/check_lateral_mpc.cc` reimplements the dynamics and cost
+independently and checks the warm-started fixed point across five scenarios
+(standstill through 27 m/s): multiple-shooting defects stay below `1e-15` and the
+central-difference gradient of the true objective below `1e-9` relative to the
+cost. A wrong sensitivity in the RK4 forward VDE fails this check, since the
+iteration would then settle where the linearized KKT holds but the true gradient
+does not.
+
+### A/B against the acados runtime (board, 2026-09-10)
+
+400 cycles per speed with identical references, both solvers warm-started from
+reset. `lockstep` feeds both the same initial curvature; `free` lets each feed
+back its own.
+
+| v (m/s) | curvature, all nodes | curvature_rate | curvature[0], free |
+| --- | --- | --- | --- |
+| 0 | 0 | 0 | 0 |
+| 3 | 1.4e-5 | 2.7e-5 | 1.3e-6 |
+| 12 | 1.3e-6 | 1.1e-6 | 1.3e-8 |
+| 27 | 2.3e-8 | 4.4e-8 | 5.5e-9 |
+
+Solve time on the board (C908, single core, with `k230_modeld` running, so the
+minimum is the meaningful figure):
+
+| Solver | min | p50 | p90 |
+| --- | --- | --- | --- |
+| acados | 964 us | 1368 us | 3246 us |
+| `LateralMpc` | 33.5 us | 33.6 us | 33.8 us |
+
+The millisecond tail is what mattered on a one-core board: 3.2 ms of the 50 ms
+control cycle could disappear into a single solve.
+
+### End-to-end replay
+
+`planner_replay` over three segments of route `2026-09-07--02-21-46-703`
+(3545 frames, 1217 of them at standstill, 0-76 kph). Both runs are board
+binaries, so nothing here is host/target float noise; the host build produces a
+byte-identical CSV to the board build.
+
+| Segment | commanded curvature, max diff | RMS | signal range | frames differing |
+| --- | --- | --- | --- | --- |
+| 000 | 2.0e-6 | 1.8e-7 | 2.7e-3 | 27/1183 |
+| 007 | 1.4e-5 | 6.3e-7 | 6.2e-3 | 50/1182 |
+| 008 | 4.0e-6 | 2.3e-7 | 1.3e-2 | 34/1180 |
+
+`mpcSolutionValid` and laneless mode never differ. The largest differences are at
+low speed, matching the synthetic A/B; 1.4e-5 1/m is about 0.002 degrees of front
+wheel angle, well below the torque command quantum.
+
+To re-run the A/B, restore `deps/acados`, `benchmarks/acados_lateral_mpc.h`, and
+`benchmarks/check_lateral_mpc_vs_acados.cc` from the commit that removed them.
+
+### Rejected: more than one SQP iteration per cycle
+
+Since a solve costs 33.5 us instead of 964 us, running 2-3 SQP iterations per
+cycle looked like free tracking accuracy. It buys nothing, because the NLS
+residuals are *linear* in the state and control at a fixed speed, so the
+Gauss-Newton Hessian is exact and the only nonlinearity in the whole problem is
+`sin/cos(psi)` at `|psi| < 0.05 rad`. One Newton step lands on the optimum.
+
+Measured against the same frame solved to convergence, over a 200-cycle 20 Hz
+sequence with a sinusoidal reference plus a 3.5 m lane-change step. The
+controller consumes only `curvatures[0]` (which the initial-state equality fixes
+to the passed value, so it is identical by construction) and `psis` interpolated
+at the actuator delay, so the gap is reported as the equivalent curvature error
+`dpsi / (v * delay)`:
+
+| v | 1 iteration | 2 | 3 |
+| --- | --- | --- | --- |
+| 3 m/s | 5.3e-6 | 6.8e-8 | 9.4e-10 |
+| 12 m/s | 2.5e-6 | 1.3e-8 | 8.6e-11 |
+| 27 m/s | 4.5e-7 | 7.2e-10 | 1.3e-12 |
+
+Cold start immediately after `reset()` is the same order (2.8e-6 at 3 m/s), so
+the failure-recovery path needs no extra iterations either. For scale, one
+iteration's residual suboptimality is ~40x smaller than the acados-vs-this-solver
+difference already accepted on real logs, and ~2500x smaller than the command
+range. `curvature_rates` are logged but never consumed by the controller.
+
+### Rejected: per-node speed profile
+
+0.9.4 passes the model's predicted speed profile per shooting node. This was
+implemented and measured, then reverted. The profile itself is real (in a creep
+window the model correctly predicts 3.4 -> 1.4 m/s over the horizon while the
+plan only reaches 7.9 m, so the flat-speed assumption was clamping references to
+the last knot), but the only source available without a recording-format change
+is differentiating the plan's arc length, and that is unstable frame to frame at
+low speed: the estimated speed jumped 3.7 -> 1.5 m/s between two frames 0.1 s
+apart. Command jerk rose 1.3-1.8x on the two standstill-heavy segments, and a
+physical acceleration-band clamp (+/-2.5 m/s^2 * t) only recovered half of it.
+Revisit with the model's velocity head (plan knot floats 3-5, currently unparsed),
+which needs `K230ModelState` to grow and the recording version to be bumped.
+
 ## Host self-tests
 
 The same benchmark build produces self-checking binaries that need no board:
@@ -56,6 +170,7 @@ The same benchmark build produces self-checking binaries that need no board:
 | `check_model_output_parser` | supercombo raw-output layout |
 | `check_k230_can_queue` | shared-memory CAN queue |
 | `check_panda_can_codec` | panda USB CAN packing/unpacking |
+| `check_lateral_mpc` | lateral MPC optimality and solve time |
 
 See [Diagnostics](diagnostics.md) for the build command and additional
 on-board tools.

@@ -187,37 +187,6 @@ if(SUPERCOMBO_BUILD_RUNTIME)
   configure_k230_target(k230_recordd k230_common)
 
   if(SUPERCOMBO_BUILD_PANDA)
-    set(ACADOS_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/acados/include")
-    set(ACADOS_SOLVER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/acados/lateral_solver")
-    set(ACADOS_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/deps/acados/riscv64/lib")
-    set(ACADOS_RUNTIME_LIBS
-      "${ACADOS_SOLVER_DIR}/libacados_ocp_solver_lat.so"
-      "${ACADOS_LIB_DIR}/libacados.so"
-      "${ACADOS_LIB_DIR}/libblasfeo.so"
-      "${ACADOS_LIB_DIR}/libhpipm.so"
-      "${ACADOS_LIB_DIR}/libqpOASES_e.so.3.1"
-    )
-    foreach(required_lib IN LISTS ACADOS_RUNTIME_LIBS)
-      if(NOT EXISTS "${required_lib}")
-        message(FATAL_ERROR "Missing Acados lateral MPC dependency: ${required_lib}")
-      endif()
-    endforeach()
-
-    # Acados 횡방향 MPC를 쓰는 실행 파일: 헤더, $ORIGIN/lib rpath, 런타임 .so.
-    function(configure_acados_target target)
-      target_include_directories(${target} SYSTEM PRIVATE
-        "${ACADOS_INCLUDE_DIR}"
-        "${ACADOS_INCLUDE_DIR}/blasfeo/include"
-        "${ACADOS_INCLUDE_DIR}/hpipm/include"
-        "${ACADOS_SOLVER_DIR}"
-      )
-      set_target_properties(${target} PROPERTIES
-        BUILD_RPATH "\$ORIGIN/lib"
-        INSTALL_RPATH "\$ORIGIN/lib"
-      )
-      configure_k230_target(${target} k230_common control_core ${ACADOS_RUNTIME_LIBS})
-    endfunction()
-
     add_executable(k230_pandad
       src/k230_pandad.cc
       src/panda_client.cc
@@ -227,15 +196,10 @@ if(SUPERCOMBO_BUILD_RUNTIME)
 
     add_executable(k230_controlsd
       src/k230_controlsd.cc
+      src/lateral_mpc.cc
       src/openpilot_lateral_planner.cc
     )
-    configure_acados_target(k230_controlsd)
-
-    add_executable(planner_replay
-      benchmarks/planner_replay.cc
-      src/openpilot_lateral_planner.cc
-    )
-    configure_acados_target(planner_replay)
+    configure_k230_target(k230_controlsd k230_common control_core)
   endif()
 endif()
 
@@ -267,6 +231,18 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
 
   add_host_tool(check_adaptive_cruise benchmarks/check_adaptive_cruise.cc)
   target_link_libraries(check_adaptive_cruise PRIVATE control_core)
+
+  add_host_tool(check_lateral_mpc
+    benchmarks/check_lateral_mpc.cc
+    src/lateral_mpc.cc
+  )
+
+  add_host_tool(planner_replay
+    benchmarks/planner_replay.cc
+    src/lateral_mpc.cc
+    src/openpilot_lateral_planner.cc
+  )
+  target_link_libraries(planner_replay PRIVATE k230_common control_core)
 
   add_host_tool(bench_input_warp_overhead
     benchmarks/bench_input_warp_overhead.cc
@@ -322,7 +298,6 @@ if(SUPERCOMBO_BUILD_RUNTIME)
   )
   if(SUPERCOMBO_BUILD_PANDA)
     install(TARGETS k230_pandad k230_controlsd RUNTIME DESTINATION .)
-    install(FILES ${ACADOS_RUNTIME_LIBS} DESTINATION lib)
   endif()
   install(PROGRAMS scripts/k230_manager.py scripts/param_server.py
     scripts/k230_display_control.py DESTINATION .)

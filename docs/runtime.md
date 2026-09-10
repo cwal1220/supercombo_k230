@@ -108,7 +108,7 @@ minimal passive overlay subscriber.
 ### `k230_controlsd` (optional K7 controller)
 
 - enabled with `K230_ENABLE_CONTROL=1`
-- runs the openpilot-compatible lane planner and Acados lateral MPC in a worker,
+- runs the openpilot-compatible lane planner and lateral MPC in a worker,
   with the KIA K7 YG HEV torque controller and `LKAS11`/`CLU11`/`MDPS12` packer
   at 100 Hz
 - consumes model path, lane, road-edge, and vehicle-state IPC
@@ -130,5 +130,5 @@ ring and publishes its selected frame metadata to `k230_recordd`. This keeps the
 split runtime close to openpilot's process boundaries without paying the cost of
 Cap'n Proto/cereal in v1.
 
-The lateral plan has a single producer: the Acados MPC inside `k230_controlsd`.
+The lateral plan has a single producer: the lateral MPC inside `k230_controlsd`.
 `modelState` carries perception output only.

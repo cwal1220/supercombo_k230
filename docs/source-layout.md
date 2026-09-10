@@ -33,8 +33,12 @@
 
 - `src/openpilot_lateral_planner.*`
   - applies openpilot lane probability/width logic, lane-change state, and the
-    generated Acados lateral MPC solver to produce curvature targets. This is the
+    lateral MPC in `src/lateral_mpc.*` to produce curvature targets. This is the
     only producer of `LateralTarget`.
+- `src/lateral_mpc.*`
+  - the lateral MPC itself: one Gauss-Newton SQP iteration per call over the
+    openpilot 0.8.16 OCP, solved by a backward Riccati recursion. No external
+    solver. See [Verification](verification.md#lateral-mpc-solver).
 - `src/lateral_target.h`
   - declares `LateralTarget`, the planner-to-controller interface.
 - `src/lateral_controller.*`, `src/openpilot_torque_controller.*`,

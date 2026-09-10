@@ -8,8 +8,7 @@
   generated CAN batches to the ordered `/dev/shm/k230_sendcan` ring queue.
 - `k230_pandad` is the final TX gate. `K230_PANDA_TX=0` is the default and
   prevents every generated frame from reaching USB.
-- No openpilot checkout, Python DBC extension, or acados module is required on
-  the K230 board.
+- No openpilot checkout or Python DBC extension is required on the K230 board.
 
 The CAN queues have 64 slots, reject new batches instead of overwriting older
 ones when full, and are drained in sequence order. Producer startup resets its

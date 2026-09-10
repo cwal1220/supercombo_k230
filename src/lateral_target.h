@@ -1,7 +1,7 @@
 #ifndef LATERAL_TARGET_H
 #define LATERAL_TARGET_H
 
-/* OpenpilotLateralPlanner(acados MPC)가 만들고 LateralController가 소비하는
+/* OpenpilotLateralPlanner(횡방향 MPC)가 만들고 LateralController가 소비하는
  * 횡방향 계획. 생산자는 controlsd의 MPC 하나뿐이다. */
 
 #include <cstdint>

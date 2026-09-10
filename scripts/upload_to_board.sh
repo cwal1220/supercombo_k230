@@ -55,17 +55,6 @@ done
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "${ui_assets[@]}" "$BOARD:$DEST/.upload/assets/ui/"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
   "rm -f '$DEST/assets/ui/'*.png; for source in '$DEST/.upload/assets/ui/'*; do mv \"\$source\" '$DEST/assets/ui/'; done"
-if [ -x "${BIN_DIR}/k230_controlsd" ]; then
-  "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/lib' '$DEST/.upload/lib'"
-  "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \
-    deps/acados/lateral_solver/libacados_ocp_solver_lat.so \
-    deps/acados/riscv64/lib/libacados.so \
-    deps/acados/riscv64/lib/libblasfeo.so \
-    deps/acados/riscv64/lib/libhpipm.so \
-    deps/acados/riscv64/lib/libqpOASES_e.so.3.1 \
-    "$BOARD:$DEST/.upload/lib/"
-  "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "for source in '$DEST/.upload/lib/'*; do mv \"\$source\" '$DEST/lib/'; done"
-fi
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "$model" "$BOARD:$DEST/.upload/supercombo.kmodel"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mv '$DEST/.upload/supercombo.kmodel' '$DEST/model/supercombo.kmodel'"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \

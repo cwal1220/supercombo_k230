@@ -36,8 +36,8 @@ k230_camerad ──► k230_modeld ──► k230_controlsd ──► k230_panda
                       └────► k230_overlayd (HUD)   k230_recordd (logging)
 ```
 
-Perception comes from the supercombo model. Lateral planning uses the
-openpilot lane planner with a generated Acados MPC, and the K7 torque controller
+Perception comes from the supercombo model. Lateral planning uses the openpilot
+lane planner with an in-tree lateral MPC solver, and the K7 torque controller
 packs `LKAS11`/`CLU11`/`MDPS12` at 100 Hz. Longitudinal control is not
 implemented: the vision lead is used only to nudge the car's stock fixed-speed
 cruise setpoint through simulated button presses.

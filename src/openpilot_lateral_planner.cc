@@ -2,6 +2,7 @@
 
 #include "driving_params.h"
 #include "k230_ipc.h"
+#include "lateral_mpc.h"
 #include "steering_params.h"
 #include "vehicle_can.h"
 
@@ -11,15 +12,8 @@
 #include <limits>
 #include <vector>
 
-extern "C" {
-#include "acados_c/ocp_nlp_interface.h"
-#include "acados_solver_lat.h"
-}
-
 namespace {
 
-constexpr int kMpcN = LAT_N;
-constexpr int kMpcNodes = LAT_N + 1;
 constexpr double kDtModel = 0.05;
 // plan 끝점이 이보다 가까우면 plan이 붕괴한 것(정지: 실측 5.6 m, 주행: 60 m+).
 constexpr double kMinPlanReachM = 10.0;
@@ -195,107 +189,6 @@ private:
   double path_offset_m_ = 0.0;
 };
 
-class AcadosLateralMpc {
-public:
-  AcadosLateralMpc() : capsule_(lat_acados_create_capsule()) {
-    lat_acados_create(capsule_);
-    reset({0.0, 0.0, 0.0, 0.0});
-  }
-
-  ~AcadosLateralMpc() {
-    lat_acados_free(capsule_);
-    lat_acados_free_capsule(capsule_);
-  }
-
-  void reset(const std::array<double, LAT_NX> &x0) {
-    x_sol_ = {};
-    u_sol_ = {};
-    const std::array<double, LAT_NY> yref{};
-    const std::array<double, LAT_NP> params{};
-    for (int i = 0; i < kMpcN; ++i)
-      ocp_nlp_cost_model_set(capsule_->nlp_config, capsule_->nlp_dims,
-                             capsule_->nlp_in, i, "yref",
-                             const_cast<double *>(yref.data()));
-    const std::array<double, 2> terminal_yref{};
-    ocp_nlp_cost_model_set(capsule_->nlp_config, capsule_->nlp_dims,
-                           capsule_->nlp_in, kMpcN, "yref",
-                           const_cast<double *>(terminal_yref.data()));
-    for (int i = 0; i <= kMpcN; ++i) {
-      std::array<double, LAT_NX> zero{};
-      ocp_nlp_out_set(capsule_->nlp_config, capsule_->nlp_dims, capsule_->nlp_out,
-                      i, "x", zero.data());
-      lat_acados_update_params(capsule_, i, const_cast<double *>(params.data()), LAT_NP);
-    }
-    set_initial_state(x0);
-    lat_acados_solve(capsule_);
-  }
-
-  void run(const std::array<double, LAT_NX> &x0,
-           const std::array<double, LAT_NP> &params,
-           const std::array<double, kMpcNodes> &y,
-           const std::array<double, kMpcNodes> &heading,
-           double heading_weight) {
-    const double weights[9] = {
-        1.0, 0.0, 0.0,
-        0.0, heading_weight, 0.0,
-        0.0, 0.0, 1.0,
-    };
-    const double terminal_weights[4] = {0.15, 0.0, 0.0, 0.15 * heading_weight};
-    for (int i = 0; i < kMpcN; ++i)
-      ocp_nlp_cost_model_set(capsule_->nlp_config, capsule_->nlp_dims,
-                             capsule_->nlp_in, i, "W", const_cast<double *>(weights));
-    ocp_nlp_cost_model_set(capsule_->nlp_config, capsule_->nlp_dims,
-                           capsule_->nlp_in, kMpcN, "W",
-                           const_cast<double *>(terminal_weights));
-
-    set_initial_state(x0);
-    for (int i = 0; i <= kMpcN; ++i) {
-      const double velocity_cost = params[0] + 5.0;
-      if (i < kMpcN) {
-        std::array<double, LAT_NY> yref = {y[i], heading[i] * velocity_cost, 0.0};
-        ocp_nlp_cost_model_set(capsule_->nlp_config, capsule_->nlp_dims,
-                               capsule_->nlp_in, i, "yref", yref.data());
-      } else {
-        std::array<double, 2> yref = {y[i], heading[i] * velocity_cost};
-        ocp_nlp_cost_model_set(capsule_->nlp_config, capsule_->nlp_dims,
-                               capsule_->nlp_in, i, "yref", yref.data());
-      }
-      lat_acados_update_params(capsule_, i, const_cast<double *>(params.data()), LAT_NP);
-    }
-
-    status_ = lat_acados_solve(capsule_);
-    for (int i = 0; i <= kMpcN; ++i)
-      ocp_nlp_out_get(capsule_->nlp_config, capsule_->nlp_dims, capsule_->nlp_out,
-                      i, "x", x_sol_[i].data());
-    for (int i = 0; i < kMpcN; ++i)
-      ocp_nlp_out_get(capsule_->nlp_config, capsule_->nlp_dims, capsule_->nlp_out,
-                      i, "u", u_sol_[i].data());
-    ocp_nlp_eval_cost(capsule_->nlp_solver, capsule_->nlp_in, capsule_->nlp_out);
-    ocp_nlp_get(capsule_->nlp_config, capsule_->nlp_solver, "cost_value", &cost_);
-  }
-
-  const auto &states() const { return x_sol_; }
-  const auto &controls() const { return u_sol_; }
-  int status() const { return status_; }
-  double cost() const { return cost_; }
-
-private:
-  void set_initial_state(const std::array<double, LAT_NX> &x0) {
-    ocp_nlp_constraints_model_set(capsule_->nlp_config, capsule_->nlp_dims,
-                                  capsule_->nlp_in, 0, "lbx",
-                                  const_cast<double *>(x0.data()));
-    ocp_nlp_constraints_model_set(capsule_->nlp_config, capsule_->nlp_dims,
-                                  capsule_->nlp_in, 0, "ubx",
-                                  const_cast<double *>(x0.data()));
-  }
-
-  lat_solver_capsule *capsule_;
-  std::array<std::array<double, LAT_NX>, kMpcNodes> x_sol_{};
-  std::array<std::array<double, LAT_NU>, kMpcN> u_sol_{};
-  int status_ = 0;
-  double cost_ = 0.0;
-};
-
 }  // namespace
 
 struct OpenpilotLateralPlanner::Impl {
@@ -392,9 +285,9 @@ struct OpenpilotLateralPlanner::Impl {
     /* MPC 노드 시각의 목표를 차속 x 시간 거리로 보간한다. knot을 직접
      * 인덱싱하면 모델 knot의 프레임 간 노이즈가 그대로 들어가 des가 2~3배
      * 떨리고 토크 슬루 리미터가 요구 토크의 절반을 잘라낸다(0.8.x 재생 실측). */
-    std::array<double, kMpcNodes> y_pts{};
-    std::array<double, kMpcNodes> heading_pts{};
-    for (int i = 0; i < kMpcNodes; ++i) {
+    std::array<double, kLatMpcNodes> y_pts{};
+    std::array<double, kLatMpcNodes> heading_pts{};
+    for (int i = 0; i < kLatMpcNodes; ++i) {
       const double query = std::max(0.0f, v_ego) * path_t[i];
       y_pts[i] = interp(query, distance.data(), path_y.data(), distance.size());
       heading_pts[i] = interp(query, distance.data(), path_heading.data(), distance.size());
@@ -408,19 +301,21 @@ struct OpenpilotLateralPlanner::Impl {
     const double heading_weight =
         v_ego <= 5.0f ? 1.0 : v_ego >= 10.0f ? 0.15
                                              : 1.0 - (v_ego - 5.0) * 0.17;
-    mpc.run(x0, {std::max(0.0f, v_ego), lateral_factor}, y_pts, heading_pts,
-            heading_weight);
-    bool has_nan = false;
-    for (const auto &state : mpc.states()) has_nan = has_nan || !std::isfinite(state[3]);
-    if (has_nan || mpc.status() != 0) {
-      mpc.reset({0.0, 0.0, 0.0, 0.0});
-      x0 = {0.0, 0.0, 0.0, measured_curvature};
+    LateralMpcWeights weights;
+    weights.heading = heading_weight;
+    mpc.run(initial_curvature, std::max(0.0f, v_ego), lateral_factor, y_pts,
+            heading_pts, weights);
+    const bool solver_failed = mpc.status() != 0;
+    if (solver_failed) {
+      mpc.reset();
+      initial_curvature = measured_curvature;
     } else {
-      std::array<double, kMpcNodes> curvatures{};
-      for (int i = 0; i < kMpcNodes; ++i) curvatures[i] = mpc.states()[i][3];
-      x0[3] = interp(kDtModel, path_t.data(), curvatures.data(), curvatures.size());
+      std::array<double, kLatMpcNodes> curvatures{};
+      for (int i = 0; i < kLatMpcNodes; ++i) curvatures[i] = mpc.nodes()[i].curvature;
+      initial_curvature =
+          interp(kDtModel, path_t.data(), curvatures.data(), curvatures.size());
     }
-    invalid_count = (mpc.cost() > 20000.0 || has_nan) ? invalid_count + 1 : 0;
+    invalid_count = (mpc.cost() > 20000.0 || solver_failed) ? invalid_count + 1 : 0;
 
     target.valid = true;
     target.capture_timestamp_ns = model.capture_timestamp_ns;
@@ -437,15 +332,15 @@ struct OpenpilotLateralPlanner::Impl {
     target.lane_d_prob = static_cast<float>(lane_planner.d_prob());
     target.lookahead_x_m = static_cast<float>(std::max(0.0f, v_ego) * path_t[1]);
     target.target_y_m = static_cast<float>(y_pts[1]);
-    target.heading_rad = static_cast<float>(mpc.states()[0][2]);
-    target.curvature = static_cast<float>(mpc.states()[0][3]);
+    target.heading_rad = static_cast<float>(mpc.nodes()[0].psi);
+    target.curvature = static_cast<float>(mpc.nodes()[0].curvature);
     target.desire = desire;
     for (int i = 0; i < kLateralControlN; ++i) {
       target.d_path_points[i] = static_cast<float>(y_pts[i]);
-      target.psis[i] = static_cast<float>(mpc.states()[i][2]);
-      target.curvatures[i] = static_cast<float>(mpc.states()[i][3]);
-      target.curvature_rates[i] = i < kMpcN
-          ? static_cast<float>(mpc.controls()[i][0]) : 0.0f;
+      target.psis[i] = static_cast<float>(mpc.nodes()[i].psi);
+      target.curvatures[i] = static_cast<float>(mpc.nodes()[i].curvature);
+      target.curvature_rates[i] = i < kLatMpcN
+          ? static_cast<float>(mpc.rates()[i]) : 0.0f;
     }
     return target;
   }
@@ -527,8 +422,9 @@ struct OpenpilotLateralPlanner::Impl {
   }
 
   LanePlanner lane_planner;
-  AcadosLateralMpc mpc;
-  std::array<double, LAT_NX> x0{};
+  LateralMpc mpc;
+  // 다음 사이클의 초기 curvature. 나머지 초기 상태는 자차 기준 0이다.
+  double initial_curvature = 0.0;
   double factor1 = 0.0;
   double factor2 = 0.0;
   int steering_pressed_threshold = 150;

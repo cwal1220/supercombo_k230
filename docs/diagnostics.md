@@ -173,6 +173,23 @@ against known results: straight-line bank reproduces -0.178 on the 8-28 route
 (logged: -0.176), and the total-least-squares torque fit over the 8-19 route
 returns `latAccelFactor` 4.00, the value that route was fit to.
 
+## Lateral planner replay
+
+`planner_replay` re-runs `OpenpilotLateralPlanner` over a recording and writes
+what the planner asked for, one row per `ModelState`. It builds on the host now
+that the MPC has no riscv64 dependency, so a recorded route can be re-planned
+without the board:
+
+```sh
+cmake --build build/host-checks --target planner_replay -j2
+./build/host-checks/bin/planner_replay out.csv <route>/events/*.bin
+```
+
+Columns include the recorded and re-planned desired curvature, the MPC's own
+`target_curv`/`heading0`, the lane observations behind the plan, and the
+`laneless`/`mpc_valid` flags. Comparing two builds' CSVs over the same route is
+the check used for planner and solver changes.
+
 ## Related documents
 
 - [Recovery procedures](recovery.md)
