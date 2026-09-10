@@ -115,7 +115,8 @@ void LateralMpc::run(double curvature, double v_ego, double rotation_radius,
     // 잔차 스케일을 흡수한 상태/입력 가중치.
     const double w_y = weights.path;
     const double w_psi = weights.heading * speed * speed;
-    const double w_u = weights.rate * (kRateScale * speed) * (kRateScale * speed);
+    const double w_u = weights.rate * (kRateScale * speed) * (kRateScale * speed) +
+                       weights.steering_rate;
 
     Mat a[kLatMpcN];
     double b[kLatMpcN][kNx];

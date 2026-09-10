@@ -117,6 +117,42 @@ wheel angle, well below the torque command quantum.
 To re-run the A/B, restore `deps/acados`, `benchmarks/acados_lateral_mpc.h`, and
 `benchmarks/check_lateral_mpc_vs_acados.cc` from the commit that removed them.
 
+### Steering-rate cost term (from 0.9.4)
+
+openpilot 0.9.4's lat MPC splits the input cost into lateral-jerk and
+steering-rate terms. Its steering-rate residual, `psi_accel / (v_ego + 0.1)`, is
+the same quantity as this solver's `curvature_rate`, so the shipped weight of
+700 transplants directly. All three of 0.9.4's extra terms were implemented and
+swept over the three replay segments; only this one earned its place:
+
+| Term | Effect at a sane weight | Verdict |
+| --- | --- | --- |
+| `steering_rate` (700) | command jerk -24.6% overall, -27.1% below 20 kph | kept |
+| `lateral_jerk` (0.04) | -2.8%; it is the existing `rate` term with a different speed scaling | dropped as redundant |
+| `lateral_accel` (0.02) | -0.0%; at a weight large enough to matter it distorts highway cornering | dropped |
+
+Command jerk (RMS of `d(des)/dt` from `planner_replay`) with `steering_rate` at
+700, by speed band:
+
+| Segment | 0-5 kph | 5-20 | 20-50 | 50+ |
+| --- | --- | --- | --- | --- |
+| 000 | -42% | **+23%** | -14% | -3% |
+| 007 | -61% | -40% | -8% | -4% |
+| 008 | -46% | -31% | -13% | -3% |
+
+Fourteen of the fifteen bands improve. The exception is a ~5 s creep window in
+segment 000 (103 frames, 5-20 kph) where the model plan is collapsed to 8-18 m
+and its references jump frame to frame; there the rate penalty makes the solver
+lag a jumping reference and the command gets rougher. The effect scales
+monotonically with the weight (+8.8% at 200, +23% at 700, +36% at 2000), so it is
+a dial rather than a threshold: halving to 400 halves that regression and keeps
+most of the benefit. `mpcSolutionValid` and laneless mode never differ, and the
+command deviation from the pre-term baseline stays under 4.1e-3 1/m, confined to
+below 20 kph (7e-5 above 50 kph).
+
+Solve time is unchanged at 33.5 us on the board; the term is one extra weight in
+the input Hessian.
+
 ### Rejected: more than one SQP iteration per cycle
 
 Since a solve costs 33.5 us instead of 964 us, running 2-3 SQP iterations per

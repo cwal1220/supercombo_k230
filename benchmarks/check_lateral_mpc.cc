@@ -88,7 +88,8 @@ double objective(const std::array<double, kLatMpcN> &u, const Scenario &s,
         double stage = w.path * e_y * e_y + w.heading * e_psi * e_psi;
         if (!terminal) {
             const double rate = u[i];
-            stage += w.rate * (4.0 * speed * rate) * (4.0 * speed * rate);
+            stage += w.rate * (4.0 * speed * rate) * (4.0 * speed * rate) +
+                     w.steering_rate * rate * rate;
         }
         total += 0.5 * scale * stage;
         if (!terminal) {
@@ -102,8 +103,9 @@ double objective(const std::array<double, kLatMpcN> &u, const Scenario &s,
 }
 
 void check_scenario(const Scenario &s) {
-    std::printf("\n[%s] v=%.1f m/s rr=%.2f k0=%.4f hw=%.2f\n", s.name, s.v_ego,
-                s.rotation_radius, s.curvature0, s.weights.heading);
+    std::printf("\n[%s] v=%.1f m/s rr=%.2f k0=%.4f hw=%.2f steer=%.4g\n", s.name,
+                s.v_ego, s.rotation_radius, s.curvature0, s.weights.heading,
+                s.weights.steering_rate);
     const Reference ref = build_reference(s);
 
     LateralMpc mpc;
@@ -189,6 +191,11 @@ int main() {
     LateralMpcWeights slow;
     LateralMpcWeights fast;
     fast.heading = 0.15;
+    // steering_rate를 끈 설정. 0.8.16 원본 코스트와 같다.
+    LateralMpcWeights bare = fast;
+    bare.steering_rate = 0.0;
+    LateralMpcWeights bare_slow = slow;
+    bare_slow.steering_rate = 0.0;
 
     const Scenario scenarios[] = {
         {"정지", 0.0, 0.0, 0.0, 0.0, slow},
@@ -196,12 +203,21 @@ int main() {
         {"시내 커브", 12.0, 0.5, 0.02, 1.0, fast},
         {"고속 차선변경", 27.0, 0.6, -0.005, 3.5, fast},
         {"급곡률 초기값", 20.0, 0.5, 0.25, 0.0, fast},
+        {"steering_rate 없음(저속)", 3.0, 0.4, 0.0, 0.2, bare_slow},
+        {"steering_rate 없음(고속)", 20.0, 0.5, 0.0, 2.0, bare},
+        {"steering_rate 2000", 3.0, 0.4, 0.0, 0.3, [&] {
+            LateralMpcWeights w = slow;
+            w.steering_rate = 2000.0;
+            return w;
+        }()},
     };
     for (const auto &s : scenarios) check_scenario(s);
 
     std::printf("\nsolve 1회 (2000회)\n");
     Scenario base{"타이밍", 20.0, 0.5, 0.01, 0.5, fast};
-    check_timing("solve", base);
+    Scenario without{"타이밍", 20.0, 0.5, 0.01, 0.5, bare};
+    check_timing("steering_rate 700", base);
+    check_timing("steering_rate 0", without);
 
     std::printf("\n%s\n", failures == 0 ? "전부 통과" : "실패 있음");
     return failures == 0 ? 0 : 1;
