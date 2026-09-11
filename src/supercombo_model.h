@@ -2,11 +2,13 @@
 #define SUPERCOMBO_MODEL_H
 
 #include "app_config.h"
+#include "gpu_warp.h"
 #include "model_input_transform.h"
 #include "model_output.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -25,10 +27,17 @@ public:
      * 불안정한 문제는 그 복사로 이미 해결된다. */
     bool run_frame_nv12(const uint8_t *nv12, int src_w, int src_h,
                         std::vector<float> &raw_output);
+    /* GPU 워프를 쓰는 경우 소비자가 프레임을 소스 평면에 직접 채울 수 있다.
+     * 그렇게 채웠으면 run_frame_preloaded로 실행한다. */
+    bool frame_planes(GpuWarp::Planes *planes);
+    bool run_frame_preloaded(int src_w, int src_h, std::vector<float> &raw_output);
     void set_input_calibration(const float rpy[3]);
     void set_desire(int desire);
 
 private:
+    bool run_frame(const uint8_t *nv12, int src_w, int src_h, std::vector<float> &raw_output);
+    void setup_gpu(const AppConfig &config);
+    bool prepare_images_gpu(const uint8_t *nv12);
     void bind_input_tensors();
     void bind_output_tensors();
     void run();
@@ -74,6 +83,10 @@ private:
     std::vector<float> desire_history_;    // 펄스 이력 (100 x 8)
     std::vector<float> feature_history_;   // 특징 버퍼 (99 x 128)
     std::vector<float> nav_features_;      // 미사용 입력 (0 고정)
+    std::unique_ptr<GpuWarp> gpu_;
+    /* GPU 타깃은 텐서 주소에 고정이라 매핑을 유지한다. */
+    std::vector<nncase::runtime::mapped_buffer> image_maps_;
+    bool gpu_projection_dirty_ = true;
 };
 
 #endif

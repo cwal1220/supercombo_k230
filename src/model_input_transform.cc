@@ -39,7 +39,18 @@ void matmul34(const float *a3, const float *b34, float *out34)
     }
 }
 
-void transform_scale_buffer(const float *in, float scale, float *out)
+bool scalar_warp_forced()
+{
+    static const bool forced = [] {
+        const char *value = std::getenv("SUPERCOMBO_WARP_SCALAR");
+        return value && value[0] != '\0' && std::strcmp(value, "0") != 0;
+    }();
+    return forced;
+}
+
+} // namespace
+
+void projection_scale_buffer(const float *in, float scale, float *out)
 {
     const float transform_out[9] = {
         1.0f / scale, 0.0f, 0.5f,
@@ -56,17 +67,6 @@ void transform_scale_buffer(const float *in, float scale, float *out)
     matmul3(in, transform_out, tmp);
     matmul3(transform_in, tmp, out);
 }
-
-bool scalar_warp_forced()
-{
-    static const bool forced = [] {
-        const char *value = std::getenv("SUPERCOMBO_WARP_SCALAR");
-        return value && value[0] != '\0' && std::strcmp(value, "0") != 0;
-    }();
-    return forced;
-}
-
-} // namespace
 
 void ModelInputTransform::SampleMap::resize(size_t size)
 {
@@ -247,7 +247,7 @@ void ModelInputTransform::rebuild_maps(int src_w, int src_h)
     float projection_y[9];
     float projection_uv[9];
     projection_matrix(projection_y);
-    transform_scale_buffer(projection_y, 0.5f, projection_uv);
+    projection_scale_buffer(projection_y, 0.5f, projection_uv);
 
     constexpr int x_offsets[4] = {0, 0, 1, 1};
     constexpr int y_offsets[4] = {0, 1, 0, 1};

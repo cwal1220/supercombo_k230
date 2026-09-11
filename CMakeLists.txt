@@ -117,7 +117,10 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     "${K230_SYSROOT_LIB_DIR}/libdrm.so.2"
   )
 
-  foreach(required_lib IN LISTS NNCASE_STATIC_LIBS K230_SHARED_LIBS)
+  # 모델 입력 워프용 2.5D GPU. modeld만 쓴다.
+  set(K230_VGLITE_LIB "${K230_SYSROOT_LIB_DIR}/libvg_lite.so")
+
+  foreach(required_lib IN LISTS NNCASE_STATIC_LIBS K230_SHARED_LIBS K230_VGLITE_LIB)
     if(NOT EXISTS "${required_lib}")
       message(FATAL_ERROR
         "Missing required library: ${required_lib}\n"
@@ -160,13 +163,15 @@ if(SUPERCOMBO_BUILD_RUNTIME)
   add_executable(k230_modeld
     src/k230_modeld.cc
     src/calibration_service.cc
+    src/gpu_warp.cc
     src/input_source.cc
     src/json_utils.cc
     src/model_input_transform.cc
     src/online_calibrator.cc
     src/supercombo_model.cc
   )
-  configure_k230_target(k230_modeld k230_common ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
+  configure_k230_target(k230_modeld k230_common ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS}
+    ${K230_VGLITE_LIB})
 
   add_executable(k230_overlayd
     src/k230_overlayd.cc

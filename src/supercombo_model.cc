@@ -1,5 +1,6 @@
 #include "supercombo_model.h"
 
+#include "common_utils.h"
 #include "scoped_timing.hpp"
 
 #include <algorithm>
@@ -180,6 +181,45 @@ SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const 
                  input_tensors_[0].datatype() == nncase::dt_uint8 ? "uint8" : "float32");
     if (!clear_image_input(0) || !clear_image_input(1))
         throw std::runtime_error("initialize image input history failed");
+
+    setup_gpu(config);
+}
+
+/* 워프를 VGLite로 넘긴다. 출력 6평면을 모델 입력 텐서의 뒤쪽 절반(현재 프레임)
+ * 물리주소에 직접 묶으므로 복사가 없다. 실패하면 CPU 경로를 그대로 쓴다. */
+void SupercomboModel::setup_gpu(const AppConfig &config)
+{
+    if (env_flag("SUPERCOMBO_WARP_CPU", false))
+        return;
+
+    gpu_ = GpuWarp::create(static_cast<int>(config.nv12_width),
+                           static_cast<int>(config.nv12_height));
+    if (!gpu_)
+        return;
+
+    for (size_t i = 0; i < 2; ++i) {
+        auto host_buffer = input_tensors_[i].impl()->to_host().unwrap()
+                               ->buffer().as_host().unwrap();
+        if (!host_buffer.has_physical_address()) {
+            std::fprintf(stderr, "gpu warp: image tensor has no physical address\n");
+            gpu_.reset();
+            image_maps_.clear();
+            return;
+        }
+        const uintptr_t physical = host_buffer.physical_address().expect("image physical address");
+        auto mapped = host_buffer.map(map_access_::map_read_write).unwrap();
+        uint8_t *base = reinterpret_cast<uint8_t *>(mapped.buffer().data());
+        image_maps_.push_back(std::move(mapped));
+        if (!gpu_->bind_output(static_cast<int>(i), base + kYuv6Floats, physical + kYuv6Floats)) {
+            gpu_.reset();
+            image_maps_.clear();
+            return;
+        }
+    }
+
+    if (!gpu_)
+        return;
+    std::fprintf(stderr, "Supercombo warp backend=vglite\n");
 }
 
 void SupercomboModel::push_desire_pulse()
@@ -229,22 +269,82 @@ void SupercomboModel::set_input_calibration(const float rpy[3])
 {
     input_transform_.set_calibration(rpy[0], rpy[1], rpy[2]);
     big_input_transform_.set_calibration(rpy[0], rpy[1], rpy[2]);
+    gpu_projection_dirty_ = true;
+}
+
+bool SupercomboModel::frame_planes(GpuWarp::Planes *planes)
+{
+    if (!gpu_ || !planes)
+        return false;
+    *planes = gpu_->planes();
+    return planes->luma != nullptr;
+}
+
+/* 히스토리는 CPU가 쓴 뒤라 먼저 DDR로 밀어내고, GPU가 쓴 뒤에는 무효화해야
+ * stale 캐시 라인이 워프 결과를 덮지 않는다. */
+bool SupercomboModel::prepare_images_gpu(const uint8_t *nv12)
+{
+    if (gpu_projection_dirty_) {
+        float projection[9];
+        input_transform_.projection_matrix(projection);
+        gpu_->set_projection(0, projection);
+        big_input_transform_.projection_matrix(projection);
+        gpu_->set_projection(1, projection);
+        gpu_projection_dirty_ = false;
+    }
+
+    for (size_t i = 0; i < 2; ++i)
+        hrt::sync(input_tensors_[i], sync_op_t::sync_write_back, true)
+            .expect("sync image write back failed");
+    if (nv12)
+        gpu_->upload(nv12);
+    else
+        gpu_->split_chroma();
+    if (!gpu_->run())
+        return false;
+    for (size_t i = 0; i < 2; ++i)
+        hrt::sync(input_tensors_[i], sync_op_t::sync_invalidate, true)
+            .expect("sync image invalidate failed");
+    return true;
 }
 
 bool SupercomboModel::run_frame_nv12(const uint8_t *nv12, int src_w, int src_h,
                                      std::vector<float> &raw_output)
 {
-    if (!nv12 || src_w <= 0 || src_h <= 0)
+    if (!nv12)
+        return false;
+    return run_frame(nv12, src_w, src_h, raw_output);
+}
+
+bool SupercomboModel::run_frame_preloaded(int src_w, int src_h, std::vector<float> &raw_output)
+{
+    if (!gpu_)
+        return false;
+    return run_frame(nullptr, src_w, src_h, raw_output);
+}
+
+bool SupercomboModel::run_frame(const uint8_t *nv12, int src_w, int src_h,
+                                std::vector<float> &raw_output)
+{
+    if (src_w <= 0 || src_h <= 0)
+        return false;
+
+    const bool gpu = gpu_ && gpu_->accepts(src_w, src_h);
+    if (!gpu && !nv12)
         return false;
 
     const bool profile = profile_enabled();
     const uint64_t t1 = profile ? now_ns() : 0;
-    if (!prepare_image_input(0, input_transform_, nv12, src_w, src_h)) return false;
-    if (!prepare_image_input(1, big_input_transform_, nv12, src_w, src_h)) return false;
+    if (gpu) {
+        if (!prepare_images_gpu(nv12)) return false;
+    } else {
+        if (!prepare_image_input(0, input_transform_, nv12, src_w, src_h)) return false;
+        if (!prepare_image_input(1, big_input_transform_, nv12, src_w, src_h)) return false;
+        hrt::sync(input_tensors_[0], sync_op_t::sync_write_back, true).expect("sync input 0 failed");
+        hrt::sync(input_tensors_[1], sync_op_t::sync_write_back, true).expect("sync input 1 failed");
+    }
     const uint64_t t2 = profile ? now_ns() : 0;
 
-    hrt::sync(input_tensors_[0], sync_op_t::sync_write_back, true).expect("sync input 0 failed");
-    hrt::sync(input_tensors_[1], sync_op_t::sync_write_back, true).expect("sync input 1 failed");
     if (!write_temporal_inputs()) return false;
     const uint64_t t3 = profile ? now_ns() : 0;
 

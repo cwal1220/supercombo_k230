@@ -7,6 +7,9 @@
 #include <cstdint>
 #include <vector>
 
+/* 모델 좌표 3x3을 절반 해상도(크로마) 좌표계로 옮긴다. */
+void projection_scale_buffer(const float *in, float scale, float *out);
+
 enum class ModelFrame {
     MedModel,
     SmallBigModel,

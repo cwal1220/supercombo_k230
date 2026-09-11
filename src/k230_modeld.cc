@@ -204,7 +204,10 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
     last = start;
     unsigned last_processed = 0;
     unsigned last_errors = 0;
-    std::vector<uint8_t> frame_copy(frame_ring.frame_bytes());
+    /* GPU 워프를 쓰면 링 슬롯을 워프 소스 평면으로 곧장 복사해 중간 버퍼를 없앤다. */
+    GpuWarp::Planes planes;
+    const bool preload_planes = model.frame_planes(&planes);
+    std::vector<uint8_t> frame_copy(preload_planes ? 0 : frame_ring.frame_bytes());
 
     std::fprintf(stderr, "modeld: live shared ring slots=%u frame=%ux%u bytes=%u target=%uHz\n",
                  frame_ring.slot_count(), frame_ring.width(), frame_ring.height(),
@@ -233,14 +236,17 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
         have_last_frame_id = true;
         last_frame_id = meta.frame_id;
 
-        if (!frame_ring.copy_slot(meta.slot, meta.frame_id,
-                                  frame_copy.data(), frame_copy.size())) {
+        const bool frame_ready = preload_planes
+            ? frame_ring.copy_slot_planes(meta.slot, meta.frame_id, planes.luma,
+                                          planes.luma_stride, planes.chroma,
+                                          planes.chroma_stride)
+            : frame_ring.copy_slot(meta.slot, meta.frame_id,
+                                   frame_copy.data(), frame_copy.size());
+        if (!frame_ready) {
             ++frame_sync_failures;
             ++errors;
             continue;
         }
-        const uint8_t *nv12 = frame_copy.data();
-
         if (!control_sub_open)
             control_sub_open = control_sub.open(kK230ControlStateTopic,
                                                 sizeof(K230ControlState), false);
@@ -264,7 +270,9 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
         }
 
         const uint64_t t0 = steady_ns();
-        const bool ok = model.run_frame_nv12(nv12, meta.width, meta.height, raw);
+        const bool ok = preload_planes
+            ? model.run_frame_preloaded(meta.width, meta.height, raw)
+            : model.run_frame_nv12(frame_copy.data(), meta.width, meta.height, raw);
         const uint64_t t1 = steady_ns();
         next_model_start_ns = t0 + model_interval_ns;
         if (ok) {
