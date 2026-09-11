@@ -1,16 +1,21 @@
 #ifndef SUPERCOMBO_MODEL_H
 #define SUPERCOMBO_MODEL_H
 
-#include "ai_base.h"
 #include "app_config.h"
 #include "model_input_transform.h"
 #include "model_output.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
-class SupercomboModel : public AIBase
+#include <nncase/runtime/interpreter.h>
+#include <nncase/runtime/runtime_op_utility.h>
+#include <nncase/runtime/util.h>
+
+/* kmodel 로드·실행을 직접 감싼다. nncase 심볼은 이 클래스 안에만 둔다. */
+class SupercomboModel
 {
 public:
     SupercomboModel(const char *kmodel_file, int debug_mode, const AppConfig &config);
@@ -24,6 +29,11 @@ public:
     void set_desire(int desire);
 
 private:
+    void bind_input_tensors();
+    void bind_output_tensors();
+    void run();
+    void fetch_outputs();
+
     static constexpr int kModelW = 512;
     static constexpr int kModelH = 256;
     static constexpr int kHalfW = kModelW / 2;
@@ -50,7 +60,12 @@ private:
     void push_feature_history(const std::vector<float> &raw_output);
     bool write_temporal_inputs();
 
-    std::vector<runtime_tensor> input_tensors_;
+    nncase::runtime::interpreter kmodel_interp_;
+    int debug_mode_ = 0;
+    std::vector<std::vector<int>> input_shapes_;
+    std::vector<std::vector<int>> output_shapes_;
+    std::vector<float *> outputs_;
+    std::vector<nncase::runtime::runtime_tensor> input_tensors_;
     ModelInputTransform input_transform_;
     ModelInputTransform big_input_transform_;
     std::vector<float> desire_;       // 현재 틱 펄스 (8)

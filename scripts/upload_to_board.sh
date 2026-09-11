@@ -6,7 +6,7 @@ cd "${repo_dir}"
 
 BOARD="${1:-root@192.168.219.111}"
 DEST="${K230_BOARD_DIR:-/root/supercombo_k230}"
-BUILD_DIR="${K230_BUILD_DIR:-build-k230-sdk}"
+BUILD_DIR="${K230_BUILD_DIR:-build}"
 BIN_DIR="${K230_BIN_DIR:-${BUILD_DIR}/bin}"
 read -r -a SSH_CMD <<< "${K230_SSH:-ssh}"
 read -r -a SCP_CMD <<< "${K230_SCP:-scp}"
@@ -48,7 +48,7 @@ for ui_asset in "${ui_assets[@]}"; do
 done
 
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
-  "test -x /etc/init.d/S35supercombo_k230 || { echo 'Missing image-provided /etc/init.d/S35supercombo_k230' >&2; exit 1; }; rm -f /etc/init.d/S95supercombo_k230; rm -rf '$DEST/.upload'; mkdir -p '$DEST/.upload' '$DEST/model' '$DEST/params' '$DEST/params.defaults'"
+  "test -x /etc/init.d/S35supercombo_k230 || { echo 'Missing image-provided /etc/init.d/S35supercombo_k230' >&2; exit 1; }; rm -f /etc/init.d/S95supercombo_k230; rm -rf '$DEST/.upload'; mkdir -p '$DEST/.upload' '$DEST/models' '$DEST/params' '$DEST/params.defaults'"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "${runtime_files[@]}" "$BOARD:$DEST/.upload/"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "for source in '$DEST/.upload/'*; do mv \"\$source\" '$DEST/'; done"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/.upload/assets/ui' '$DEST/assets/ui'"
@@ -56,7 +56,7 @@ done
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
   "rm -f '$DEST/assets/ui/'*.png; for source in '$DEST/.upload/assets/ui/'*; do mv \"\$source\" '$DEST/assets/ui/'; done"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "$model" "$BOARD:$DEST/.upload/supercombo.kmodel"
-"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mv '$DEST/.upload/supercombo.kmodel' '$DEST/model/supercombo.kmodel'"
+"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mv '$DEST/.upload/supercombo.kmodel' '$DEST/models/supercombo.kmodel'"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \
   params/calibration.json \
   params/adaptive_cruise.json \
@@ -68,4 +68,7 @@ done
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
   "for name in calibration.json adaptive_cruise.json steering.json driving.json recording.json display.json; do test -e '$DEST/params/'\"\$name\" || cp '$DEST/params.defaults/'\"\$name\" '$DEST/params/'\"\$name\"; done"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "rm -rf '$DEST/.upload'; sync"
+# 예전 배포는 model/ 에 넣었다. 매니저는 이제 models/ 만 본다.
+"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
+  "test ! -e '$DEST/model' || echo 'note: legacy $DEST/model is unused, remove it manually'"
 echo "Uploaded runtime files to $BOARD:$DEST"

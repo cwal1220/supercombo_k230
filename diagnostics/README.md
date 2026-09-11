@@ -1,28 +1,29 @@
-# Benchmarks and diagnostics
+# Diagnostics
 
 This folder keeps standalone experiments out of the production runtime path.
 They are not built by the default CMake target.
 
-Build them explicitly when needed:
+The `check_*` and `verify_*` self-checks build and run in one step:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSUPERCOMBO_BUILD_BENCHMARKS=ON
-cmake --build build -j2
+./scripts/run_host_checks.sh
 ```
 
-Host-only calibration/input-warp verification does not need nncase, OpenCV, or
-K230 display libraries:
+Build the remaining benchmarks and tools explicitly. Host-only targets need
+neither nncase, OpenCV, nor the K230 display libraries:
 
 ```sh
-cmake -S . -B /tmp/supercombo_k230_verify \
+cmake -S . -B build-host \
   -DCMAKE_BUILD_TYPE=Release \
   -DSUPERCOMBO_BUILD_RUNTIME=OFF \
-  -DSUPERCOMBO_BUILD_BENCHMARKS=ON
-cmake --build /tmp/supercombo_k230_verify \
-  --target verify_calibration_equivalence bench_input_warp_overhead -j2
-./verify_calibration_equivalence
-./bench_input_warp_overhead 3000
+  -DSUPERCOMBO_BUILD_DIAGNOSTICS=ON
+cmake --build build-host --target bench_input_warp_overhead -j2
+./build-host/bin/bench_input_warp_overhead 3000
 ```
+
+Board-only targets (`bench_capture_nv12`, `bench_ai2d_resize`, `bench_kmodel`,
+`run_kmodel_sequence`, `probe_drm_planes`) need the K230 runtime build; add
+`-DSUPERCOMBO_BUILD_DIAGNOSTICS=ON` to the cross-build in `build/`.
 
 Available utilities:
 

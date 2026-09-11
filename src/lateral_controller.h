@@ -3,15 +3,24 @@
 #include <string>
 #include <vector>
 
-#include "driving_params.h"
+#include "control_params.h"
 #include "hyundai_can.h"
 #include "lateral_path.h"
 #include "lateral_target.h"
-#include "openpilot_torque_controller.h"
+#include "torque_controller.h"
 #include "vehicle_can.h"
 
+/* lag 보상 곡률의 고정 한계. 런타임 튜닝 항목이 아니다. 진단용 참조 구현이
+ * 같은 값을 쓰도록 헤더에 둔다(값이 갈리면 리플레이 검증이 조용히 썩는다). */
+constexpr float kCurvatureDeviationWindowS = 0.05f;
+constexpr float kMaxCurvature = 0.3f;
+// openpilot drive_helpers.MIN_SPEED
+constexpr float kMinCurvatureSpeedMps = 1.0f;
+// EU 안전 한계(openpilot MAX_LATERAL_JERK/ACCEL). accel 3.3은 K7 실측 기준.
+constexpr float kMaxLateralJerk = 5.0f;
+constexpr float kMaxLateralAccel = 3.3f;
+
 struct LateralControllerConfig {
-  bool enabled = true;
   bool zero_release_when_inactive = true;
   bool force_engaged = false;
   SteeringParams steering_params{};
@@ -80,16 +89,6 @@ private:
                                   float speed_kph,
                                   float plan_age_s) const;
 
-  // 방향지시등 기반 수동 조향 차단 타이머를 갱신한다.
-  void update_manual_blinker_timers(const VehicleCanState &vehicle_state,
-                                    float speed_mps);
-
-  // 수동 조향 차단 타이머를 한 프레임 감소시킨다.
-  void decay_manual_blinker_timers();
-
-  // 현재 수동 조향 차단 사유를 반환한다.
-  std::string manual_blinker_block_reason() const;
-
   // openpilot K7 조향각 제한값을 현재 속도에 맞게 계산한다.
   float steering_angle_limit_deg(float speed_kph) const;
 
@@ -109,11 +108,6 @@ private:
 
   // 운전자 조향 중 요청 토크 fade 비율을 반환한다.
   float driver_torque_scale() const;
-
-  // smooth steer 모드에서 요청 토크를 서서히 줄이거나 회복한다.
-  int smooth_steer_torque(int raw_torque,
-                          const VehicleCanState &vehicle_state,
-                          bool steering_pressed);
 
   // 제어 내부 상태를 초기값으로 되돌린다.
   void reset_control_state();
@@ -135,7 +129,7 @@ private:
   int next_lkas11_counter(const VehicleCanState &vehicle_state);
 
   LateralControllerConfig config_{};
-  OpenpilotTorqueController torque_controller_;
+  TorqueController torque_controller_;
   bool engaged_ = false;
   /* path 유효성 디바운스: 차단은 즉시, 복귀는 연속 유효 0.5s 후.
    * 정지 부근에서 plan 도달거리가 경계를 넘나들며 active가 깜빡이고
@@ -152,10 +146,8 @@ private:
   int angle_limit_counter_ = 0;
   int cut_steer_frames_ = 0;
   bool cut_steer_ = false;
-  int lanechange_manual_timer_ = 0;
   int steering_pressed_counter_ = 0;
   int driver_steering_torque_above_timer_ = 100;
-  float steer_timer_apply_torque_ = 1.0f;
   // 라이브 편경사 추정: bank = lat실측 + yaw_rate*v, 2초 저역통과, 직선에서만 갱신
   float road_bank_lat_accel_ = 0.0f;
   bool road_bank_init_ = false;

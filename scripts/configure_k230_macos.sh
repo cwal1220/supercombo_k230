@@ -19,10 +19,17 @@ nncase_dir="${NNCASE_DEPS_DIR:-${repo_dir}/deps}"
 pkg_config="${PKG_CONFIG_EXECUTABLE:-${repo_dir}/tools/target-pkg-config}"
 riscv_ld="${K230_RISCV_LD:-${workspace_dir}/host-tools/binutils-build-riscv/ld/ld-new}"
 panda_build="${SUPERCOMBO_BUILD_PANDA:-ON}"
-benchmarks_build="${SUPERCOMBO_BUILD_BENCHMARKS:-OFF}"
+diagnostics_build="${SUPERCOMBO_BUILD_DIAGNOSTICS:-OFF}"
 
-gcc_lib_dir="${toolchain_dir}/lib/gcc/riscv64-unknown-linux-gnu/14.1.1/lib64xthead/lp64d"
-cxx_include_dir="${toolchain_dir}/riscv64-unknown-linux-gnu/include/c++/14.1.1"
+# Xuantie GCC 버전. 툴체인을 올리면 이 값 하나만 바꾼다.
+gcc_version="${K230_XUANTIE_GCC_VERSION:-$(basename "$(ls -d "${toolchain_dir}"/lib/gcc/riscv64-unknown-linux-gnu/*/ 2>/dev/null | head -1)" 2>/dev/null)}"
+if [ -z "${gcc_version}" ]; then
+  echo "Cannot detect Xuantie GCC version under ${toolchain_dir}" >&2
+  exit 1
+fi
+
+gcc_lib_dir="${toolchain_dir}/lib/gcc/riscv64-unknown-linux-gnu/${gcc_version}/lib64xthead/lp64d"
+cxx_include_dir="${toolchain_dir}/riscv64-unknown-linux-gnu/include/c++/${gcc_version}"
 cxx_target_include_dir="${cxx_include_dir}/riscv64-unknown-linux-gnu/lib64xthead/lp64d"
 sysroot_base_lib_dir="${sysroot}/lib64xthead/lp64d"
 sysroot_usr_lib_dir="${sysroot}/usr/lib64xthead/lp64d"
@@ -95,4 +102,4 @@ mkdir -p "${build_dir}"
   -DPKG_CONFIG_EXECUTABLE="${pkg_config}" \
   -DSUPERCOMBO_BUILD_RUNTIME=ON \
   -DSUPERCOMBO_BUILD_PANDA="${panda_build}" \
-  -DSUPERCOMBO_BUILD_BENCHMARKS="${benchmarks_build}"
+  -DSUPERCOMBO_BUILD_DIAGNOSTICS="${diagnostics_build}"

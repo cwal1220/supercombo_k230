@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 
 project(supercombo_k230 LANGUAGES C CXX)
 
-option(SUPERCOMBO_BUILD_BENCHMARKS "Build standalone benchmark/diagnostic utilities" OFF)
+option(SUPERCOMBO_BUILD_DIAGNOSTICS "Build standalone benchmark/diagnostic utilities" OFF)
 option(SUPERCOMBO_BUILD_PANDA "Build optional panda USB/CAN bridge" ON)
 option(SUPERCOMBO_BUILD_RUNTIME "Build K230 runtime binaries" ON)
 
@@ -66,16 +66,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 add_library(control_core STATIC
+  src/control_params.cc
   src/departure_alert.cc
-  src/driving_params.cc
   src/hyundai_can.cc
-  src/hyundai_steering.cc
   src/json_utils.cc
   src/adaptive_cruise.cc
   src/lateral_controller.cc
   src/lateral_path.cc
-  src/openpilot_torque_controller.cc
-  src/steering_params.cc
+  src/torque_controller.cc
   src/vehicle_can.cc
 )
 target_include_directories(control_core PUBLIC ${PROJECT_LOCAL_INCLUDES})
@@ -161,7 +159,6 @@ if(SUPERCOMBO_BUILD_RUNTIME)
 
   add_executable(k230_modeld
     src/k230_modeld.cc
-    src/ai_base.cc
     src/calibration_service.cc
     src/input_source.cc
     src/json_utils.cc
@@ -197,61 +194,61 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     add_executable(k230_controlsd
       src/k230_controlsd.cc
       src/lateral_mpc.cc
-      src/openpilot_lateral_planner.cc
+      src/lateral_planner.cc
     )
     configure_k230_target(k230_controlsd k230_common control_core)
   endif()
 endif()
 
-if(SUPERCOMBO_BUILD_BENCHMARKS)
-  add_host_tool(check_model_output_parser benchmarks/check_model_output_parser.cc)
+if(SUPERCOMBO_BUILD_DIAGNOSTICS)
+  add_host_tool(check_model_output_parser diagnostics/check_model_output_parser.cc)
   target_link_libraries(check_model_output_parser PRIVATE k230_common)
 
-  add_host_tool(bench_nv12_to_yuv6 benchmarks/bench_nv12_to_yuv6.cc)
+  add_host_tool(bench_nv12_to_yuv6 diagnostics/bench_nv12_to_yuv6.cc)
 
   add_host_tool(check_panda_can_codec
-    benchmarks/check_panda_can_codec.cc
+    diagnostics/check_panda_can_codec.cc
     src/panda_can_codec.cc
   )
 
-  add_host_tool(check_k230_can_queue benchmarks/check_k230_can_queue.cc)
+  add_host_tool(check_k230_can_queue diagnostics/check_k230_can_queue.cc)
   target_link_libraries(check_k230_can_queue PRIVATE k230_common)
 
   add_host_tool(check_control_replay
-    benchmarks/check_control_replay.cc
-    benchmarks/can_replay.cc
+    diagnostics/check_control_replay.cc
+    diagnostics/can_replay.cc
   )
   target_link_libraries(check_control_replay PRIVATE control_core)
 
-  add_host_tool(extract_lateral_dataset benchmarks/extract_lateral_dataset.cc)
+  add_host_tool(extract_lateral_dataset diagnostics/extract_lateral_dataset.cc)
   target_link_libraries(extract_lateral_dataset PRIVATE control_core)
 
-  add_host_tool(check_departure_alert benchmarks/check_departure_alert.cc)
+  add_host_tool(check_departure_alert diagnostics/check_departure_alert.cc)
   target_link_libraries(check_departure_alert PRIVATE control_core)
 
-  add_host_tool(check_adaptive_cruise benchmarks/check_adaptive_cruise.cc)
+  add_host_tool(check_adaptive_cruise diagnostics/check_adaptive_cruise.cc)
   target_link_libraries(check_adaptive_cruise PRIVATE control_core)
 
   add_host_tool(check_lateral_mpc
-    benchmarks/check_lateral_mpc.cc
+    diagnostics/check_lateral_mpc.cc
     src/lateral_mpc.cc
   )
 
   add_host_tool(planner_replay
-    benchmarks/planner_replay.cc
+    diagnostics/planner_replay.cc
     src/lateral_mpc.cc
-    src/openpilot_lateral_planner.cc
+    src/lateral_planner.cc
   )
   target_link_libraries(planner_replay PRIVATE k230_common control_core)
 
   add_host_tool(bench_input_warp_overhead
-    benchmarks/bench_input_warp_overhead.cc
+    diagnostics/bench_input_warp_overhead.cc
     src/model_input_transform.cc
   )
   target_link_libraries(bench_input_warp_overhead PRIVATE k230_common)
 
   add_host_tool(verify_calibration_equivalence
-    benchmarks/verify_calibration_equivalence.cc
+    diagnostics/verify_calibration_equivalence.cc
     src/calibration_service.cc
     src/json_utils.cc
     src/model_input_transform.cc
@@ -262,7 +259,7 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
   # HUD 스냅샷·타이밍 도구. 렌더러가 OpenCV를 쓰므로 OpenCV가 있는 곳에서만 만든다.
   if(OpenCV_FOUND)
     add_host_tool(hud_snapshot
-      benchmarks/hud_snapshot.cc
+      diagnostics/hud_snapshot.cc
       src/overlay_renderer.cc
     )
     target_include_directories(hud_snapshot SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
@@ -270,19 +267,19 @@ if(SUPERCOMBO_BUILD_BENCHMARKS)
   endif()
 
   if(SUPERCOMBO_BUILD_RUNTIME)
-    add_executable(bench_capture_nv12 benchmarks/bench_capture_nv12.cc)
+    add_executable(bench_capture_nv12 diagnostics/bench_capture_nv12.cc)
     configure_k230_target(bench_capture_nv12 mmz ${K230_SHARED_LIBS})
 
-    add_executable(bench_ai2d_resize benchmarks/bench_ai2d_resize.cc)
+    add_executable(bench_ai2d_resize diagnostics/bench_ai2d_resize.cc)
     configure_k230_target(bench_ai2d_resize ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
 
-    add_executable(bench_kmodel benchmarks/bench_kmodel.cc)
+    add_executable(bench_kmodel diagnostics/bench_kmodel.cc)
     configure_k230_target(bench_kmodel ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
 
-    add_executable(run_kmodel_sequence benchmarks/run_kmodel_sequence.cc)
+    add_executable(run_kmodel_sequence diagnostics/run_kmodel_sequence.cc)
     configure_k230_target(run_kmodel_sequence ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
 
-    add_executable(probe_drm_planes benchmarks/probe_drm_planes.cc)
+    add_executable(probe_drm_planes diagnostics/probe_drm_planes.cc)
     configure_k230_target(probe_drm_planes mmz ${K230_SHARED_LIBS})
   endif()
 endif()

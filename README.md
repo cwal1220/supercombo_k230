@@ -85,13 +85,12 @@ cmake --install build-native --prefix /root/supercombo_k230
 ### Operating
 
 - [Runtime options](docs/runtime-options.md) — environment variables, parameter editor, defaults
-- [Verification](docs/verification.md) — calibration equivalence and host self-tests
-- [Diagnostics](docs/diagnostics.md) — benchmarks, NV12 replay, recording format
+- [Verification](docs/verification.md) — `scripts/run_host_checks.sh`, calibration equivalence
+- [Diagnostics](docs/diagnostics.md) — host self-checks, benchmarks, NV12 replay
 - [Recovery](docs/recovery.md) — board recovery procedures
 
 ### Design notes
 
-- [CAN stability plan](docs/can_stability_plan.md)
 - [Departure alerts](docs/departure_alerts.md)
 - [YG panda port](docs/yg_panda_port.md)
 

@@ -9,8 +9,8 @@ cd /root/supercombo_k230
 ./k230_manager.py
 ```
 
-The no-argument command selects the installed `model/supercombo.kmodel` (or the
-source-tree `models/supercombo.kmodel`), debug mode `0`, K7 control enabled,
+The no-argument command selects `models/supercombo.kmodel`, debug mode `0`,
+K7 control enabled,
 Panda TX enabled, and the FastAPI parameter server enabled. Each setting can
 still be overridden with its environment variable; the model and debug mode can
 also be passed as command-line arguments.

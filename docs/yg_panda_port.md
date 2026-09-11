@@ -50,11 +50,11 @@ The Buildroot SDK configuration must include `BR2_PACKAGE_LIBUSB=y`.
 Export the collected drive log to the `K230CAN1` fixture format, then run:
 
 ```sh
-cmake -S . -B build/host-checks \
+cmake -S . -B build-host \
   -DSUPERCOMBO_BUILD_RUNTIME=OFF \
-  -DSUPERCOMBO_BUILD_BENCHMARKS=ON
-cmake --build build/host-checks --target check_control_replay
-./check_control_replay build/drive.k230can
+  -DSUPERCOMBO_BUILD_DIAGNOSTICS=ON
+cmake --build build-host --target check_control_replay
+./build-host/bin/check_control_replay drive.k230can
 ```
 
 The 60.001 second K7 YG HEV fixture contains 43,273 CAN records. The expected

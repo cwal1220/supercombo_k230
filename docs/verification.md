@@ -4,7 +4,7 @@
 
 ## Calibration and input-warp equivalence
 
-- `benchmarks/verify_calibration_equivalence.cc` is a host-only verifier for the
+- `diagnostics/verify_calibration_equivalence.cc` is a host-only verifier for the
   openpilot-derived calibration and input-warp math. It checks the pose-based
   calibration state machine, manual-vs-online feedback policy,
   medmodel/sbigmodel homography matrices, UV `transform_scale_buffer(0.5)`
@@ -31,17 +31,18 @@
   910-pixel-focal medmodel virtual camera and `big_input_imgs` uses the
   455-pixel-focal sbigmodel virtual camera, matching the single-camera C2 path.
 
-Run the host-only verifier:
+`scripts/run_host_checks.sh` already runs this verifier. To run it alone,
+together with the warp benchmark:
 
 ```sh
-cmake -S . -B /tmp/supercombo_k230_verify \
+cmake -S . -B build-host \
   -DCMAKE_BUILD_TYPE=Release \
   -DSUPERCOMBO_BUILD_RUNTIME=OFF \
-  -DSUPERCOMBO_BUILD_BENCHMARKS=ON
-cmake --build /tmp/supercombo_k230_verify \
+  -DSUPERCOMBO_BUILD_DIAGNOSTICS=ON
+cmake --build build-host \
   --target verify_calibration_equivalence bench_input_warp_overhead -j2
-/tmp/supercombo_k230_verify/bin/verify_calibration_equivalence
-/tmp/supercombo_k230_verify/bin/bench_input_warp_overhead 3000
+build-host/bin/verify_calibration_equivalence
+build-host/bin/bench_input_warp_overhead 3000
 ```
 
 ## Lateral MPC solver
@@ -65,7 +66,7 @@ Two deliberate reductions:
 
 ### Optimality (host, no second solver)
 
-`benchmarks/check_lateral_mpc.cc` reimplements the dynamics and cost
+`diagnostics/check_lateral_mpc.cc` reimplements the dynamics and cost
 independently and checks the warm-started fixed point across five scenarios
 (standstill through 27 m/s): multiple-shooting defects stay below `1e-15` and the
 central-difference gradient of the true objective below `1e-9` relative to the
@@ -115,7 +116,8 @@ low speed, matching the synthetic A/B; 1.4e-5 1/m is about 0.002 degrees of fron
 wheel angle, well below the torque command quantum.
 
 To re-run the A/B, restore `deps/acados`, `benchmarks/acados_lateral_mpc.h`, and
-`benchmarks/check_lateral_mpc_vs_acados.cc` from the commit that removed them.
+`benchmarks/check_lateral_mpc_vs_acados.cc` from the commit that removed them
+(they predate the `benchmarks/` -> `diagnostics/` rename).
 
 ### Steering-rate cost term (from 0.9.4)
 

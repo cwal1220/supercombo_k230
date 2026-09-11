@@ -4,6 +4,5 @@
   "inactive_release_ms": 3000,
   "mdps_speed_spoof_kph": 60.0,
   "lane_change_min_speed_kph": 30.0,
-  "manual_steer_disable_frames": 50,
   "driver_torque_threshold": 170
 }

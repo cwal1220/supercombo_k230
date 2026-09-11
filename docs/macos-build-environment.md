@@ -104,5 +104,5 @@ K230_RISCV_LD=/path/to/ld-new \
 ```
 
 Set `SUPERCOMBO_BUILD_PANDA=OFF` when the target-side Panda/libusb dependencies
-are intentionally excluded. `SUPERCOMBO_BUILD_BENCHMARKS=ON` can be used to
+are intentionally excluded. `SUPERCOMBO_BUILD_DIAGNOSTICS=ON` can be used to
 add benchmark targets without changing the runtime pipeline.

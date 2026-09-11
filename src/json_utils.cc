@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cctype>
 #include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 
 // 단순 JSON 텍스트에서 bool 값을 읽는다.
@@ -75,4 +77,23 @@ void parse_json_optional_int(const std::string &text, const std::string &key,
   float value = 0.0f;
   if (parse_json_float_value(text, key, &value))
     *field = clamp_int(value, minimum, maximum);
+}
+
+bool load_json_param_file(const std::string &path,
+                          const std::function<void(const std::string &)> &apply,
+                          std::string *error) {
+  std::ifstream file(path);
+  if (!file.is_open()) {
+    if (error) *error = "open failed";
+    return false;
+  }
+  const std::string text((std::istreambuf_iterator<char>(file)),
+                         std::istreambuf_iterator<char>());
+  try {
+    apply(text);
+  } catch (const std::exception &exc) {
+    if (error) *error = exc.what();
+    return false;
+  }
+  return true;
 }

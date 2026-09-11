@@ -1,11 +1,11 @@
-#ifndef OPENPILOT_TORQUE_CONTROLLER_H
-#define OPENPILOT_TORQUE_CONTROLLER_H
+#ifndef TORQUE_CONTROLLER_H
+#define TORQUE_CONTROLLER_H
 
 // openpilot latcontrol_torque(v0.11)의 C++ 이식.
 
-#include "steering_params.h"
+#include "control_params.h"
 
-class OpenpilotTorqueController {
+class TorqueController {
 public:
   // PID와 saturation 상태를 초기화한다.
   void reset();
@@ -45,7 +45,6 @@ private:
   // 조향각과 속도에서 실제 curvature를 계산한다.
   float vehicle_model_curvature(float steering_angle_rad,
                                 float speed_mps,
-                                float roll_rad,
                                 const SteeringParams &params);
 
   // PID 한 스텝을 계산한다.
@@ -58,7 +57,6 @@ private:
   float i_ = 0.0f;
   float f_ = 0.0f;
   float slip_factor_ = 0.0f;
-  float inv_slip_factor_ = 0.0f;
   float last_mass_kg_ = -1.0f;
   float last_wheelbase_m_ = -1.0f;
   float last_center_to_front_m_ = -1.0f;
@@ -81,4 +79,4 @@ private:
   float jerk_filtered_ = 0.0f;
 };
 
-#endif  // OPENPILOT_TORQUE_CONTROLLER_H
+#endif  // TORQUE_CONTROLLER_H

@@ -12,20 +12,9 @@ constexpr int kButtonSetDecel = 2;
 constexpr int kButtonCancel = 4;
 constexpr int kGearDrive = 5;
 constexpr int kSteeringPressedMinCount = 5;
-constexpr float kSmoothSteerRecoverStep = 0.005f;
-/* plan 곡률에서 벗어날 수 있는 lateral jerk 허용 창(초). openpilot DT_MDL과
- * 같은 값이다. */
-constexpr float kCurvatureDeviationWindowS = 0.05f;
 /* lag 보상에 더하는 plan 나이의 상한. 이 이상 낡은 plan은 staleness gate가
  * 별도로 차단한다. */
 constexpr float kMaxPlanAgeCompS = 0.25f;
-constexpr float kMaxCurvature = 0.3f;
-// openpilot drive_helpers.MIN_SPEED
-constexpr float kMinCurvatureSpeedMps = 1.0f;
-// EU 안전 한계(openpilot MAX_LATERAL_JERK/ACCEL). accel 3.3은 K7 실측 기준.
-constexpr float kMaxLateralJerk = 5.0f;
-constexpr float kMaxLateralAccel = 3.3f;
-constexpr float kGravity = 9.8f;
 constexpr double kPandaEngageGraceS = 1.0;
 
 bool is_hard_disengage_block(const std::string &block) {
@@ -139,10 +128,6 @@ LateralControlResult LateralController::update(const LateralPath &path,
       vehicle_state, now_s,
       static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) / 1000.0);
   const float speed_mps = result.control_speed_kph / 3.6f;
-  if (logical_engaged) {
-    update_manual_blinker_timers(vehicle_state, speed_mps);
-  }
-
   /* plan 나이: 근거 프레임 캡처 시각부터 지금까지. lag 보상과 staleness
    * gate가 함께 쓴다. 타임스탬프가 없으면(테스트, 초기값) 0으로 둔다. */
   float plan_age_s = 0.0f;
@@ -217,12 +202,7 @@ LateralControlResult LateralController::update(const LateralPath &path,
   result.cut_steer_temp = update_cut_steer_state(result.active, vehicle_state);
 
   const bool steering_pressed = update_steering_pressed(vehicle_state.driver_torque);
-  const EffectiveSteerLimits effective_limits =
-      config_.steering_params.effective_steer_limits();
-  SteeringParams control_params = config_.steering_params;
-  control_params.steer_max = effective_limits.steer_max;
-  control_params.steer_delta_up = effective_limits.steer_delta_up;
-  control_params.steer_delta_down = effective_limits.steer_delta_down;
+  const SteeringParams &control_params = config_.steering_params;
   const bool yaw_rate_valid = signal_time_fresh(
                                   vehicle_state.esp12_time_s, now_s,
                                   static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) /
@@ -252,12 +232,8 @@ LateralControlResult LateralController::update(const LateralPath &path,
         true, speed_mps, result.desired_curvature, vehicle_state.steering_angle_deg,
         steering_pressed, steer_rate_limited_, control_params,
         vehicle_state.yaw_rate_rad_s, yaw_rate_valid, road_bank_lat_accel_);
-    if (config_.steering_params.smooth_steer_method == 1) {
-      result.desired_torque = smooth_steer_torque(raw_torque, vehicle_state, steering_pressed);
-    } else {
-      result.desired_torque = static_cast<int>(
-          std::lround(static_cast<float>(raw_torque) * driver_torque_scale()));
-    }
+    result.desired_torque = static_cast<int>(
+        std::lround(static_cast<float>(raw_torque) * driver_torque_scale()));
     result.actual_curvature = torque_controller_.actual_curvature();
     result.actual_curvature_vm = torque_controller_.actual_curvature_vm();
     result.actual_curvature_yaw = torque_controller_.actual_curvature_yaw();
@@ -266,7 +242,7 @@ LateralControlResult LateralController::update(const LateralPath &path,
     result.feedforward = torque_controller_.feedforward();
     result.apply_torque = apply_hyundai_steer_torque_limits(
         result.desired_torque, last_torque_, vehicle_state.driver_torque,
-        control_params.hyundai_limits(effective_limits));
+        hyundai_limits(control_params));
   } else {
     // 0을 넘기면 커브 중 engage 시 지연 버퍼가 0-setpoint로 P를 튀게 한다
     torque_controller_.update(false, speed_mps, result.desired_curvature,
@@ -303,7 +279,6 @@ LateralControlResult LateralController::update(const LateralPath &path,
     steer_rate_limited_ = false;
   }
   update_driver_steering_guard(vehicle_state, speed_mps);
-  decay_manual_blinker_timers();
   return result;
 }
 
@@ -319,30 +294,6 @@ void LateralController::update_button_state(int button, double now_s) {
     engaged_ = true;
   }
   last_button_ = button;
-}
-
-// 방향지시등 기반 수동 조향 차단 타이머를 갱신한다.
-void LateralController::update_manual_blinker_timers(
-    const VehicleCanState &vehicle_state, float speed_mps) {
-  const bool one_side_blinker = vehicle_state.left_blinker != vehicle_state.right_blinker;
-  const float lane_change_min_speed_mps =
-      config_.driving_params.lane_change_min_speed_kph / 3.6f;
-  if (one_side_blinker &&
-      speed_mps < lane_change_min_speed_mps &&
-      config_.steering_params.turn_steering_disable) {
-    lanechange_manual_timer_ = config_.driving_params.manual_steer_disable_frames;
-  }
-}
-
-// 수동 조향 차단 타이머를 한 프레임 감소시킨다.
-void LateralController::decay_manual_blinker_timers() {
-  if (lanechange_manual_timer_ > 0) --lanechange_manual_timer_;
-}
-
-// 현재 수동 조향 차단 사유를 반환한다.
-std::string LateralController::manual_blinker_block_reason() const {
-  if (lanechange_manual_timer_ > 0) return "lanechange_manual";
-  return "";
 }
 
 // openpilot K7 조향각 제한값을 현재 속도에 맞게 계산한다.
@@ -434,29 +385,6 @@ float LateralController::driver_torque_scale() const {
   return 1.0f;
 }
 
-// smooth steer 모드에서 요청 토크를 서서히 줄이거나 회복한다.
-int LateralController::smooth_steer_torque(
-    int raw_torque, const VehicleCanState &vehicle_state, bool steering_pressed) {
-  const SteeringParams &params = config_.steering_params;
-  if (params.smooth_max_steering_angle_deg > 0.0f &&
-      std::fabs(vehicle_state.steering_angle_deg) > params.smooth_max_steering_angle_deg) {
-    if (params.smooth_max_driver_angle_wait > 0.0f && steering_pressed) {
-      steer_timer_apply_torque_ -= params.smooth_max_driver_angle_wait;
-    } else if (params.smooth_max_steer_angle_wait > 0.0f) {
-      steer_timer_apply_torque_ -= params.smooth_max_steer_angle_wait;
-    }
-  } else if (params.smooth_driver_angle_wait > 0.0f && steering_pressed) {
-    steer_timer_apply_torque_ -= params.smooth_driver_angle_wait;
-  } else {
-    if (steer_timer_apply_torque_ >= 1.0f) return raw_torque;
-    steer_timer_apply_torque_ += kSmoothSteerRecoverStep;
-  }
-
-  steer_timer_apply_torque_ = clamp_float(steer_timer_apply_torque_, 0.0f, 1.0f);
-  return static_cast<int>(
-      std::lround(static_cast<float>(raw_torque) * steer_timer_apply_torque_));
-}
-
 // 제어 내부 상태를 초기값으로 되돌린다.
 void LateralController::reset_control_state() {
   last_torque_ = 0;
@@ -464,9 +392,7 @@ void LateralController::reset_control_state() {
   angle_limit_counter_ = 0;
   cut_steer_frames_ = 0;
   cut_steer_ = false;
-  lanechange_manual_timer_ = 0;
   driver_steering_torque_above_timer_ = 100;
-  steer_timer_apply_torque_ = 1.0f;
   torque_controller_.reset();
 }
 
@@ -486,7 +412,7 @@ std::string LateralController::active_block_reason(
    * 결함이 가용성에 가려지면 정차 중 문 열림/MDPS 폴트가 disengage를
    * 건너뛰므로, 결함 검사가 path/plan 대기보다 먼저 와야 한다. */
   if (!config_.force_engaged && !engaged_) return "not_engaged";
-  if (!config_.enabled || !config_.steering_params.enabled) return "controller_disabled";
+  if (!config_.steering_params.enabled) return "controller_disabled";
   if (!panda_ready) return "panda_not_ready";
   if (!panda_controls_allowed) return "panda_controls_off";
   if (!seeds_ready) return "seeds_missing";
@@ -522,14 +448,8 @@ std::string LateralController::active_block_reason(
                        1000.0f) {
     return "lateral_plan_stale";
   }
-  if (config_.steering_params.no_smart_mdps &&
-      speed_kph / 3.6f < config_.steering_params.min_steer_speed_mps) {
-    return "no_smart_mdps_low_speed";
-  }
   const std::string angle_block = steering_angle_block(vehicle_state, speed_kph);
   if (!angle_block.empty()) return angle_block;
-  const std::string manual_block = manual_blinker_block_reason();
-  if (!manual_block.empty()) return manual_block;
   return "";
 }
 
@@ -558,13 +478,10 @@ float LateralController::lag_adjusted_desired_curvature(
       current_curvature + max_curvature_rate * kCurvatureDeviationWindowS);
 
   const float limit_speed = std::max(speed, 1.0f);
-  const float roll_compensation = config_.steering_params.roll_rad * kGravity;
   desired_curvature = clamp_float(
       desired_curvature,
-      (-kMaxLateralAccel + roll_compensation) /
-          (limit_speed * limit_speed),
-      (kMaxLateralAccel + roll_compensation) /
-          (limit_speed * limit_speed));
+      -kMaxLateralAccel / (limit_speed * limit_speed),
+      kMaxLateralAccel / (limit_speed * limit_speed));
   desired_curvature = clamp_float(desired_curvature,
                                   -kMaxCurvature, kMaxCurvature);
   return desired_curvature;

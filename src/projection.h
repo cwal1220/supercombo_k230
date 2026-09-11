@@ -18,7 +18,7 @@ ProjectionState make_projection_state(float roll, float pitch, float yaw);
 bool project_point(const ProjectionState &projection, float x_forward, float y_left, float z_up,
                    int width, int height, int *px, int *py);
 
-#endif
-
 // RPY(rad) -> 3x3 회전행렬(row-major), Rz*Ry*Rx.
 void rotation_from_rpy(float roll, float pitch, float yaw, float *rot);
+
+#endif

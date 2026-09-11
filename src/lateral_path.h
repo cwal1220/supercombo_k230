@@ -1,19 +1,14 @@
 #pragma once
 
 #include <string>
-#include <vector>
 
 struct K230ModelState;
 
-struct LateralPathPoint {
-  float forward_m = 0.0f;
-  float lateral_m = 0.0f;
-  float confidence = 0.0f;
-};
-
+/* 모델 plan을 조향 가용성 gate로만 환산한다. 목표 곡률은 MPC(LateralTarget)가
+ * 내므로 여기서 경로 기하를 계산하지 않는다. */
 struct LateralPath {
-  std::vector<LateralPathPoint> points;
-  float confidence = 0.0f;
+  int point_count = 0;
+  float reach_m = 0.0f;
   bool left_valid = false;
   bool right_valid = false;
   bool usable_for_steering = false;
@@ -23,5 +18,3 @@ struct LateralPath {
 LateralPath path_from_model_state(const K230ModelState &state,
                                   unsigned long long now_ns,
                                   unsigned long long timeout_ns = 250000000ULL);
-bool path_lateral_at(const LateralPath &path, float forward_m, float *lateral_m);
-float steering_curvature(const LateralPath &path, float lookahead_m);

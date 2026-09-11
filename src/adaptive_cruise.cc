@@ -5,9 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
-#include <iterator>
-#include <stdexcept>
 
 namespace {
 
@@ -42,15 +39,8 @@ bool load_adaptive_cruise_params_json(
     const std::string &path, AdaptiveCruiseConfig *config,
     std::string *error) {
   if (!config) return false;
-  std::ifstream file(path);
-  if (!file.is_open()) {
-    if (error) *error = "open failed";
-    return false;
-  }
-  const std::string text((std::istreambuf_iterator<char>(file)),
-                         std::istreambuf_iterator<char>());
-  try {
-    parse_json_bool_value(text, "enabled", &config->enabled);
+  return load_json_param_file(path, [config](const std::string &text) {
+    parse_json_optional_bool(text, "enabled", &config->enabled);
     parse_json_optional_float(text, "lead_probability_threshold", 0.2f, 0.99f,
                          &config->lead_probability_threshold);
     parse_json_optional_float(text, "standstill_gap_m", 2.0f, 20.0f,
@@ -73,11 +63,7 @@ bool load_adaptive_cruise_params_json(
                          &config->command_interval_s);
     parse_json_optional_int(text, "button_pulse_frames", 1, 10,
                        &config->button_pulse_frames);
-  } catch (const std::exception &exception) {
-    if (error) *error = exception.what();
-    return false;
-  }
-  return true;
+  }, error);
 }
 
 AdaptiveCruiseController::AdaptiveCruiseController(

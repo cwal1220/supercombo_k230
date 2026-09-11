@@ -32,6 +32,9 @@ core.*
 *.mp4
 /recordings/
 models/*.onnx
+# 모델 파이프라인 중간·실험 산출물 (수 GB)
+models/onnx/
+models/quantization_work/
 
 # 코어덤프 (960MB급이 생긴다)
 core

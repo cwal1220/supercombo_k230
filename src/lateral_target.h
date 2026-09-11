@@ -1,7 +1,7 @@
 #ifndef LATERAL_TARGET_H
 #define LATERAL_TARGET_H
 
-/* OpenpilotLateralPlanner(횡방향 MPC)가 만들고 LateralController가 소비하는
+/* LateralPlanner(횡방향 MPC)가 만들고 LateralController가 소비하는
  * 횡방향 계획. 생산자는 controlsd의 MPC 하나뿐이다. */
 
 #include <cstdint>
@@ -16,7 +16,6 @@ struct LateralTarget {
     uint64_t capture_timestamp_ns = 0;
     bool mpc_solution_valid = false;
     bool laneless_mode = false;
-    float lookahead_x_m = 0.0f;
     float target_y_m = 0.0f;
     float heading_rad = 0.0f;
     float curvature = 0.0f;
@@ -25,8 +24,7 @@ struct LateralTarget {
     float psis[kLateralControlN] = {};
     float curvatures[kLateralControlN] = {};
     float curvature_rates[kLateralControlN] = {};
-    float d_path_points[kLateralControlN] = {};
-    // 차선 관측값(로그 전용). 모델 좌표계(+y=오른쪽), camera_offset 적용 후.
+    // 차선 관측값(로그 전용). 모델 좌표계(+y=오른쪽), 오프셋 미적용.
     bool lane_valid = false;
     float lane_left_y_m = 0.0f;
     float lane_right_y_m = 0.0f;

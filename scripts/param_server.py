@@ -24,15 +24,14 @@ else:
 
 CONTROLSD_NAME = "k230_controlsd"
 RECORDD_NAME = "k230_recordd"
-GROUP_ENV = {
-    "steering": ("K230_STEERING_PARAMS", "steering.json"),
-    "driving": ("K230_DRIVING_PARAMS", "driving.json"),
-    "adaptive_cruise": (
-        "K230_ADAPTIVE_CRUISE_PARAMS",
-        "adaptive_cruise.json",
-    ),
-    "recording": ("K230_RECORDING_PARAMS", "recording.json"),
-    "display": ("K230_DISPLAY_PARAMS", "display.json"),
+# 파라미터 파일 경로는 K230_PARAMS_DIR 하나로만 바꾼다. 파일별 override는
+# 그 디렉터리 설정과 중복이라 없앴다.
+GROUP_FILES = {
+    "steering": "steering.json",
+    "driving": "driving.json",
+    "adaptive_cruise": "adaptive_cruise.json",
+    "recording": "recording.json",
+    "display": "display.json",
 }
 
 
@@ -167,36 +166,6 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "1로 바뀌면 조향 방향이 반전됩니다.",
             "-1로 바뀌면 K7 기준 정상 조향 방향이 됩니다.",
         ),
-        "smooth_steer_method": param_meta(
-            "Smooth steer 모드", "Smooth steer", "mode", 1, 0, 1,
-            "운전자 입력과 큰 조향각에서 토크를 줄이는 방식을 선택합니다.",
-            "1이면 각도 기반 smooth steer를 사용합니다.",
-            "0이면 일반 운전자 토크 fade를 사용합니다.",
-        ),
-        "smooth_max_steering_angle_deg": param_meta(
-            "Smooth steer 시작 각도", "Smooth steer", "°", 5, 0, 180,
-            "Smooth steer가 큰 조향각으로 판단하는 기준입니다.",
-            "더 큰 핸들 각도까지 토크 감소를 늦춥니다.",
-            "더 작은 핸들 각도부터 토크를 줄입니다.",
-        ),
-        "smooth_max_driver_angle_wait": param_meta(
-            "큰 각도 운전자 감쇠", "Smooth steer", "ratio/frame", 0.001, 0, 1,
-            "큰 조향각에서 운전자 입력이 있을 때 프레임마다 줄이는 토크 비율입니다.",
-            "운전자 개입 시 토크를 더 빨리 줄입니다.",
-            "운전자 개입 시 토크를 더 천천히 줄입니다.",
-        ),
-        "smooth_max_steer_angle_wait": param_meta(
-            "큰 각도 자동 감쇠", "Smooth steer", "ratio/frame", 0.001, 0, 1,
-            "큰 조향각에서 운전자 입력이 없을 때 프레임마다 줄이는 토크 비율입니다.",
-            "큰 조향각의 자동 토크를 더 빨리 줄입니다.",
-            "큰 조향각의 자동 토크를 더 오래 유지합니다.",
-        ),
-        "smooth_driver_angle_wait": param_meta(
-            "일반 각도 운전자 감쇠", "Smooth steer", "ratio/frame", 0.001, 0, 1,
-            "일반 조향각에서 운전자 입력이 있을 때 프레임마다 줄이는 토크 비율입니다.",
-            "운전자 입력에 자동 조향이 더 빨리 양보합니다.",
-            "자동 조향 토크를 더 오래 유지합니다.",
-        ),
         "steer_ratio": param_meta(
             "조향비", "차량 모델", "ratio", 0.1, 8, 25,
             "핸들 조향각과 전륜 조향각 사이의 차량 조향비입니다.",
@@ -241,20 +210,6 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "request를 더 오래 유지한 뒤 잠시 끊습니다.",
             "request를 더 일찍 끊어 fault를 회피합니다.",
         ),
-        "no_smart_mdps": {
-            "label": "비 Smart MDPS 모드",
-            "section": "고정 차량 설정",
-            "description": "최소 조향 속도 아래에서 제어 전체를 차단하는 호환 모드입니다.",
-            "increase": "켜면 저속에서 제어를 차단합니다.",
-            "decrease": "끄면 K7 Smart MDPS 동작을 유지합니다.",
-        },
-        "turn_steering_disable": {
-            "label": "저속 방향지시등 조향 차단",
-            "section": "운전자 개입",
-            "description": "저속에서 방향지시등을 켰을 때 자동 조향을 잠시 차단합니다.",
-            "increase": "켜면 설정 속도 아래에서 차선 변경 조향을 운전자에게 넘깁니다.",
-            "decrease": "끄면 방향지시등 중에도 desire 경로를 따라 자동 조향합니다.",
-        },
         "live_bank_compensation": {
             "label": "실시간 편경사 보정",
             "section": "차량 중심 보정",
@@ -275,12 +230,6 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "직진 상태의 조향각 센서 편차를 실제 곡률 계산 전에 뺍니다.",
             "현재 센서 각도를 더 작게 보정합니다.",
             "현재 센서 각도를 더 크게 보정합니다.",
-        ),
-        "roll_rad": param_meta(
-            "차량 Roll 보정", "차량 모델", "rad", 0.001, -0.2, 0.2,
-            "도로 기울기 또는 차량 roll이 만드는 횡가속도를 보정합니다.",
-            "우측 방향 중력 보정량이 커집니다.",
-            "좌측 방향 중력 보정량이 커집니다.",
         ),
         "mass_kg": param_meta(
             "차량 질량", "차량 모델", "kg", 10, 1000, 2600,
@@ -305,13 +254,6 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "후륜 조향 차량의 곡률 보정값입니다. K7 정상값은 0입니다.",
             "후륜 조향의 양의 보정량이 커집니다.",
             "후륜 조향의 음의 보정량이 커집니다.",
-        ),
-        "camera_offset_m": param_meta(
-            "카메라 좌우 위치", "차량 중심 보정", "m", 0.01, -1, 1,
-            "차량 중심에 대한 카메라 위치를 차선 검출선에 보정합니다.",
-            "목표 차선 중심이 차량 기준 오른쪽으로 이동합니다.",
-            "목표 차선 중심이 차량 기준 왼쪽으로 이동합니다.",
-            quick=True, quick_section="주행 위치", quick_order=30
         ),
         "path_offset_m": param_meta(
             "주행 경로 좌우 보정", "차량 중심 보정", "m", 0.01, -1, 1,
@@ -357,12 +299,6 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "운전자 토크 보호와 저속 방향지시등 조향 차단의 속도 기준입니다.",
             "보호 로직이 적용되는 속도 구간이 넓어집니다.",
             "보호 로직이 적용되는 속도 구간이 줄어듭니다.",
-        ),
-        "manual_steer_disable_frames": param_meta(
-            "수동 조향 유지 시간", "운전자 개입", "frame", 10, 0, 500,
-            "저속 방향지시등 조작 후 자동 조향을 차단하는 100 Hz 프레임 수입니다.",
-            "운전자에게 조향을 넘기는 시간이 길어집니다.",
-            "자동 조향으로 더 빨리 복귀합니다.",
         ),
         "driver_torque_threshold": param_meta(
             "저속 운전자 토크 기준", "운전자 개입", "MDPS raw", 10, 0, 500,
@@ -462,6 +398,13 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "quick_section": "기록",
             "quick_order": 10,
         },
+        "bitrate_bps": param_meta(
+            "기록 비트레이트", "기록", "bps", 500000, 1000000, 20000000,
+            "H.265 인코더 목표 비트레이트입니다. 인코더는 기동할 때 한 번 열리므로 "
+            "변경은 recordd 재시작부터 적용됩니다.",
+            "화질이 올라가고 파일이 커집니다.",
+            "파일이 작아지고 화질이 내려갑니다.",
+        ),
     },
     "display": {
         "enabled": {
@@ -489,8 +432,8 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
 def configured_paths() -> Dict[str, Path]:
     params_dir = Path(os.environ.get("K230_PARAMS_DIR", "params"))
     return {
-        group: Path(os.environ.get(env_name, params_dir / filename))
-        for group, (env_name, filename) in GROUP_ENV.items()
+        group: params_dir / filename
+        for group, filename in GROUP_FILES.items()
     }
 
 
@@ -498,7 +441,7 @@ def configured_default_paths() -> Dict[str, Path]:
     params_dir = Path(os.environ.get("K230_PARAM_DEFAULTS_DIR", "params.defaults"))
     return {
         group: params_dir / filename
-        for group, (_, filename) in GROUP_ENV.items()
+        for group, filename in GROUP_FILES.items()
     }
 
 
@@ -555,14 +498,21 @@ class ParamStore:
             else (configured_default_paths() if paths is None else {})
         )
         self.display_controller = display_controller
-        self._merge_missing_defaults()
+        self._sync_runtime_schema()
         if self.display_controller is not None and "display" in self.paths:
             try:
                 self.display_controller.apply(self.read_group("display"))
             except (RuntimeError, ValueError):
                 pass
 
-    def _merge_missing_defaults(self) -> None:
+    def _sync_runtime_schema(self) -> None:
+        """런타임 JSON의 키 집합을 params.defaults의 스키마에 맞춘다.
+
+        빠진 키는 기본값으로 채우고, 스키마에서 사라진 키는 지운다. 살아남은
+        키의 값은 그대로 둔다. 지우지 않으면 편집기가 런타임 JSON 키를 그대로
+        렌더링하므로(Object.entries), 코드가 더 이상 읽지 않는 파라미터가
+        편집 가능한 채로 남아 튜닝이 적용된 것처럼 보인다.
+        """
         for group, default_path in self.default_paths.items():
             runtime_path = self.paths.get(group)
             if runtime_path is None or not default_path.is_file():
@@ -578,7 +528,7 @@ class ParamStore:
                 continue
             if not isinstance(defaults, dict) or not isinstance(runtime, dict):
                 continue
-            merged = {**defaults, **runtime}
+            merged = {key: runtime.get(key, value) for key, value in defaults.items()}
             if merged != runtime:
                 self._atomic_write(runtime_path, merged)
 

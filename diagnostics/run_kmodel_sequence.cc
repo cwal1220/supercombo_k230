@@ -132,7 +132,7 @@ int main(int argc, char **argv)
                      specs[match].name.c_str(), bytes);
     }
 
-    // outputs must be created and bound before run(), like AIBase does
+    // outputs must be created and bound before run(), like SupercomboModel does
     std::vector<runtime_tensor> out_tensors;
     for (size_t i = 0; i < interp.outputs_size(); ++i) {
         auto desc = interp.output_desc(i);

@@ -2,22 +2,22 @@
 
 [← Documentation index](../README.md)
 
-Benchmark and diagnostic utilities live under `benchmarks/` and are not built by
-default. Build them explicitly with:
+The host self-checks build and run in one step, from the repository root:
 
 ```sh
-cmake -S . -B build/host-checks \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DSUPERCOMBO_BUILD_RUNTIME=OFF \
-  -DSUPERCOMBO_BUILD_BENCHMARKS=ON
-cmake --build build/host-checks -j2
+./scripts/run_host_checks.sh
 ```
 
-CAN/panda payload checks can be run on a host before connecting the car:
+That covers every `check_*` and `verify_*` target. The remaining benchmark and
+diagnostic utilities under `diagnostics/` are not built by default; build them
+explicitly with:
 
 ```sh
-cmake --build build/host-checks --target check_panda_can_codec -j2
-./build/host-checks/bin/check_panda_can_codec
+cmake -S . -B build-host \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DSUPERCOMBO_BUILD_RUNTIME=OFF \
+  -DSUPERCOMBO_BUILD_DIAGNOSTICS=ON
+cmake --build build-host -j2
 ```
 
 ## HUD snapshots
@@ -26,7 +26,7 @@ cmake --build build/host-checks --target check_panda_can_codec -j2
 drive / busy / depart / fault scenarios, writes each `480x800` frame as a
 `K230ARGB` file and prints draw timings. It links OpenCV like `k230_overlayd`,
 so build it where OpenCV is installed: the board-native CMake build with
-`-DSUPERCOMBO_BUILD_BENCHMARKS=ON`, or a Linux host.
+`-DSUPERCOMBO_BUILD_DIAGNOSTICS=ON`, or a Linux host.
 
 ```sh
 ./hud_snapshot --assets assets/ui --out /tmp/hud
@@ -47,7 +47,7 @@ board:
 
 ```sh
 SUPERCOMBO_REPLAY_NV12=/root/supercombo_k230/replay_120.scnv12 \
-  ./k230_modeld model/supercombo.kmodel 0
+  ./k230_modeld models/supercombo.kmodel 0
 ```
 
 ## Model swap verification
@@ -111,7 +111,7 @@ filter keeps one side of the curve distribution and manufactures a rotation
 term that is not there. On the 2026-08-19 route that mistake reported
 -4.22 mrad where the honest figure is -0.74 mrad.
 
-Measured on the two logged drives, both with `camera_offset_m = 0`:
+Measured on the two logged drives (no lane-line offset was applied on either):
 
 | drive | `path_offset_m` | translation | rotation |
 | --- | ---: | ---: | ---: |
@@ -151,8 +151,8 @@ segments. `tools/model/k230_route.py` reads both the v3 and v4 layouts.
 own `vehicle_can` so signs and scaling match the board exactly:
 
 ```sh
-cmake --build build/host-checks --target extract_lateral_dataset -j2
-./build/host-checks/bin/extract_lateral_dataset out.csv <route>/events/*.bin
+cmake --build build-host --target extract_lateral_dataset -j2
+./build-host/bin/extract_lateral_dataset out.csv <route>/events/*.bin
 ```
 
 Version 2 route-level `events.bin` files work as well; a file truncated by the
@@ -175,14 +175,14 @@ returns `latAccelFactor` 4.00, the value that route was fit to.
 
 ## Lateral planner replay
 
-`planner_replay` re-runs `OpenpilotLateralPlanner` over a recording and writes
+`planner_replay` re-runs `LateralPlanner` over a recording and writes
 what the planner asked for, one row per `ModelState`. It builds on the host now
 that the MPC has no riscv64 dependency, so a recorded route can be re-planned
 without the board:
 
 ```sh
-cmake --build build/host-checks --target planner_replay -j2
-./build/host-checks/bin/planner_replay out.csv <route>/events/*.bin
+cmake --build build-host --target planner_replay -j2
+./build-host/bin/planner_replay out.csv <route>/events/*.bin
 ```
 
 Columns include the recorded and re-planned desired curvature, the MPC's own
@@ -193,6 +193,5 @@ the check used for planner and solver changes.
 ## Related documents
 
 - [Recovery procedures](recovery.md)
-- [CAN stability plan](can_stability_plan.md)
 - [Departure alerts](departure_alerts.md)
 - [YG panda port notes](yg_panda_port.md)

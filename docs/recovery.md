@@ -196,11 +196,11 @@ calibration is not applied to the overlay.
 
 The front-vehicle marker is enabled by default with probability threshold `0.5`.
 
-Standalone benchmark and diagnostic utilities live in `benchmarks/` and are not
+Standalone benchmark and diagnostic utilities live in `diagnostics/` and are not
 built by default:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSUPERCOMBO_BUILD_BENCHMARKS=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSUPERCOMBO_BUILD_DIAGNOSTICS=ON
 cmake --build build -j2
 ```
 

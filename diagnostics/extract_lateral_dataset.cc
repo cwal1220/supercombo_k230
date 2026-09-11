@@ -4,7 +4,7 @@
 #include "common_utils.h"
 #include "k230_ipc.h"
 #include "recording_format.h"
-#include "steering_params.h"
+#include "control_params.h"
 #include "vehicle_can.h"
 
 #include <cmath>

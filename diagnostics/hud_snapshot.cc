@@ -199,7 +199,7 @@ int main(int argc, char **argv)
     OverlayHudState standby = drive;
     standby.controller_engaged = standby.controller_active = false;
     standby.cruise_active = false;
-    std::snprintf(standby.active_block, sizeof(standby.active_block), "no_smart_mdps_low_speed");
+    std::snprintf(standby.active_block, sizeof(standby.active_block), "stopped");
     standby.cluster_speed_kph = 12.0f;
 
     const std::vector<Scenario> scenarios = {

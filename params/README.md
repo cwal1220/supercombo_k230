@@ -25,6 +25,8 @@ PID 상태는 유지되며 engage 여부에 따른 적용 지연은 없다.
 |---|---:|---|---|
 | `enabled` | false | bool | 웹의 `주행 기록` 메뉴에서 변경한다. 켜면 모델이 실제 선택한 640x360 20 FPS 프레임을 MVX 하드웨어 H.265 인코더로 저장하고 CAN RX/TX 및 모델·제어 상태를 함께 기록한다. |
 
+| `bitrate_bps` | 8000000 | bps / 1M~20M | H.265 인코더 목표 비트레이트다. 인코더는 recordd 기동 시 한 번 열리므로 변경은 재시작부터 적용된다. |
+
 기록은 `recordings/<시각>/` 아래에 생성된다. 영상은 60초 단위 HEVC
 세그먼트로 나뉜다. 프레임의 원본 캡처 시각은 각 세그먼트의 `frames.bin`,
 CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`에
@@ -60,16 +62,14 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 
 | 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
 |---|---:|---|---|
-| `lane_change_min_speed_kph` | 30.0 | km/h / 0~80 | 이 속도 미만에서 운전자 토크 보호를 강화하는 기준이다. `turn_steering_disable=true`일 때는 저속 방향지시등 조향 차단 기준으로도 사용한다. |
-| `manual_steer_disable_frames` | 50 | frame / 0~500 | 저속에서 한쪽 방향지시등을 켰을 때 자동 조향을 차단할 프레임 수다. 제어 주기가 100Hz이므로 50 frame은 약 0.5초다. 현재 `turn_steering_disable=false`라 비활성이다. |
+| `lane_change_min_speed_kph` | 30.0 | km/h / 0~80 | 이 속도 미만에서 운전자 토크 보호를 강화하는 기준이다. |
 | `driver_torque_threshold` | 170 | MDPS raw torque / 0~500 | 이 값보다 큰 운전자 조향 토크가 저속에서 감지되면 요청 토크를 점진적으로 줄인다. Nm 단위가 아니다. |
 
 ### 경로 제한
 
-| 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
-|---|---:|---|---|
-
-최종 목표 곡률의 절대 상한은 K7 고정값 `0.3 1/m`로 적용되며 설정 항목으로 노출하지 않는다.
+횡방향 경로 제한은 런타임 항목이 아니라 `src/lateral_controller.cc`의 고정
+상수다: 최대 횡저크 `5.0 m/s^3`, 최대 횡가속 `3.3 m/s^2`, 최종 목표 곡률의 절대
+상한은 K7 고정값 `0.3 1/m`로 적용되며 설정 항목으로 노출하지 않는다.
 
 ## adaptive_cruise.json
 
@@ -107,40 +107,22 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 | `steer_driver_factor` | 1 | 배수 / 0~5 | MDPS 운전자 토크 입력에 적용하는 계수다. |
 | `steering_pressed_threshold` | 150 | MDPS raw torque / 0~500 | 토크 PID의 적분을 멈추는 운전자 조향 감지 기준이다. RK openpilot과 같이 5프레임 필터를 거치며, CAN 안전 제한용 `steer_driver_allowance`와는 별개다. |
 
-### 속도별 토크 제한
-
-| 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
-|---|---:|---|---|
-
 ### OpenPilot 토크 컨트롤러
 
 `*_raw` 값은 OpenPilot 파라미터 표현을 유지한다. 현재
-`torque_max_lat_accel_raw=22`는 RK K7의 2.2 m/s^2로 환산된다. `kp`, `kf`, `ki`는
+`torque_max_lat_accel_raw=40`은 4.0 m/s^2로 환산된다. `kp`, `kf`, `ki`는
 각각 `raw * 0.1 / max_lat_accel`로 변환되고 friction은 `raw * 0.001`로
 변환된다.
 
 | 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
 |---|---:|---|---|
-| `torque_max_lat_accel_raw` | 22 | 0.1 m/s^2 / 1~80 | 토크 컨트롤러가 정규화에 사용하는 최대 횡가속도다. RK K7의 `latAccelFactor=2.2`에 맞춘 값이다. |
-| `torque_kp_raw` | 12 | raw / 0~100 | 횡가속도 오차의 비례 이득이다. |
-| `torque_kf_raw` | 10 | raw / 0~100 | 목표 횡가속도 feed-forward 이득이다. RK처럼 횡가속도 1.0을 그대로 feed-forward한 뒤 2.2로 정규화한다. |
-| `torque_ki_raw` | 1 | raw / 0~100 | 횡가속도 오차의 적분 이득이다. |
+| `torque_max_lat_accel_raw` | 40 | 0.1 m/s^2 / 1~80 | 토크 컨트롤러가 정규화에 사용하는 최대 횡가속도다. RK K7의 `latAccelFactor=2.2`에서 출발해 실차 튜닝으로 4.0까지 올렸다. |
+| `torque_kp_raw` | 20 | raw / 0~100 | 횡가속도 오차의 비례 이득이다. |
+| `torque_kf_raw` | 9 | raw / 0~100 | 목표 횡가속도 feed-forward 이득이다. RK처럼 횡가속도 1.0을 그대로 feed-forward한 뒤 `torque_max_lat_accel`로 정규화한다. |
+| `torque_ki_raw` | 3 | raw / 0~100 | 횡가속도 오차의 적분 이득이다. |
 | `torque_friction_raw` | 100 | 0.001 m/s^2 / 0~300 | 조향계 마찰을 넘기 위한 feed-forward 보상값이다. RK K7과 같은 0.1이다. |
 | `torque_use_angle` | true | bool | `true`면 조향각 기반 실제 곡률을 사용한다. `false`면 유효한 ESP yaw-rate가 필요하며 두 값을 속도에 따라 혼합한다. |
 | `torque_output_sign` | -1 | 부호 / -1 또는 1 | 토크 출력 방향이다. K7 YG HEV에서는 -1을 사용한다. 잘못 바꾸면 반대 방향으로 조향할 수 있다. |
-
-### Smooth steer
-
-`smooth_steer_method=1`일 때만 나머지 smooth 파라미터가 적용된다. wait 값은
-초가 아니라 100Hz 제어 주기마다 토크 배율에서 차감하는 비율이다.
-
-| 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
-|---|---:|---|---|
-| `smooth_steer_method` | 0 | mode / 0~1 | 0은 일반 운전자 토크 fade, 1은 조향각과 운전자 입력에 따른 smooth steer를 사용한다. |
-| `smooth_max_steering_angle_deg` | 90.0 | degree / 0~180 | smooth 모드에서 토크를 줄이기 시작하는 절대 조향각이다. |
-| `smooth_max_driver_angle_wait` | 0.002 | ratio/frame / 0~1 | 큰 조향각에서 운전자 조향까지 감지될 때 프레임마다 줄일 토크 배율이다. |
-| `smooth_max_steer_angle_wait` | 0.001 | ratio/frame / 0~1 | 큰 조향각에서 운전자 입력이 없을 때 프레임마다 줄일 토크 배율이다. |
-| `smooth_driver_angle_wait` | 0.001 | ratio/frame / 0~1 | 일반 조향각에서 운전자 조향이 감지될 때 프레임마다 줄일 토크 배율이다. |
 
 ### 차량 모델과 지연
 
@@ -148,17 +130,15 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 |---|---:|---|---|
 | `steer_ratio` | 16.8 | ratio / 8~25 | 핸들 조향각과 전륜 조향각의 비율이다. RK의 KIA K7 HEV 차량값과 동일하다. |
 | `tire_stiffness_factor` | 1.0 | 배율 / 0.2~2.0 | 기준 타이어 횡강성에 적용하는 차량별 보정 계수다. RK K7의 기본 배율과 동일하다. |
-| `steer_actuator_delay` | 0.46 | second / 0.01~1.0 | 현재 시점의 목표 곡률을 계산할 때 보상하는 조향 액추에이터 지연이다. 값을 키우면 MPC 경로를 조금 더 앞에서 읽어 커브 진입을 선행하지만, 과도하면 조향이 빨라지거나 오버슈트할 수 있다. |
-| `angle_offset_deg` | 0.0 | degree / -10~10 | 조향각 센서의 직진 오프셋이다. 실제 곡률 추정 전에 센서 각도에서 뺀다. |
-| `roll_rad` | 0.0 | radian / -0.2~0.2 | 도로 또는 차량 roll에 의한 횡가속도와 곡률 보정값이다. |
+| `steer_actuator_delay` | 0.34 | second / 0.01~1.0 | 현재 시점의 목표 곡률을 계산할 때 보상하는 조향 액추에이터 지연이다. 값을 키우면 MPC 경로를 조금 더 앞에서 읽어 커브 진입을 선행하지만, 과도하면 조향이 빨라지거나 오버슈트할 수 있다. |
+| `angle_offset_deg` | -0.7 | degree / -10~10 | 조향각 센서의 직진 오프셋이다. 실제 곡률 추정 전에 센서 각도에서 뺀다. |
 | `torque_lat_accel_offset` | 0.0 | m/s^2 / -1.0~1.0 | 장착 롤 오차 등이 만드는 상수 횡가속 편향을 feed-forward에서 뺀다(openpilot latAccelOffset). 값은 `tools/control/fit_lateral_params.py fit`으로 주행 로그에서 실측한다. 양수 = 차가 오른쪽으로 쏠릴 때 키우는 방향(+y=오른쪽 관례, openpilot 문서와 반대 어휘). fit 출력을 그대로 넣는다. |
-| `live_bank_compensation` | true | bool | ESP12 실측으로 추정한 도로 편경사(2초 필터)를 feed-forward에서 실시간 보정한다. 켜면 센서로 보이는 편향(크라운·영점)은 bank가 흡수하므로, `torque_lat_accel_offset`은 센서에 안 보이는 토크 경로/기계 편향 전용 트림으로만 쓴다. |
+| `live_bank_compensation` | true | bool | ESP12 실측으로 추정한 도로 편경사(2초 필터)를 feed-forward에서 실시간 보정한다. 센서로 보이는 편향(크라운·영점)은 bank가 흡수하므로, `torque_lat_accel_offset`은 센서에 안 보이는 토크 경로/기계 편향 전용 트림으로만 쓴다. 정적 roll 항목은 이것으로 대체되어 없앴다. |
 | `mass_kg` | 1816.0 | kg / 1000~2600 | 차량 모델과 타이어 횡강성 계산에 사용하는 차량 질량이다. |
 | `wheelbase_m` | 2.855 | m / 2.0~3.5 | 차량 축거다. |
 | `center_to_front_ratio` | 0.4 | wheelbase ratio / 0.2~0.7 | 무게중심에서 전축까지 거리의 축거 대비 비율이다. |
 | `steer_ratio_rear` | 0.0 | ratio / -0.5~0.5 | 후륜 조향 보정 계수다. K7은 후륜 조향이 없으므로 0을 사용한다. |
-| `camera_offset_m` | 0.0 | m / -1~1 | 차량 중심에 대한 카메라 위치를 lane line에 보정한다. 양수는 목표 차선 중심을 우측, 음수는 좌측으로 이동한다. 현재는 최종 경로 오프셋만 사용하므로 0을 유지한다. |
-| `path_offset_m` | 0.09 | m / -1~1 | 차선/랜리스 선택이 끝난 최종 주행 경로 전체에 적용하는 사용자 횡방향 보정이다. 양수는 목표 주행 위치를 우측, 음수는 좌측으로 이동한다. 현재 K7 실차 기준값은 `+0.09 m`다. |
+| `path_offset_m` | 0.0 | m / -1~1 | 차선/랜리스 선택이 끝난 최종 주행 경로 전체에 적용하는 사용자 횡방향 보정이다. 양수는 목표 주행 위치를 우측, 음수는 좌측으로 이동한다. 현재 K7 실차 기준값은 `0.0 m`다. |
 | `min_steer_speed_mps` | 1.0 | m/s / 0~5 | 이 속도 미만에서는 조향 토크를 내지 않는다(openpilot CP.minSteerSpeed). 1.1~3.6 km/h 크립에서 v0.9.4 plan이 포화 지시를 내는 대역을 덮는다. |
 
 ### 조향각 및 LKAS fault 보호
@@ -169,8 +149,6 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 | `avoid_lkas_fault_enabled` | true | bool | 큰 조향각이 지속될 때 토크는 유지하고 steer request만 잠시 끊는 RK openpilot 방식의 fault 회피 로직을 사용한다. |
 | `avoid_lkas_fault_max_angle_deg` | 85.0 | degree / 1~180 | fault 회피 카운터를 증가시키는 절대 조향각 기준이다. |
 | `avoid_lkas_fault_max_frames` | 89 | frame / 0~300 | 85도 이상 조향각이 지속될 때 허용하는 프레임 수다. 이후 2프레임 동안 request를 끊고 다시 허용한다. |
-| `no_smart_mdps` | false | bool | `true`면 `min_steer_speed_mps` 미만에서 제어 자체를 차단한다. |
-| `turn_steering_disable` | false | bool | `true`면 `lane_change_min_speed_kph` 미만에서 한쪽 방향지시등을 켰을 때 지정 프레임 동안 조향을 차단한다. |
 
 ## calibration.json
 
@@ -217,10 +195,11 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 ## 권장 튜닝 순서
 
 1. 카메라 장착을 고정하고 온라인 캘리브레이션을 완료한다.
-2. `camera_offset_m`, `path_offset_m`로 차선 중심 위치를 먼저 맞춘다.
+2. `path_offset_m`로 차선 중심 위치를 먼저 맞춘다.
 3. `angle_offset_deg`, `steer_ratio`, 차량 제원이 실제 차량과 맞는지 확인한다.
 4. `torque_kp_raw`, `torque_ki_raw`, `torque_kf_raw`, `torque_friction_raw`을 한 항목씩 조정한다.
-5. 토크가 정상적으로 추종된 뒤 `steer_actuator_delay`, `max_lateral_jerk`, `max_lateral_accel`을 조정한다.
+5. 토크가 정상적으로 추종된 뒤 `steer_actuator_delay`를 조정한다. 횡저크·횡가속
+   상한은 런타임 항목이 아니므로 여기서 바꾸지 않는다(위 `경로 제한` 참고).
 6. 마지막으로 운전자 토크 보호와 fault 회피 옵션을 검증한다.
 
 각 단계에서 disengage 가능 여부, 운전자 개입 시 즉시 토크가 줄어드는지, CAN 오류와

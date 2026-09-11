@@ -4,12 +4,31 @@
 #include <cstdint>
 #include <vector>
 
+#include "control_params.h"
 #include "vehicle_can.h"
 
 constexpr uint32_t kHyundaiLkas11Address = 832;   // 0x340
 constexpr uint32_t kHyundaiClu11Address = 1265;   // 0x4f1
 constexpr uint32_t kHyundaiMdps12Address = 593;   // 0x251
 constexpr uint8_t kHyundaiMdps12TxBus = 2;
+
+struct HyundaiSteeringLimits {
+  int steer_max = 384;
+  int steer_delta_up = 3;
+  int steer_delta_down = 7;
+  int steer_driver_allowance = 50;
+  int steer_driver_multiplier = 2;
+  int steer_driver_factor = 1;
+};
+
+// SteeringParams의 토크 제한을 CAN 계층 표현으로 옮긴다.
+HyundaiSteeringLimits hyundai_limits(const SteeringParams &params);
+
+int apply_hyundai_steer_torque_limits(int desired_torque, int last_torque, int driver_torque,
+                                      const HyundaiSteeringLimits &limits = HyundaiSteeringLimits{});
+
+float mdps_speed_for_lkas(float cluster_speed_raw, bool lkas_active, bool is_mph,
+                          float spoof_speed_kph = 60.0f);
 
 struct HyundaiLkas11Values {
   int ldws_active_mode = 0;

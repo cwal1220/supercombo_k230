@@ -31,7 +31,7 @@
 
 ## Planning and control
 
-- `src/openpilot_lateral_planner.*`
+- `src/lateral_planner.*`
   - applies openpilot lane probability/width logic, lane-change state, and the
     lateral MPC in `src/lateral_mpc.*` to produce curvature targets. This is the
     only producer of `LateralTarget`.
@@ -41,12 +41,13 @@
     solver. See [Verification](verification.md#lateral-mpc-solver).
 - `src/lateral_target.h`
   - declares `LateralTarget`, the planner-to-controller interface.
-- `src/lateral_controller.*`, `src/openpilot_torque_controller.*`,
-  `src/steering_params.*`, `src/hyundai_steering.*`
+- `src/lateral_controller.*`, `src/torque_controller.*`,
+  `src/control_params.*`, `src/hyundai_can.*`
   - apply the planner's lag-adjusted curvature through the validated K7
     torque/CAN path.
 - `src/lateral_path.*`
-  - adapts `modelState` into the steering-usability path gate.
+  - reduces `modelState` to the steering-usability gate (reach and point
+    count). It computes no path geometry; curvature comes from the MPC.
 - `src/adaptive_cruise.*`, `src/departure_alert.*`
   - vision cruise setpoint control and departure alerting.
 - `src/vehicle_can.*`, `src/hyundai_can.*`

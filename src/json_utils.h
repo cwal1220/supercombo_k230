@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cerrno>
+#include <functional>
 #include <cmath>
 #include <cctype>
 #include <cstddef>
@@ -23,6 +24,12 @@ void parse_json_optional_float(const std::string &text, const std::string &key,
                                float minimum, float maximum, float *field);
 void parse_json_optional_int(const std::string &text, const std::string &key,
                              int minimum, int maximum, int *field);
+
+/* 파라미터 파일 로더 공통 뼈대. 파일을 통째로 읽어 apply(text)를 부르고,
+ * 파싱 예외를 error 문자열로 바꾼다. 로더는 키 목록만 쓰면 된다. */
+bool load_json_param_file(const std::string &path,
+                          const std::function<void(const std::string &)> &apply,
+                          std::string *error);
 
 // 단순 JSON 텍스트에서 고정 길이 float 배열을 읽는다.
 template <size_t N>

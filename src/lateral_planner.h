@@ -9,14 +9,14 @@ struct DrivingParams;
 struct SteeringParams;
 struct VehicleCanState;
 
-class OpenpilotLateralPlanner {
+class LateralPlanner {
 public:
-  OpenpilotLateralPlanner(const SteeringParams &params,
+  LateralPlanner(const SteeringParams &params,
                           const DrivingParams &driving);
-  ~OpenpilotLateralPlanner();
+  ~LateralPlanner();
 
-  OpenpilotLateralPlanner(const OpenpilotLateralPlanner &) = delete;
-  OpenpilotLateralPlanner &operator=(const OpenpilotLateralPlanner &) = delete;
+  LateralPlanner(const LateralPlanner &) = delete;
+  LateralPlanner &operator=(const LateralPlanner &) = delete;
 
   void update_params(const SteeringParams &params,
                      const DrivingParams &driving);

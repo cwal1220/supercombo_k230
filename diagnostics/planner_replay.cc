@@ -1,11 +1,10 @@
-// 녹화된 ModelState/ControlState로 OpenpilotLateralPlanner를 재실행한다.
+// 녹화된 ModelState/ControlState로 LateralPlanner를 재실행한다.
 // 녹화된 인지 결과에 대해 플래너가 무엇을 요구했는지 오프라인으로 재현한다.
 // 사용: planner_replay <out.csv> <events.bin...>
 #include "k230_ipc.h"
-#include "openpilot_lateral_planner.h"
+#include "lateral_planner.h"
 #include "recording_format.h"
-#include "steering_params.h"
-#include "driving_params.h"
+#include "control_params.h"
 #include "vehicle_can.h"
 
 #include <algorithm>
@@ -54,7 +53,7 @@ int main(int argc, char **argv) {
 
   SteeringParams steering;
   DrivingParams driving;
-  OpenpilotLateralPlanner planner(steering, driving);
+  LateralPlanner planner(steering, driving);
 
   VehicleCanState vehicle{};   // 블링커/개입 없음
   std::FILE *out = std::fopen(argv[1], "w");

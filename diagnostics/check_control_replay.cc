@@ -2,8 +2,9 @@
 #include "hyundai_can.h"
 #include "k230_ipc.h"
 #include "lateral_controller.h"
+#include "model_output.h"
 #include "lateral_path.h"
-#include "openpilot_torque_controller.h"
+#include "torque_controller.h"
 #include "vehicle_can.h"
 
 #include <algorithm>
@@ -36,11 +37,8 @@ LateralPath replay_path() {
   path.left_valid = true;
   path.right_valid = true;
   path.usable_for_steering = true;
-  path.confidence = 1.0f;
-  for (int x = 2; x <= 60; x += 2) {
-    const float xf = static_cast<float>(x);
-    path.points.push_back({xf, 0.0004f * xf * xf, 1.0f});
-  }
+  path.point_count = 30;
+  path.reach_m = 60.0f;
   return path;
 }
 
@@ -81,36 +79,37 @@ VehicleCanState ready_vehicle(double timestamp_s = 1.0) {
   return vehicle;
 }
 
-float original_lag_adjusted_curvature(const LateralTarget &target, float speed_mps,
-                                      float delay) {
-  constexpr float desired_curvature_limit = 0.05f;
-  constexpr float max_lateral_jerk = 5.0f;
-  constexpr float max_lateral_accel = 3.0f;
-  constexpr float max_curvature = 0.2f;
-  const auto model_t = [](int i) {
-    const float ratio = static_cast<float>(i) / 32.0f;
-    return 10.0f * ratio * ratio;
-  };
+/* lag 보상 곡률의 독립 전사본. 한계값은 lateral_controller.h에서 그대로
+ * 가져온다 — 숫자를 복제하면 구현이 바뀔 때 이 검증이 조용히 썩는다.
+ * 픽스처 target은 capture_timestamp_ns=0이라 plan 나이 보정은 0이다. */
+float reference_lag_adjusted_curvature(const LateralTarget &target, float speed_mps,
+                                       float actuator_delay) {
+  const float delay = std::max(0.01f, actuator_delay);
   float psi = target.psis[kLateralControlN - 1];
-  for (int i = 1; i < kLateralControlN; ++i) {
-    if (delay <= model_t(i)) {
-      const float p = (delay - model_t(i - 1)) / (model_t(i) - model_t(i - 1));
-      psi = target.psis[i - 1] + p * (target.psis[i] - target.psis[i - 1]);
-      break;
+  if (delay <= 0.0f) {
+    psi = target.psis[0];
+  } else {
+    for (int i = 1; i < kLateralControlN; ++i) {
+      if (delay <= model_t_idx(i)) {
+        const float p = (delay - model_t_idx(i - 1)) /
+                        (model_t_idx(i) - model_t_idx(i - 1));
+        psi = target.psis[i - 1] + p * (target.psis[i] - target.psis[i - 1]);
+        break;
+      }
     }
   }
-  const float speed = std::max(speed_mps, 0.1f);
+  const float speed = std::max(speed_mps, kMinCurvatureSpeedMps);
   const float current = target.curvatures[0];
   float desired = current + 2.0f * (psi / (speed * delay) - current);
-  const float rate_limit = max_lateral_jerk / (speed * speed);
+  const float rate_limit = kMaxLateralJerk / (speed * speed);
   desired = std::clamp(desired,
-                       current - rate_limit * desired_curvature_limit,
-                       current + rate_limit * desired_curvature_limit);
+                       current - rate_limit * kCurvatureDeviationWindowS,
+                       current + rate_limit * kCurvatureDeviationWindowS);
   const float accel_speed = std::max(speed, 1.0f);
   desired = std::clamp(desired,
-                       -max_lateral_accel / (accel_speed * accel_speed),
-                       max_lateral_accel / (accel_speed * accel_speed));
-  return std::clamp(desired, -max_curvature, max_curvature);
+                       -kMaxLateralAccel / (accel_speed * accel_speed),
+                       kMaxLateralAccel / (accel_speed * accel_speed));
+  return std::clamp(desired, -kMaxCurvature, kMaxCurvature);
 }
 
 void verify_mdps_speed_spoof() {
@@ -608,11 +607,13 @@ void verify_fixed_max_curvature() {
 /* v0.11식 지연 보정: 요청 스텝 직후 delay 동안은 P가 과거 요청(0)과 현재
  * 측정(0)을 비교해 오차가 없어야 하고, 토크는 FF만으로 나와야 한다. */
 void verify_delay_compensated_error() {
-  OpenpilotTorqueController torque;
+  TorqueController torque;
   SteeringParams params;
   params.enabled = true;
   params.steer_actuator_delay = 0.30f;
   params.torque_use_angle = true;
+  // 검증 대상은 요청 버퍼/지연 보상이다. 차량별 센서 트림은 배제한다.
+  params.angle_offset_deg = 0.0f;
   const float v = 20.0f;
 
   // 요청 0으로 버퍼를 채운다
@@ -636,11 +637,13 @@ void verify_delay_compensated_error() {
 
 // inactive 동안에도 요청 버퍼가 갱신되어야 재engage 때 낡은 요청과 비교되지 않는다.
 void verify_reengage_has_no_stale_buffer_spike() {
-  OpenpilotTorqueController torque;
+  TorqueController torque;
   SteeringParams params;
   params.enabled = true;
   params.steer_actuator_delay = 0.30f;
   params.torque_use_angle = true;
+  // 검증 대상은 요청 버퍼/지연 보상이다. 차량별 센서 트림은 배제한다.
+  params.angle_offset_deg = 0.0f;
   const float v = 20.0f;
 
   // 커브 요청으로 버퍼를 채운 뒤 disengage
@@ -657,7 +660,7 @@ void verify_reengage_has_no_stale_buffer_spike() {
 
 // 라이브 뱅크: 편경사에 해당하는 만큼 FF가 이동해야 한다.
 void verify_live_bank_compensation() {
-  OpenpilotTorqueController with_bank, without_bank;
+  TorqueController with_bank, without_bank;
   SteeringParams params;
   params.enabled = true;
   params.torque_use_angle = true;
@@ -708,7 +711,7 @@ void verify_bank_holds_during_curves() {
 
 // latAccelOffset: 상수 편향이 FF에서 그대로 빠져야 한다.
 void verify_lat_accel_offset_shifts_feedforward() {
-  OpenpilotTorqueController a, b;
+  TorqueController a, b;
   SteeringParams params;
   params.enabled = true;
   params.torque_use_angle = true;
@@ -960,13 +963,20 @@ void verify_model_path_adapter() {
   }
   const LateralPath path =
       path_from_model_state(state, 1100000000ULL, 250000000ULL);
-  float lateral_20m = 0.0f;
   require(path.usable_for_steering && path.left_valid && path.right_valid,
           "model path adapter validity");
-  require(path_lateral_at(path, 20.0f, &lateral_20m) && lateral_20m > 0.0f,
-          "openpilot-left to K7-right coordinate conversion");
-  require(steering_curvature(path, 20.0f) > 0.0f,
-          "model path curvature sign");
+  require(path.point_count == kTrajectorySize && path.reach_m >= 60.0f,
+          "model path adapter counts every forward plan point");
+
+  /* 정차에서 plan이 몇 미터로 주저앉으면 점 수는 충분해도 조향에 못 쓴다. */
+  K230ModelState short_state = state;
+  for (int i = 0; i < kTrajectorySize; ++i)
+    short_state.plan[i].x = 1.0f + 0.1f * static_cast<float>(i);
+  const LateralPath short_path =
+      path_from_model_state(short_state, 1100000000ULL, 250000000ULL);
+  require(!short_path.usable_for_steering &&
+              short_path.invalid_reason == "path_invalid",
+          "short plan reach must fail the steering gate");
 }
 
 }  // namespace
@@ -1043,10 +1053,10 @@ int main(int argc, char **argv) {
                                  frame.length, frame.bus, now_s);
       }
       const auto result = controller.update(path, target, vehicle, now_s, tick);
-      const float speed_kph = vehicle.cluster_speed_raw *
-          (vehicle.speed_unit_mph ? 1.609344f : 1.0f);
-      const float expected_curvature = original_lag_adjusted_curvature(
-          target, std::max(0.0f, speed_kph / 3.6f),
+      /* 컨트롤러는 휠 속도 평균으로 곡률을 낸다. 클러스터 속도를 먹이면
+       * 참조식이 다른 입력을 보게 되어 비교가 성립하지 않는다. */
+      const float expected_curvature = reference_lag_adjusted_curvature(
+          target, std::max(0.0f, result.control_speed_kph / 3.6f),
           config.steering_params.steer_actuator_delay);
       max_curvature_error = std::max(
           max_curvature_error, std::fabs(result.desired_curvature - expected_curvature));

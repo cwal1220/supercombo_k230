@@ -1,4 +1,4 @@
-#include "openpilot_torque_controller.h"
+#include "torque_controller.h"
 
 #include <algorithm>
 #include <cmath>
@@ -8,7 +8,6 @@
 
 namespace {
 
-constexpr float kGravity = 9.8f;
 constexpr float kDtCtrl = 0.01f;
 constexpr float kFrictionThreshold = 0.2f;
 // 저크 선행 마찰: 0.19s 앞의 요청 저크를 1.2Hz LP로 걸러 미리 반영한다.
@@ -44,7 +43,7 @@ std::pair<float, float> scale_tire_stiffness(float mass, float wheelbase,
 }  // namespace
 
 // PID와 saturation 상태를 초기화한다.
-void OpenpilotTorqueController::reset() {
+void TorqueController::reset() {
   p_ = 0.0f;
   i_ = 0.0f;
   f_ = 0.0f;
@@ -56,7 +55,7 @@ void OpenpilotTorqueController::reset() {
 }
 
 // openpilot LatControlTorque와 같은 형태로 조향 토크를 계산한다.
-int OpenpilotTorqueController::update(bool active,
+int TorqueController::update(bool active,
                                       float speed_mps,
                                       float desired_curvature,
                                       float steering_angle_deg,
@@ -116,7 +115,7 @@ int OpenpilotTorqueController::update(bool active,
   const float measurement = actual_lat_accel + low_speed_factor * actual_curvature;
   const float error = setpoint - measurement;
 
-  float feedforward = desired_lat_accel - params.roll_rad * kGravity;
+  float feedforward = desired_lat_accel;
   // 상수 편향(offset)은 FF에서 뺀다. bank = -g*sin(도로기울기)이므로
   // 중력의 횡가속 기여(-bank)를 빼려면 bank를 더한다 (2026-08-30 부호 수정)
   feedforward -= params.torque_lat_accel_offset;
@@ -139,7 +138,7 @@ int OpenpilotTorqueController::update(bool active,
 }
 
 // 현재 조향각/속도에서 차량 모델 기반 실제 curvature를 추정한다.
-float OpenpilotTorqueController::estimate_actual_curvature(float speed_mps,
+float TorqueController::estimate_actual_curvature(float speed_mps,
                                                            float steering_angle_deg,
                                                            const SteeringParams &params,
                                                            float yaw_rate_rad_s,
@@ -151,7 +150,6 @@ float OpenpilotTorqueController::estimate_actual_curvature(float speed_mps,
   const float actual_curvature_vm = -vehicle_model_curvature(
       deg_to_rad(steering_angle_deg - params.angle_offset_deg),
       speed_mps,
-      params.roll_rad,
       params);
   actual_curvature_vm_ = actual_curvature_vm;
   float actual_curvature_yaw = actual_curvature_vm;
@@ -167,7 +165,7 @@ float OpenpilotTorqueController::estimate_actual_curvature(float speed_mps,
 }
 
 // 차량 모델 slip factor를 파라미터에 맞춰 갱신한다.
-void OpenpilotTorqueController::update_vehicle_model(const SteeringParams &params) {
+void TorqueController::update_vehicle_model(const SteeringParams &params) {
   const float center_to_front = params.center_to_front_m();
   if (std::fabs(last_mass_kg_ - params.mass_kg) < 1e-3f &&
       std::fabs(last_wheelbase_m_ - params.wheelbase_m) < 1e-4f &&
@@ -186,7 +184,6 @@ void OpenpilotTorqueController::update_vehicle_model(const SteeringParams &param
       ? 0.0f
       : params.mass_kg * (stiffness.first * center_to_front -
                           stiffness.second * center_to_rear) / denominator;
-  inv_slip_factor_ = std::fabs(slip_factor_) < 1e-6f ? 0.0f : 1.0f / slip_factor_;
   last_mass_kg_ = params.mass_kg;
   last_wheelbase_m_ = params.wheelbase_m;
   last_center_to_front_m_ = center_to_front;
@@ -196,27 +193,19 @@ void OpenpilotTorqueController::update_vehicle_model(const SteeringParams &param
 }
 
 // 조향각과 속도에서 실제 curvature를 계산한다.
-float OpenpilotTorqueController::vehicle_model_curvature(float steering_angle_rad,
+float TorqueController::vehicle_model_curvature(float steering_angle_rad,
                                                          float speed_mps,
-                                                         float roll_rad,
                                                          const SteeringParams &params) {
   update_vehicle_model(params);
   float denom = 1.0f - slip_factor_ * speed_mps * speed_mps;
   if (std::fabs(denom) < 1e-6f) denom = denom >= 0.0f ? 1e-6f : -1e-6f;
   const float curvature_factor =
       (1.0f - params.steer_ratio_rear) / denom / params.wheelbase_m;
-  float roll_comp = 0.0f;
-  if (inv_slip_factor_ != 0.0f) {
-    const float roll_denom = inv_slip_factor_ - speed_mps * speed_mps;
-    if (std::fabs(roll_denom) >= 1e-6f) {
-      roll_comp = kGravity * roll_rad / roll_denom;
-    }
-  }
-  return curvature_factor * steering_angle_rad / params.steer_ratio + roll_comp;
+  return curvature_factor * steering_angle_rad / params.steer_ratio;
 }
 
 // PID 한 스텝을 계산한다.
-float OpenpilotTorqueController::pid_update(float error,
+float TorqueController::pid_update(float error,
                                             float feedforward,
                                             bool freeze_integrator,
                                             const SteeringParams &params) {

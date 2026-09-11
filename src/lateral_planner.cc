@@ -1,9 +1,8 @@
-#include "openpilot_lateral_planner.h"
+#include "lateral_planner.h"
 
-#include "driving_params.h"
+#include "control_params.h"
 #include "k230_ipc.h"
 #include "lateral_mpc.h"
-#include "steering_params.h"
 #include "vehicle_can.h"
 
 #include <algorithm>
@@ -66,11 +65,9 @@ private:
 
 class LanePlanner {
 public:
-  LanePlanner(double camera_offset_m, double path_offset_m)
-      : camera_offset_m_(camera_offset_m), path_offset_m_(path_offset_m) {}
+  explicit LanePlanner(double path_offset_m) : path_offset_m_(path_offset_m) {}
 
-  void update_offsets(double camera_offset_m, double path_offset_m) {
-    camera_offset_m_ = camera_offset_m;
+  void update_offsets(double path_offset_m) {
     path_offset_m_ = path_offset_m;
   }
 
@@ -78,8 +75,8 @@ public:
     for (int i = 0; i < kTrajectorySize; ++i) {
       lane_t_[i] = model.lane_t[i];
       lane_x_[i] = model.lanes[1][i].x;
-      left_y_[i] = model.lanes[1][i].y + camera_offset_m_;
-      right_y_[i] = model.lanes[2][i].y + camera_offset_m_;
+      left_y_[i] = model.lanes[1][i].y;
+      right_y_[i] = model.lanes[2][i].y;
     }
     left_prob_ = model.lane_probabilities[1];
     right_prob_ = model.lane_probabilities[2];
@@ -185,21 +182,20 @@ private:
   double right_std_ = 0.0;
   double lane_width_ = 3.7;
   double d_prob_ = 0.0;
-  double camera_offset_m_ = 0.0;
   double path_offset_m_ = 0.0;
 };
 
 }  // namespace
 
-struct OpenpilotLateralPlanner::Impl {
+struct LateralPlanner::Impl {
   Impl(const SteeringParams &steering, const DrivingParams &driving)
-      : lane_planner(steering.camera_offset_m, steering.path_offset_m) {
+      : lane_planner(steering.path_offset_m) {
     update_params(steering, driving);
   }
 
   void update_params(const SteeringParams &steering,
                      const DrivingParams &driving) {
-    lane_planner.update_offsets(steering.camera_offset_m, steering.path_offset_m);
+    lane_planner.update_offsets(steering.path_offset_m);
     // desire_helper의 torque_applied는 carstate.steeringPressed에서 나오므로
     // 컨트롤러와 같은 임계값을 써야 한다.
     steering_pressed_threshold = steering.steering_pressed_threshold;
@@ -330,13 +326,11 @@ struct OpenpilotLateralPlanner::Impl {
     target.lane_left_std = static_cast<float>(lane_planner.left_std());
     target.lane_right_std = static_cast<float>(lane_planner.right_std());
     target.lane_d_prob = static_cast<float>(lane_planner.d_prob());
-    target.lookahead_x_m = static_cast<float>(std::max(0.0f, v_ego) * path_t[1]);
     target.target_y_m = static_cast<float>(y_pts[1]);
     target.heading_rad = static_cast<float>(mpc.nodes()[0].psi);
     target.curvature = static_cast<float>(mpc.nodes()[0].curvature);
     target.desire = desire;
     for (int i = 0; i < kLateralControlN; ++i) {
-      target.d_path_points[i] = static_cast<float>(y_pts[i]);
       target.psis[i] = static_cast<float>(mpc.nodes()[i].psi);
       target.curvatures[i] = static_cast<float>(mpc.nodes()[i].curvature);
       target.curvature_rates[i] = i < kLatMpcN
@@ -442,18 +436,18 @@ struct OpenpilotLateralPlanner::Impl {
   std::array<double, 2> model_road_edge_stds{};
 };
 
-OpenpilotLateralPlanner::OpenpilotLateralPlanner(const SteeringParams &params,
+LateralPlanner::LateralPlanner(const SteeringParams &params,
                                                  const DrivingParams &driving)
     : impl_(std::make_unique<Impl>(params, driving)) {}
 
-OpenpilotLateralPlanner::~OpenpilotLateralPlanner() = default;
+LateralPlanner::~LateralPlanner() = default;
 
-void OpenpilotLateralPlanner::update_params(const SteeringParams &params,
+void LateralPlanner::update_params(const SteeringParams &params,
                                             const DrivingParams &driving) {
   impl_->update_params(params, driving);
 }
 
-LateralTarget OpenpilotLateralPlanner::update(const K230ModelState &model,
+LateralTarget LateralPlanner::update(const K230ModelState &model,
                                               const VehicleCanState &vehicle,
                                               float v_ego,
                                               float measured_curvature,

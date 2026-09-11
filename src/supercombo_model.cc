@@ -1,10 +1,13 @@
 #include "supercombo_model.h"
 
+#include "scoped_timing.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <numeric>
@@ -78,8 +81,63 @@ ProfileStats &profile_stats()
 
 } // namespace
 
+// nncase 입력 텐서를 만들어 바인딩하고 shape를 기억한다.
+void SupercomboModel::bind_input_tensors()
+{
+    ScopedTiming st("Supercombo set_input init", debug_mode_);
+    for (size_t i = 0; i < kmodel_interp_.inputs_size(); ++i) {
+        auto desc = kmodel_interp_.input_desc(i);
+        auto shape = kmodel_interp_.input_shape(i);
+        auto tensor = nncase::runtime::host_runtime_tensor::create(
+            desc.datatype, shape, nncase::runtime::hrt::pool_shared)
+                          .expect("cannot create input tensor");
+        kmodel_interp_.input_tensor(i, tensor).expect("cannot set input tensor");
+        std::vector<int> dims;
+        for (size_t j = 0; j < shape.size(); ++j)
+            dims.push_back(static_cast<int>(shape[j]));
+        input_shapes_.push_back(dims);
+        input_tensors_.push_back(
+            kmodel_interp_.input_tensor(i).expect("cannot get input tensor"));
+    }
+}
+
+void SupercomboModel::bind_output_tensors()
+{
+    ScopedTiming st("Supercombo set_output init", debug_mode_);
+    for (size_t i = 0; i < kmodel_interp_.outputs_size(); ++i) {
+        auto desc = kmodel_interp_.output_desc(i);
+        auto shape = kmodel_interp_.output_shape(i);
+        std::vector<int> dims;
+        for (size_t j = 0; j < shape.size(); ++j)
+            dims.push_back(static_cast<int>(shape[j]));
+        output_shapes_.push_back(dims);
+        auto tensor = nncase::runtime::host_runtime_tensor::create(
+            desc.datatype, shape, nncase::runtime::hrt::pool_shared)
+                          .expect("cannot create output tensor");
+        kmodel_interp_.output_tensor(i, tensor).expect("cannot set output tensor");
+    }
+}
+
+void SupercomboModel::run()
+{
+    ScopedTiming st("Supercombo run", debug_mode_);
+    kmodel_interp_.run().expect("error occurred in running model");
+}
+
+void SupercomboModel::fetch_outputs()
+{
+    ScopedTiming st("Supercombo get_output", debug_mode_);
+    outputs_.clear();
+    for (size_t i = 0; i < kmodel_interp_.outputs_size(); ++i) {
+        auto out = kmodel_interp_.output_tensor(i).expect("cannot get output tensor");
+        auto buf = out.impl()->to_host().unwrap()->buffer().as_host().unwrap()
+                       .map(nncase::runtime::map_access_::map_read).unwrap().buffer();
+        outputs_.push_back(reinterpret_cast<float *>(buf.data()));
+    }
+}
+
 SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const AppConfig &config)
-    : AIBase(kmodel_file, "Supercombo", debug_mode),
+    : debug_mode_(debug_mode),
       input_transform_(config, ModelFrame::MedModel),
       big_input_transform_(config, ModelFrame::SmallBigModel),
       desire_(kDesireLen, 0.0f),
@@ -89,8 +147,10 @@ SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const 
       feature_history_(kFeatureHistoryTicks * kModelFeatureLen, 0.0f),
       nav_features_(kNavFeatureLen, 0.0f)
 {
-    for (size_t i = 0; i < input_shapes_.size(); ++i)
-        input_tensors_.push_back(get_input_tensor(i));
+    std::ifstream kmodel(kmodel_file, std::ios::binary);
+    kmodel_interp_.load_model(kmodel).expect("Invalid kmodel");
+    bind_input_tensors();
+    bind_output_tensors();
     for (size_t i = 0; i < 2; ++i) {
         const auto image_type = input_tensors_[i].datatype();
         if (image_type != nncase::dt_float32 && image_type != nncase::dt_uint8)
@@ -192,7 +252,7 @@ bool SupercomboModel::run_frame_nv12(const uint8_t *nv12, int src_w, int src_h,
     const uint64_t t4 = profile ? now_ns() : 0;
     if (!advance_image_history(0) || !advance_image_history(1)) return false;
     const uint64_t t5 = profile ? now_ns() : 0;
-    get_output();
+    fetch_outputs();
 
     size_t total = 0;
     for (const auto &shape : output_shapes_)
@@ -202,7 +262,7 @@ bool SupercomboModel::run_frame_nv12(const uint8_t *nv12, int src_w, int src_h,
     size_t offset = 0;
     for (size_t i = 0; i < output_shapes_.size(); ++i) {
         const size_t count = std::accumulate(output_shapes_[i].begin(), output_shapes_[i].end(), size_t{1}, std::multiplies<size_t>());
-        std::memcpy(raw_output.data() + offset, p_outputs_[i], count * sizeof(float));
+        std::memcpy(raw_output.data() + offset, outputs_[i], count * sizeof(float));
         offset += count;
     }
 

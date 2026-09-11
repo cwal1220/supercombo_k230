@@ -24,10 +24,7 @@ DISPLAY_READY_FILE = "/tmp/k230_display_ready"
 DISPLAY_READY_TIMEOUT_MS = 7000
 START_ORDER = ("k230_overlayd", "k230_camerad", "k230_recordd", "k230_modeld")
 PROCESS_ORDER = ("k230_camerad", "k230_modeld", "k230_overlayd", "k230_recordd")
-DEFAULT_KMODEL_CANDIDATES = (
-    "model/supercombo.kmodel",
-    "models/supercombo.kmodel",
-)
+DEFAULT_KMODEL_PATH = "models/supercombo.kmodel"
 DEFAULT_DEBUG_MODE = "0"
 
 
@@ -49,10 +46,7 @@ def default_kmodel_path() -> str:
     override = os.environ.get("K230_KMODEL")
     if override:
         return override
-    return next(
-        (path for path in DEFAULT_KMODEL_CANDIDATES if os.path.exists(path)),
-        DEFAULT_KMODEL_CANDIDATES[0],
-    )
+    return DEFAULT_KMODEL_PATH
 
 
 class LatestPublisher:
@@ -151,7 +145,6 @@ class Manager:
             )
         self.kmodel = argv[1] if len(argv) >= 2 else default_kmodel_path()
         self.debug = argv[2] if len(argv) >= 3 else DEFAULT_DEBUG_MODE
-        os.environ.setdefault("K230_ENABLE_CONTROL", "1")
         os.environ.setdefault("K230_PANDA_TX", "1")
         os.environ.setdefault("K230_PANDA_ENGAGED", "1")
         os.environ.setdefault("K230_PANDA_SAFETY", "hyundaiCommunity")
@@ -166,7 +159,7 @@ class Manager:
 
         self.start_order = list(START_ORDER)
         self.process_order = list(PROCESS_ORDER)
-        enable_control = env_enabled("K230_ENABLE_CONTROL")
+        enable_control = env_enabled("K230_ENABLE_CONTROL", True)
         specs = [
             ProcSpec("k230_camerad", ["./k230_camerad"], 0),
             ProcSpec("k230_modeld", ["./k230_modeld", self.kmodel, self.debug], -15),

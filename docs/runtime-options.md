@@ -44,7 +44,8 @@ true.
 ## Storage and replay
 
 - `K230_PARAMS_DIR=/path/to/params`
-  - overrides the shared runtime parameter directory. The default is `params/`
+  - overrides the shared runtime parameter directory, and is the only way to
+    relocate parameter files; there are no per-file overrides. The default is `params/`
     relative to the runtime working directory. Stable online calibration is
     stored atomically in `params/calibration.json` and restored before the first
     model frame. Manual `SUPERCOMBO_CALIB_*` values take precedence and seed this
@@ -53,8 +54,6 @@ true.
   - overrides the route output directory. The default is `recordings/` under the
     runtime working directory. Recording is toggled live through the web UI or
     `params/recording.json`; at least 5 GiB and 10% free space is kept.
-- `K230_RECORD_BITRATE=8000000`
-  - overrides the HEVC recording bitrate in bits per second (default 8 Mbps).
 - `K230_RECORD_STAGING=/path/to/staging`
   - overrides the tmpfs staging directory for the active route (default
     `/tmp/record_staging`). Closed files are moved to `K230_RECORD_ROOT`
@@ -110,28 +109,9 @@ true.
 - `K230_ENABLE_CONTROL=1`
   - manager starts `k230_pandad` and `k230_controlsd`. This is the manager
     default. No openpilot checkout or Python native extension is required.
-- `K230_CONTROL=0|1`
-  - enables the standalone controller. Default is `1`; Panda TX remains
-    independently blocked unless `K230_PANDA_TX=1`.
 - `K230_FORCE_ENGAGED=0|1`
   - bypasses the SET/CANCEL engage latch for offline replay only. Default is `0`
     and must remain `0` in a vehicle.
-- `K230_ADAPTIVE_CRUISE=0|1`
-  - enables vision-based adjustment of the stock fixed-speed cruise setpoint.
-    Default is `1`. The JSON defaults send at most one five-frame button pulse per
-    second and pace repeated `SET-` commands with the measured vehicle
-    deceleration response. It yields to driver buttons and pedals and never
-    commands brakes; the driver remains responsible for braking when the stock
-    cruise cannot maintain a safe following distance.
-- `K230_STEERING_PARAMS=/path/to/steering_params.json`
-  - overrides the default `params/steering.json` file.
-- `K230_DRIVING_PARAMS=/path/to/driving_params.json`
-  - overrides `params/driving.json`, which contains model/CAN freshness,
-    inactive release, MDPS 60 kph spoof, and lateral motion limits.
-- `K230_ADAPTIVE_CRUISE_PARAMS=/path/to/adaptive_cruise.json`
-  - overrides `params/adaptive_cruise.json`. The web editor exposes it as a
-    separate vision-cruise menu; valid changes are hot-reloaded on the next 100 Hz
-    control tick without restarting the pipeline.
 
 ## Parameter server and display
 
@@ -141,12 +121,6 @@ true.
 - `K230_PARAM_HOST=address`, `K230_PARAM_PORT=port`
   - select the parameter editor listen address and port. Defaults are
     `0.0.0.0:8080`.
-- `K230_DISPLAY_PARAMS=/path/to/display.json`
-  - overrides `params/display.json`. The web editor controls the active-high
-    GPIO25 backlight and its 20 kHz PWM5 brightness without stopping the video
-    pipeline.
-- `K230_RECORDING_PARAMS=/path/to/recording.json`
-  - overrides `params/recording.json` for both `k230_recordd` and the editor.
 - `K230_PARAM_DEFAULTS_DIR=/path/to/params.defaults`
   - directory the editor reads factory defaults from. The default is
     `params.defaults/` under the runtime working directory; the upload script

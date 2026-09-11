@@ -22,7 +22,7 @@ namespace {
 
 volatile sig_atomic_t g_stop = 0;
 constexpr unsigned kRecordingFps = 20;
-/* K230_RECORD_BITRATE로 조정 가능. */
+// recording.json 의 bitrate_bps 가 없을 때의 기본값.
 constexpr unsigned kRecordingBitrate = 8000000;
 constexpr uint64_t kConfigPollIntervalNs = 250000000ULL;
 constexpr uint64_t kMaximumFrameAgeNs = 100000000ULL;
@@ -37,6 +37,18 @@ bool read_recording_enabled(const std::string &path, bool fallback) {
     throw std::runtime_error("recording config has no 'enabled' value");
   }
   return enabled;
+}
+
+/* 인코더는 시작할 때 한 번만 열리므로 비트레이트는 기동 시점 값이다.
+ * 웹에서 바꾸면 recordd 재시작부터 적용된다. */
+unsigned read_recording_bitrate(const std::string &path, unsigned fallback) {
+  std::ifstream file(path);
+  if (!file) return fallback;
+  const std::string text((std::istreambuf_iterator<char>(file)),
+                         std::istreambuf_iterator<char>());
+  int bitrate = static_cast<int>(fallback);
+  parse_json_optional_int(text, "bitrate_bps", 1000000, 20000000, &bitrate);
+  return static_cast<unsigned>(bitrate);
 }
 
 uint64_t file_revision(const std::string &path) {
@@ -63,13 +75,11 @@ int main() {
   install_stop_signal_handlers(&g_stop);
 
   try {
-    const std::string params_directory = env_string("K230_PARAMS_DIR", "params");
-    const std::string config_path = env_string(
-        "K230_RECORDING_PARAMS", (params_directory + "/recording.json").c_str());
+    const std::string config_path = k230_param_path("recording.json");
     const std::string recording_root = env_string("K230_RECORD_ROOT", "recordings");
     const std::string codec_device = env_string("K230_RECORD_CODEC", "/dev/video0");
     const unsigned recording_bitrate =
-        env_unsigned("K230_RECORD_BITRATE", kRecordingBitrate);
+        read_recording_bitrate(config_path, kRecordingBitrate);
 
     K230FrameRing frame_ring;
     while (!g_stop && !frame_ring.open(false)) {
@@ -94,7 +104,7 @@ int main() {
                       kRecordingFps, recording_bitrate)) {
       throw std::runtime_error("open MVX hardware encoder failed");
     }
-    RecordingWriter writer(recording_root, params_directory, frame_ring.width(),
+    RecordingWriter writer(recording_root, k230_params_dir(), frame_ring.width(),
                            frame_ring.height(), kRecordingFps, recording_bitrate);
 
     auto packet_handler = [&writer](const MvxV4l2Encoder::Packet &packet) {

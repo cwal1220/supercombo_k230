@@ -3,9 +3,9 @@
 #include "adaptive_cruise.h"
 #include "lateral_controller.h"
 #include "lateral_path.h"
-#include "openpilot_lateral_planner.h"
+#include "lateral_planner.h"
 #include "common_utils.h"
-#include "steering_params.h"
+#include "control_params.h"
 #include "vehicle_can.h"
 
 #include <signal.h>
@@ -265,7 +265,7 @@ private:
     }
   }
 
-  OpenpilotLateralPlanner planner_;
+  LateralPlanner planner_;
   mutable std::mutex mutex_;
   std::condition_variable condition_;
   Request request_;
@@ -302,23 +302,11 @@ int main() {
     sendcan_pub.reset();
 
     LateralControllerConfig config;
-    config.enabled = env_flag("K230_CONTROL", true);
     config.force_engaged = env_flag("K230_FORCE_ENGAGED", false);
-    const bool adaptive_cruise_env_enabled =
-        env_flag("K230_ADAPTIVE_CRUISE", true);
     AdaptiveCruiseConfig adaptive_cruise_config;
-    const char *steering_override = std::getenv("K230_STEERING_PARAMS");
-    const char *driving_override = std::getenv("K230_DRIVING_PARAMS");
-    const char *adaptive_cruise_override =
-        std::getenv("K230_ADAPTIVE_CRUISE_PARAMS");
-    const std::string steering_path = steering_override && steering_override[0] != '\0'
-        ? steering_override : k230_param_path("steering.json");
-    const std::string driving_path = driving_override && driving_override[0] != '\0'
-        ? driving_override : k230_param_path("driving.json");
-    const std::string adaptive_cruise_path =
-        adaptive_cruise_override && adaptive_cruise_override[0] != '\0'
-            ? adaptive_cruise_override
-            : k230_param_path("adaptive_cruise.json");
+    const std::string steering_path = k230_param_path("steering.json");
+    const std::string driving_path = k230_param_path("driving.json");
+    const std::string adaptive_cruise_path = k230_param_path("adaptive_cruise.json");
     std::string error;
     if (!load_runtime_params(steering_path, driving_path, adaptive_cruise_path,
                              &config, &adaptive_cruise_config, &error)) {
@@ -331,7 +319,7 @@ int main() {
                  steering_path.c_str(), driving_path.c_str(),
                  adaptive_cruise_path.c_str(),
                  config.driving_params.mdps_speed_spoof_kph,
-                 adaptive_cruise_env_enabled && adaptive_cruise_config.enabled
+                 adaptive_cruise_config.enabled
                      ? 1U : 0U,
                  adaptive_cruise_config.standstill_gap_m,
                  adaptive_cruise_config.following_time_s,
@@ -424,9 +412,7 @@ int main() {
                          "decel=%.1fkph/s\n",
                          param_generation,
                          config.driving_params.mdps_speed_spoof_kph,
-                         adaptive_cruise_env_enabled &&
-                                 adaptive_cruise_config.enabled
-                             ? 1U : 0U,
+                         adaptive_cruise_config.enabled ? 1U : 0U,
                          adaptive_cruise_config.standstill_gap_m,
                          adaptive_cruise_config.following_time_s,
                          adaptive_cruise_config.deceleration_rate_kph_per_s);
@@ -559,15 +545,16 @@ int main() {
       if (have_previous_active && last_result.active != previous_active) {
         std::fprintf(stderr,
                      "k230_controlsd: active transition %u->%u "
-                     "engaged=%u block=%s raw=%s rawPoints=%zu pathPoints=%zu "
-                     "hold=%u modelAgeMs=%llu panda=%u/%u "
+                     "engaged=%u block=%s raw=%s rawPoints=%d rawReachM=%.1f "
+                     "pathPoints=%d hold=%u modelAgeMs=%llu panda=%u/%u "
                      "state=%u/%u/%u/%u safety=%u:%u hb=%u fresh=%u\n",
                      previous_active ? 1U : 0U, last_result.active ? 1U : 0U,
                      last_result.engaged ? 1U : 0U,
                      last_result.active_block.c_str(),
                      raw_path.invalid_reason.empty() ? "none" :
                          raw_path.invalid_reason.c_str(),
-                     raw_path.points.size(), path.points.size(),
+                     raw_path.point_count, static_cast<double>(raw_path.reach_m),
+                     path.point_count,
                      path_hold_applied ? 1U : 0U,
                      model.model_timestamp_ns != 0 && now_ns >= model.model_timestamp_ns
                          ? static_cast<unsigned long long>(
@@ -622,7 +609,7 @@ int main() {
       AdaptiveCruiseInput adaptive_input;
       adaptive_input.now_s = now_s;
       adaptive_input.enabled =
-          adaptive_cruise_env_enabled && adaptive_cruise_config.enabled;
+          adaptive_cruise_config.enabled;
       adaptive_input.controls_ready =
           last_result.active && panda_ready && panda_controls_allowed &&
           vehicle.has_clu11_seed;
@@ -677,7 +664,7 @@ int main() {
 
       K230ControlState control_state;
       control_state.timestamp_ns = k230_now_ns();
-      control_state.enabled = config.enabled ? 1U : 0U;
+      control_state.enabled = config.steering_params.enabled ? 1U : 0U;
       control_state.engaged = last_result.engaged ? 1U : 0U;
       control_state.active = last_result.active ? 1U : 0U;
       control_state.should_send = last_result.should_send ? 1U : 0U;
