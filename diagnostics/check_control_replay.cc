@@ -862,7 +862,10 @@ void verify_panda_gate_and_handoff() {
           "Panda controls off must generate zero LKAS");
 
   LateralController panda_timeout_controller(config);
-  VehicleCanState timeout_vehicle = vehicle;
+  /* 이 블록은 t=10 에서 돈다. CAN 타임스탬프를 함께 옮기지 않으면 차량 상태가
+   * 9초 낡아 vehicle_state_stale 이 되고, 검증하려던 Panda 유예가 아니라
+   * freshness 게이트를 보게 된다. */
+  VehicleCanState timeout_vehicle = ready_vehicle(10.0);
   timeout_vehicle.clu_button = 2;
   panda_timeout_controller.update(replay_path(), replay_target(), timeout_vehicle,
                                   10.0, 0, true, true);
@@ -871,8 +874,10 @@ void verify_panda_gate_and_handoff() {
       replay_path(), replay_target(), timeout_vehicle, 10.01, 1, true, false);
   require(panda_waiting.engaged && !panda_waiting.engage_rejected,
           "Panda handshake grace must keep a valid request latched");
+  // 유예(1초)를 넘기며 CAN 은 계속 신선하게 유지한다.
+  VehicleCanState timeout_vehicle_later = ready_vehicle(11.0);
   const auto panda_timeout = panda_timeout_controller.update(
-      replay_path(), replay_target(), timeout_vehicle, 11.02, 102, true, false);
+      replay_path(), replay_target(), timeout_vehicle_later, 11.02, 102, true, false);
   require(!panda_timeout.engaged && panda_timeout.engage_rejected &&
               panda_timeout.active_block == "panda_controls_off",
           "persistent Panda mismatch must eventually reject engage");
@@ -949,6 +954,42 @@ void verify_panda_gate_and_handoff() {
           "static engage gate must reject without latching engaged state");
 }
 
+/* 시동 직후 첫 engage: Panda health 가 아직 없고 안전벨트/기어가 막고 있을 때.
+ * 실차(2026-09-12)에서 engage 톤이 울린 뒤 해제되고, 두 번째 시도부터만
+ * 거절음이 났다. 하드 결함이 panda_not_ready 뒤로 밀려 가려졌기 때문이다. */
+void verify_cold_start_engage_reports_hard_block() {
+  const auto cold_start_attempt = [](bool panda_ready, bool seatbelt_unlatched,
+                                     int gear) {
+    LateralControllerConfig config;
+    LateralController controller(config);
+    VehicleCanState vehicle = ready_vehicle();
+    vehicle.seatbelt_unlatched = seatbelt_unlatched;
+    vehicle.gear = gear;
+    vehicle.clu_button = 2;
+    controller.update(replay_path(), replay_target(), vehicle, 1.0, 0,
+                      panda_ready, panda_ready);
+    vehicle.clu_button = 0;
+    return controller.update(replay_path(), replay_target(), vehicle, 1.01, 1,
+                             panda_ready, panda_ready);
+  };
+
+  const auto belt = cold_start_attempt(false, true, 5);
+  require(!belt.engaged && belt.engage_rejected &&
+              belt.active_block == "seatbelt_unlatched",
+          "cold-start SET with seatbelt off must report the seatbelt, not defer on panda");
+
+  const auto gear = cold_start_attempt(false, false, 0);
+  require(!gear.engaged && gear.engage_rejected &&
+              gear.active_block == "gear_not_drive",
+          "cold-start SET out of D must report the gear, not defer on panda");
+
+  // 차량이 정상이면 Panda 핸드셰이크 유예는 그대로 살아 있어야 한다.
+  const auto handshake = cold_start_attempt(false, false, 5);
+  require(handshake.engaged && !handshake.engage_rejected &&
+              handshake.active_block == "panda_not_ready",
+          "cold-start SET with a healthy car must still wait for the panda handshake");
+}
+
 void verify_model_path_adapter() {
   K230ModelState state;
   state.valid = 1;
@@ -1006,6 +1047,7 @@ int main(int argc, char **argv) {
     verify_runtime_params_apply_immediately();
     verify_lkas_hud_state_stability();
     verify_panda_gate_and_handoff();
+    verify_cold_start_engage_reports_hard_block();
     verify_model_path_adapter();
     if (argc == 1) {
       std::puts("CONTROL_SELF_TEST_OK");

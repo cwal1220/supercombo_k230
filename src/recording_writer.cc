@@ -467,6 +467,7 @@ void RecordingWriter::snapshot_params() const {
   make_directories(destination);
   while (dirent *entry = readdir(directory)) {
     const std::string name = entry->d_name;
+    if (name.empty() || name[0] == '.') continue;
     if (name.size() < 5 || name.substr(name.size() - 5) != ".json") continue;
     copy_file(params_directory_ + "/" + name, destination + "/" + name);
   }

@@ -408,13 +408,11 @@ std::string LateralController::active_block_reason(
     bool panda_controls_allowed,
     float speed_kph,
     float plan_age_s) const {
-  /* 순서 규칙: 데이터 유효성 -> 차량 결함(hard disengage) -> 가용성 대기.
-   * 결함이 가용성에 가려지면 정차 중 문 열림/MDPS 폴트가 disengage를
-   * 건너뛰므로, 결함 검사가 path/plan 대기보다 먼저 와야 한다. */
+  /* 순서 규칙: 데이터 유효성 -> 차량 결함(hard disengage) -> 핸드셰이크 ->
+   * 가용성 대기. 결함이 뒤로 밀리면 앞선 일시적 사유가 결함을 가리고, 그
+   * 사이 engage가 유예되어 톤만 울렸다가 해제된다. */
   if (!config_.force_engaged && !engaged_) return "not_engaged";
   if (!config_.steering_params.enabled) return "controller_disabled";
-  if (!panda_ready) return "panda_not_ready";
-  if (!panda_controls_allowed) return "panda_controls_off";
   if (!seeds_ready) return "seeds_missing";
   if (!vehicle_fresh) return "vehicle_state_stale";
   if (!std::isfinite(speed_kph)) return "speed_invalid";
@@ -425,6 +423,11 @@ std::string LateralController::active_block_reason(
   if (vehicle_state.brake_error) return "brake_error";
   if (vehicle_state.gear != kGearDrive) return "gear_not_drive";
   if (vehicle_state.steering_fault) return "mdps_fault";
+  /* Panda 핸드셰이크는 차량 결함 뒤에 온다. 앞에 두면 시동 직후 health가
+   * 도착하기 전의 engage 요청이 panda_not_ready(일시적)로 분류되어 유예되고,
+   * 안전벨트/기어 같은 하드 결함이 가려진 채 engage 톤이 울린 뒤 해제된다. */
+  if (!panda_ready) return "panda_not_ready";
+  if (!panda_controls_allowed) return "panda_controls_off";
   if (!config_.steering_params.torque_use_angle) {
     if (!signal_time_fresh(vehicle_state.esp12_time_s, now_s,
                       static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) /
