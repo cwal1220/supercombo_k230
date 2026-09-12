@@ -64,6 +64,7 @@ struct DrivingParams {
   float mdps_speed_spoof_kph = 60.0f;
   float lane_change_min_speed_kph = 30.0f;
   int driver_torque_threshold = 170;
+  bool laneless_mode = false;
 };
 
 // params/steering.json을 읽어 SteeringParams에 반영한다.

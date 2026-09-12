@@ -65,6 +65,12 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 | `lane_change_min_speed_kph` | 30.0 | km/h / 0~80 | 이 속도 미만에서 운전자 토크 보호를 강화하는 기준이다. |
 | `driver_torque_threshold` | 170 | MDPS raw torque / 0~500 | 이 값보다 큰 운전자 조향 토크가 저속에서 감지되면 요청 토크를 점진적으로 줄인다. Nm 단위가 아니다. |
 
+### 경로 모드
+
+| 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
+|---|---:|---|---|
+| `laneless_mode` | false | bool | `false`는 Lane 모드로, 차선 확률이 높으면 차선 중심 경로를 섞고 낮아지면 자동으로 모델 경로만 쓴다. `true`는 Laneless 모드로, 차선 관측을 무시하고 항상 모델 plan을 따른다. 웹의 `주행 제한` 메뉴에서 바꾸고, 현재 사용 중인 경로는 HUD에 `LANE`/`LANELESS`로 표시된다. 차로 변경은 두 모드 모두 모델의 desire 입력으로 동작한다. |
+
 ### 경로 제한
 
 횡방향 경로 제한은 런타임 항목이 아니라 `src/lateral_controller.cc`의 고정

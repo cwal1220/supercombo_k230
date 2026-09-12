@@ -188,7 +188,9 @@ cmake --build build-host --target planner_replay -j2
 Columns include the recorded and re-planned desired curvature, the MPC's own
 `target_curv`/`heading0`, the lane observations behind the plan, and the
 `laneless`/`mpc_valid` flags. Comparing two builds' CSVs over the same route is
-the check used for planner and solver changes.
+the check used for planner and solver changes. `--laneless` before the event
+files forces Laneless mode, so the same route can be re-planned both ways
+without touching `params/driving.json`.
 
 ## Related documents
 

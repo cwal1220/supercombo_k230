@@ -1,6 +1,6 @@
 // 녹화된 ModelState/ControlState로 LateralPlanner를 재실행한다.
 // 녹화된 인지 결과에 대해 플래너가 무엇을 요구했는지 오프라인으로 재현한다.
-// 사용: planner_replay <out.csv> <events.bin...>
+// 사용: planner_replay <out.csv> [--laneless] <events.bin...>
 #include "k230_ipc.h"
 #include "lateral_planner.h"
 #include "recording_format.h"
@@ -49,10 +49,17 @@ float lag_adjusted(const LateralTarget &t, float v, float delay_s, float age_s) 
 }  // namespace
 
 int main(int argc, char **argv) {
-  if (argc < 3) { std::fprintf(stderr, "usage: %s <out.csv> <events...>\n", argv[0]); return 1; }
-
   SteeringParams steering;
   DrivingParams driving;
+  int first_event = 2;
+  if (argc > 2 && std::strcmp(argv[2], "--laneless") == 0) {
+    driving.laneless_mode = true;
+    first_event = 3;
+  }
+  if (argc <= first_event) {
+    std::fprintf(stderr, "usage: %s <out.csv> [--laneless] <events...>\n", argv[0]);
+    return 1;
+  }
   LateralPlanner planner(steering, driving);
 
   VehicleCanState vehicle{};   // 블링커/개입 없음
@@ -62,7 +69,7 @@ int main(int argc, char **argv) {
 
   float v_kph = 0.0f, measured = 0.0f, des_rec = 0.0f;
   bool have_cs = false;
-  for (int a = 2; a < argc; ++a) {
+  for (int a = first_event; a < argc; ++a) {
     std::ifstream f(argv[a], std::ios::binary);
     K230EventFileHeader hdr{};
     f.read(reinterpret_cast<char *>(&hdr), sizeof(hdr));

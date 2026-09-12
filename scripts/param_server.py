@@ -223,7 +223,7 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "뺍니다. fit_lateral_params.py fit의 latAccelOffset을 그대로 넣습니다.",
             "차가 오른쪽으로 쏠릴 때 키우는 방향입니다.",
             "차가 왼쪽으로 쏠릴 때 줄이는 방향입니다.",
-            quick=True, quick_section="주행 위치", quick_order=20,
+            quick=True, quick_section="주행 위치", quick_order=40,
         ),
         "angle_offset_deg": param_meta(
             "직진 조향각 오프셋", "차량 중심 보정", "°", 0.1, -10, 10,
@@ -260,7 +260,7 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "최종 모델 주행 경로 전체를 좌우로 평행 이동합니다.",
             "목표 주행 위치가 차량 기준 오른쪽으로 이동합니다.",
             "목표 주행 위치가 차량 기준 왼쪽으로 이동합니다.",
-            quick=True, quick_section="주행 위치", quick_order=10,
+            quick=True, quick_section="주행 위치", quick_order=30,
         ),
         "min_steer_speed_mps": param_meta(
             "최소 자동 조향 속도", "기본 토크 제한", "m/s", 0.1, 0, 5,
@@ -270,6 +270,17 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
         ),
     },
     "driving": {
+        "laneless_mode": {
+            "label": "Laneless 모드",
+            "section": "경로 모드",
+            "description": "차선 융합을 끄고 모델이 낸 주행 경로만 따라갑니다. "
+            "끄면 차선이 뚜렷할 때 차선 중심으로 붙는 Lane 모드입니다.",
+            "increase": "켜면 차선이 보여도 모델 경로만 따라가고 HUD에 LANELESS로 표시됩니다.",
+            "decrease": "끄면 차선 확률이 높을 때 차선 중심 경로를 섞는 Lane 모드로 돌아갑니다.",
+            "quick": True,
+            "quick_section": "경로 모드",
+            "quick_order": 10,
+        },
         "model_timeout_ms": param_meta(
             "모델 경로 유효 시간", "데이터 상태", "ms", 50, 50, 2000,
             "마지막 모델 경로를 유효하다고 인정하는 최대 시간입니다.",
@@ -889,7 +900,7 @@ HTML = """<!doctype html>
         "LKAS fault 보호", "고정 조향 한계", "고정 차량 설정", "기타",
       ],
       driving: [
-        "빠른 주행 튜닝", "운전자 개입", "상태와 CAN", "데이터 상태",
+        "경로 모드", "운전자 개입", "상태와 CAN", "데이터 상태",
         "고정 차량 설정", "기타",
       ],
       adaptive_cruise: [

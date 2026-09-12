@@ -32,22 +32,16 @@ class FakeDisplayController:
 class ParamStoreTest(unittest.TestCase):
     EXPECTED_QUICK = {
         "steering": [
-            "path_offset_m",
+            "torque_max_lat_accel_raw",
             "steer_actuator_delay",
-            "torque_kp_raw",
-            "torque_kf_raw",
-            "torque_friction_raw",
-            "torque_angle_deadzone_raw",
+            "path_offset_m",
+            "torque_lat_accel_offset",
         ],
-        "driving": ["max_lateral_jerk", "max_lateral_accel"],
+        "driving": ["laneless_mode"],
         "adaptive_cruise": [
             "enabled",
             "following_time_s",
             "standstill_gap_m",
-            "gap_correction_gain",
-            "max_slowdown_correction_mps",
-            "lead_restore_delay_s",
-            "command_interval_s",
         ],
         "recording": ["enabled"],
         "display": ["enabled", "brightness_percent"],

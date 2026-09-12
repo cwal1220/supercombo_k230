@@ -90,5 +90,6 @@ bool load_driving_params_json(const std::string &path,
                          &params->lane_change_min_speed_kph);
     parse_json_optional_int(text, "driver_torque_threshold", 0, 500,
                        &params->driver_torque_threshold);
+    parse_json_optional_bool(text, "laneless_mode", &params->laneless_mode);
   }, error);
 }

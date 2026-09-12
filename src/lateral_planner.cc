@@ -200,6 +200,7 @@ struct LateralPlanner::Impl {
     // 컨트롤러와 같은 임계값을 써야 한다.
     steering_pressed_threshold = steering.steering_pressed_threshold;
     lane_change_min_speed_mps = driving.lane_change_min_speed_kph / 3.6;
+    laneless_mode = driving.laneless_mode;
     const double center_to_front = steering.center_to_front_m();
     constexpr double civic_mass = 1326.0 + 136.0;
     constexpr double civic_wheelbase = 2.70;
@@ -238,9 +239,11 @@ struct LateralPlanner::Impl {
     }
 
     const double lane_probability = lane_planner.mean_near_probability();
-    bool use_model_path = false;
+    bool use_model_path = laneless_mode;
     const bool lane_change_off = lane_change_state == 0;
-    if (lane_probability < 0.3 && lane_change_off) {
+    if (laneless_mode) {
+      laneless_buffer = false;
+    } else if (lane_probability < 0.3 && lane_change_off) {
       use_model_path = true;
       laneless_buffer = true;
     // 복귀 문턱을 openpilot의 0.5에서 0.4로 내렸다. 교차로 후 차선
@@ -423,6 +426,7 @@ struct LateralPlanner::Impl {
   double factor2 = 0.0;
   int steering_pressed_threshold = 150;
   double lane_change_min_speed_mps = 30.0 / 3.6;
+  bool laneless_mode = false;
   bool laneless_buffer = false;
   int invalid_count = 0;
   int lane_change_state = 0;
