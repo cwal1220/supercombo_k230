@@ -31,6 +31,13 @@ double interp(double x, const double *xp, const double *fp, size_t count) {
   return fp[count - 1];
 }
 
+// interp()은 xp가 단조 증가라고 가정한다. 양자화된 plan은 정차 부근에서
+// 먼 knot이 뒤로 뛰므로, 보간축으로 쓰기 전에 역행 구간을 평평하게 만든다.
+void make_monotonic(double *xp, size_t count) {
+  for (size_t i = 1; i < count; ++i)
+    if (xp[i] < xp[i - 1]) xp[i] = xp[i - 1];
+}
+
 double path_heading_at(
     const std::array<std::array<double, 3>, kTrajectorySize> &path, int index) {
   const int previous = std::max(0, index - 1);
@@ -84,9 +91,9 @@ public:
     right_std_ = model.lane_stds[2];
   }
 
-  std::array<std::array<double, 3>, kTrajectorySize> lane_path(
-      float v_ego, const std::array<double, kTrajectorySize> &path_t,
-      std::array<std::array<double, 3>, kTrajectorySize> path) {
+  // 폭/std 보정을 반영한 유효 확률과 폭 추정을 갱신한다. 랜리스 모드에서도
+  // 매 프레임 호출해야 폭 필터와 로그 값이 멈추지 않는다.
+  void update_probabilities(float v_ego) {
     std::array<double, kTrajectorySize> width{};
     for (int i = 0; i < kTrajectorySize; ++i)
       width[i] = right_y_[i] - left_y_[i];
@@ -109,22 +116,34 @@ public:
     };
     left_prob *= std_mod(left_std_);
     right_prob *= std_mod(right_std_);
+    left_prob_eff_ = left_prob;
+    right_prob_eff_ = right_prob;
 
-    lane_width_certainty_.update(left_prob * right_prob);
-    lane_width_estimate_.update(std::fabs(right_y_[0] - left_y_[0]));
+    const double certainty = left_prob * right_prob;
+    lane_width_certainty_.update(certainty);
+    // 양쪽이 다 보일 때만 폭을 학습한다. estimate는 certainty보다 시정수가 10배
+    // 길어(약 10초 대 1초), 한 번 오염되면 재획득 직후 그대로 신뢰된다.
+    if (certainty > kWidthLearnMinCertainty)
+      lane_width_estimate_.update(std::fabs(right_y_[0] - left_y_[0]));
     const double speed_width = interp(v_ego, kLaneWidthSpeed.data(), kLaneWidth.data(),
                                       kLaneWidthSpeed.size());
     lane_width_ = lane_width_certainty_.value() * lane_width_estimate_.value() +
                   (1.0 - lane_width_certainty_.value()) * speed_width;
-    const double half_width = std::min(4.0, lane_width_) * 0.5;
-    const double denominator = left_prob + right_prob + 0.0001;
     d_prob_ = left_prob + right_prob - left_prob * right_prob;
+  }
+
+  std::array<std::array<double, 3>, kTrajectorySize> lane_path(
+      const std::array<double, kTrajectorySize> &path_t,
+      std::array<std::array<double, 3>, kTrajectorySize> path) const {
+    const double half_width = std::min(4.0, lane_width_) * 0.5;
+    const double denominator = left_prob_eff_ + right_prob_eff_ + 0.0001;
 
     std::array<double, kTrajectorySize> lane_path_y{};
     for (int i = 0; i < kTrajectorySize; ++i) {
       const double from_left = left_y_[i] + half_width;
       const double from_right = right_y_[i] - half_width;
-      lane_path_y[i] = (left_prob * from_left + right_prob * from_right) / denominator;
+      lane_path_y[i] =
+          (left_prob_eff_ * from_left + right_prob_eff_ * from_right) / denominator;
     }
 
     std::array<double, kTrajectorySize> valid_t{};
@@ -152,8 +171,11 @@ public:
     for (auto &point : *path) point[1] += path_offset_m_;
   }
 
-  double mean_near_probability() const { return (left_prob_ + right_prob_) * 0.5; }
-  // 로그/분석용 관측값 노출. lane_path()가 쓰는 확률은 지역 사본이라 원값이다.
+  // 랜리스 전환 판정값. 블렌드와 같은 유효 확률을 써서 두 판정이 어긋나지 않게 한다.
+  double mean_effective_probability() const {
+    return (left_prob_eff_ + right_prob_eff_) * 0.5;
+  }
+  // 로그/분석용 관측값 노출. left_prob()/right_prob()는 보정 전 모델 원값이다.
   double near_left_y() const { return left_y_[0]; }
   double near_right_y() const { return right_y_[0]; }
   double lane_width() const { return lane_width_; }
@@ -170,6 +192,7 @@ public:
 private:
   static constexpr std::array<double, 2> kLaneWidthSpeed = {0.0, 31.0};
   static constexpr std::array<double, 2> kLaneWidth = {2.8, 3.5};
+  static constexpr double kWidthLearnMinCertainty = 0.25;
   std::array<double, kTrajectorySize> lane_t_{};
   std::array<double, kTrajectorySize> lane_x_{};
   std::array<double, kTrajectorySize> left_y_{};
@@ -178,6 +201,8 @@ private:
   FirstOrderFilter lane_width_certainty_{1.0, 0.95};
   double left_prob_ = 0.0;
   double right_prob_ = 0.0;
+  double left_prob_eff_ = 0.0;
+  double right_prob_eff_ = 0.0;
   double left_std_ = 0.0;
   double right_std_ = 0.0;
   double lane_width_ = 3.7;
@@ -238,7 +263,8 @@ struct LateralPlanner::Impl {
       path_t[i] = model.model_t[i];
     }
 
-    const double lane_probability = lane_planner.mean_near_probability();
+    lane_planner.update_probabilities(v_ego);
+    const double lane_probability = lane_planner.mean_effective_probability();
     bool use_model_path = laneless_mode;
     const bool lane_change_off = lane_change_state == 0;
     if (laneless_mode) {
@@ -256,7 +282,7 @@ struct LateralPlanner::Impl {
       laneless_buffer = false;
     }
     if (!use_model_path)
-      path = lane_planner.lane_path(v_ego, path_t, path);
+      path = lane_planner.lane_path(path_t, path);
     lane_planner.apply_path_offset(&path);
 
     std::array<double, kTrajectorySize> distance{};
@@ -280,6 +306,7 @@ struct LateralPlanner::Impl {
       if (plan_collapsed || path[next][0] <= path[prev][0])
         path_heading[i] = 0.0;
     }
+    make_monotonic(distance.data(), distance.size());
 
     /* MPC 노드 시각의 목표를 차속 x 시간 거리로 보간한다. knot을 직접
      * 인덱싱하면 모델 knot의 프레임 간 노이즈가 그대로 들어가 des가 2~3배
@@ -328,7 +355,8 @@ struct LateralPlanner::Impl {
     target.lane_right_prob = static_cast<float>(lane_planner.right_prob());
     target.lane_left_std = static_cast<float>(lane_planner.left_std());
     target.lane_right_std = static_cast<float>(lane_planner.right_std());
-    target.lane_d_prob = static_cast<float>(lane_planner.d_prob());
+    target.lane_d_prob =
+        static_cast<float>(use_model_path ? 0.0 : lane_planner.d_prob());
     target.target_y_m = static_cast<float>(y_pts[1]);
     target.heading_rad = static_cast<float>(mpc.nodes()[0].psi);
     target.curvature = static_cast<float>(mpc.nodes()[0].curvature);

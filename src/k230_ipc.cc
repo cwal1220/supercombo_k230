@@ -235,12 +235,17 @@ void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parse
             break;
         }
 
-        const float current_x = parsed.plan.points[tidx].x;
-        const float next_x = parsed.plan.points[tidx + 1].x;
-        const float p = static_cast<float>(
-            (model_x_idx_double(xidx) - current_x) / (next_x - current_x));
+        const double current_x = parsed.plan.points[tidx].x;
+        const double next_x = parsed.plan.points[tidx + 1].x;
+        // 정차 부근의 양자화된 plan은 knot이 뒤로 뛴다. 보정 없이 두면 p가
+        // 발산하거나 NaN이 되어 lane_t가 비단조가 된다. p를 [0,1]로 묶으면
+        // lane_t는 항상 두 knot 시각 사이에 들어가 단조성이 보장된다.
+        const double span = next_x - current_x;
+        const double p = span > 0.0
+            ? std::clamp((model_x_idx_double(xidx) - current_x) / span, 0.0, 1.0)
+            : 1.0;
         state.lane_t[xidx] = static_cast<float>(
-            p * model_t_idx_double(tidx + 1) + (1.0f - p) * model_t_idx_double(tidx));
+            p * model_t_idx_double(tidx + 1) + (1.0 - p) * model_t_idx_double(tidx));
     }
     for (int lane = 0; lane < 4; ++lane) {
         state.lane_probabilities[lane] = parsed.lanes[lane].probability;
