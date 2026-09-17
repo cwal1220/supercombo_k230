@@ -1,8 +1,6 @@
 #ifndef PROJECTION_H
 #define PROJECTION_H
 
-#include "app_config.h"
-
 struct ProjectionState {
     float roll = 0.0f;
     float pitch = 0.0f;

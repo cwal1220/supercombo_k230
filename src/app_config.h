@@ -3,8 +3,6 @@
 
 #include <string>
 
-#include "common_utils.h"
-
 constexpr unsigned kDefaultSensorWidth = 1920;
 constexpr unsigned kDefaultSensorHeight = 1080;
 /* AI 캡처 기본 해상도. 720p는 supercombo 학습 카메라(17.9 px/°)를 넘는

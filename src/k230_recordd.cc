@@ -1,5 +1,7 @@
-#include "json_utils.h"
-#include "k230_ipc.h"
+#include "utils_json.h"
+#include "utils_process.h"
+#include "utils_time.h"
+#include "ipc_channels.h"
 #include "mvx_v4l2_encoder.h"
 #include "recording_writer.h"
 

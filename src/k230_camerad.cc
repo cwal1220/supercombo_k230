@@ -1,6 +1,8 @@
 #include "app_config.h"
 #include "input_source.h"
-#include "k230_ipc.h"
+#include "utils_process.h"
+#include "utils_time.h"
+#include "ipc_channels.h"
 #include "mmz.h"
 
 #include <linux/videodev2.h>

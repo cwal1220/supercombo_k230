@@ -1,7 +1,7 @@
 #include "lateral_planner.h"
 
 #include "control_params.h"
-#include "k230_ipc.h"
+#include "ipc_messages.h"
 #include "lateral_mpc.h"
 #include "vehicle_can.h"
 

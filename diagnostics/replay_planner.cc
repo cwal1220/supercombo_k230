@@ -1,7 +1,7 @@
 // 녹화된 ModelState/ControlState로 LateralPlanner를 재실행한다.
 // 녹화된 인지 결과에 대해 플래너가 무엇을 요구했는지 오프라인으로 재현한다.
-// 사용: planner_replay <out.csv> [--laneless] <events.bin...>
-#include "k230_ipc.h"
+// 사용: replay_planner <out.csv> [--laneless] <events.bin...>
+#include "ipc_messages.h"
 #include "lateral_controller.h"
 #include "lateral_planner.h"
 #include "recording_format.h"

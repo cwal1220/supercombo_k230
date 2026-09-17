@@ -1,4 +1,5 @@
 #include "model_input_transform.h"
+#include "utils_math.h"
 
 #include "projection.h"
 

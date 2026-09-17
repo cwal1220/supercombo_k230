@@ -20,8 +20,8 @@ runtime_files=(
   "${BIN_DIR}/k230_overlayd"
   "${BIN_DIR}/k230_recordd"
   scripts/k230_manager.py
-  scripts/param_server.py
-  scripts/k230_display_control.py
+  scripts/k230_param_server.py
+  scripts/display_control.py
   scripts/requirements-param-server.txt
 )
 model="models/supercombo.kmodel"

@@ -35,7 +35,7 @@ def now_ns() -> int:
 
 
 def env_enabled(name: str, default: bool = False) -> bool:
-    """common_utils.h의 env_flag와 같은 규약을 따른다."""
+    """utils_process.h의 env_flag와 같은 규약을 따른다."""
     value = os.environ.get(name)
     if value is None or value == "":
         return default
@@ -176,7 +176,7 @@ class Manager:
             self.process_order.append("k230_controlsd")
         if env_enabled("K230_ENABLE_PARAM_SERVER", enable_control):
             server_script = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "param_server.py"
+                os.path.dirname(os.path.abspath(__file__)), "k230_param_server.py"
             )
             specs.append(
                 ProcSpec("param_server", [sys.executable, server_script], 10)

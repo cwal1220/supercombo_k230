@@ -1,5 +1,5 @@
-#ifndef TORQUE_CONTROLLER_H
-#define TORQUE_CONTROLLER_H
+#ifndef LATERAL_TORQUE_H
+#define LATERAL_TORQUE_H
 
 // openpilot latcontrol_torque(v0.11)의 C++ 이식.
 
@@ -79,4 +79,4 @@ private:
   float jerk_filtered_ = 0.0f;
 };
 
-#endif  // TORQUE_CONTROLLER_H
+#endif  // LATERAL_TORQUE_H

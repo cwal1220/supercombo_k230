@@ -3,7 +3,7 @@
 
 #include "app_config.h"
 #include "model_output.h"
-#include "online_calibrator.h"
+#include "calibration_online.h"
 #include "projection.h"
 
 #include <chrono>

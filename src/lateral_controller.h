@@ -7,7 +7,7 @@
 #include "hyundai_can.h"
 #include "lateral_path.h"
 #include "lateral_target.h"
-#include "torque_controller.h"
+#include "lateral_torque.h"
 #include "vehicle_can.h"
 
 /* lag 보상 곡률의 고정 한계. 런타임 튜닝 항목이 아니다. 진단용 참조 구현이
@@ -24,7 +24,7 @@ constexpr float kMaxLateralAccel = 3.3f;
 constexpr float kMaxPlanAgeCompS = 0.25f;
 
 /* lateral MPC 출력을 actuator delay + plan 나이와 횡가속도 한계에 맞춰 보정한다.
- * 컨트롤러와 planner_replay가 같은 구현을 호출한다. */
+ * 컨트롤러와 replay_planner가 같은 구현을 호출한다. */
 float lag_adjusted_desired_curvature(const LateralTarget &target, float speed_mps,
                                      float plan_age_s, float steer_actuator_delay_s);
 

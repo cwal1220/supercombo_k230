@@ -1,6 +1,6 @@
 """Reader for K230 recordd routes (frames.bin / event log / road.hevc).
 
-Binary layouts mirror src/recording_format.h and src/k230_ipc.h. Struct sizes
+Binary layouts mirror src/recording_format.h and src/ipc_channels.h. Struct sizes
 are asserted against the payload sizes found in the stream, so a layout drift
 fails loudly instead of decoding garbage.
 """

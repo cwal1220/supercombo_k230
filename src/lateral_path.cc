@@ -1,6 +1,6 @@
 #include "lateral_path.h"
 
-#include "k230_ipc.h"
+#include "ipc_messages.h"
 
 #include <cmath>
 

@@ -1,7 +1,10 @@
 #include "app_config.h"
 #include "calibration_service.h"
 #include "input_source.h"
-#include "k230_ipc.h"
+#include "utils_process.h"
+#include "utils_time.h"
+#include "ipc_channels.h"
+#include "ipc_messages.h"
 #include "model_output.h"
 #include "supercombo_model.h"
 
@@ -10,7 +13,6 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstdint>
 #include <stdexcept>
@@ -19,12 +21,6 @@
 namespace {
 
 volatile sig_atomic_t g_stop = 0;
-
-uint64_t steady_ns()
-{
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count());
-}
 
 /* SUPERCOMBO_RAW_DUMP: replay 중 모델 raw 출력을 SCODMP1로 남긴다.
  * diagnostics/check_model_output_parser가 이 포맷을 읽어 보드 출력과 호스트
@@ -122,9 +118,9 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
     last = start;
 
     while (!g_stop && source.read(frame)) {
-        const uint64_t t0 = steady_ns();
+        const uint64_t t0 = k230_now_ns();
         const bool ok = model.run_frame_nv12(frame.data.data(), frame.width, frame.height, raw);
-        const uint64_t t1 = steady_ns();
+        const uint64_t t1 = k230_now_ns();
         if (ok) {
             raw_dump.append(raw);
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);
@@ -214,7 +210,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
                  frame_ring.frame_bytes(), target_fps);
 
     while (!g_stop) {
-        const uint64_t now_ns = steady_ns();
+        const uint64_t now_ns = k230_now_ns();
         if (next_model_start_ns > now_ns) {
             const uint64_t sleep_us = (next_model_start_ns - now_ns) / 1000ULL;
             if (sleep_us > 0) usleep(static_cast<useconds_t>(sleep_us));
@@ -269,11 +265,11 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
             std::fprintf(stderr, "\nmodeld: publish recordFrame failed\n");
         }
 
-        const uint64_t t0 = steady_ns();
+        const uint64_t t0 = k230_now_ns();
         const bool ok = preload_planes
             ? model.run_frame_preloaded(meta.width, meta.height, raw)
             : model.run_frame_nv12(frame_copy.data(), meta.width, meta.height, raw);
-        const uint64_t t1 = steady_ns();
+        const uint64_t t1 = k230_now_ns();
         next_model_start_ns = t0 + model_interval_ns;
         if (ok) {
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "k230_ipc.h"
+#include "ipc_messages.h"
 
 #include <linux/videodev2.h>
 

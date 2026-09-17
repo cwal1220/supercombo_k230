@@ -14,9 +14,9 @@ from typing import Any, Callable, Dict
 # fastapi/uvicorn은 서버를 띄울 때만 import한다. diagnostics/check_param_server.py가
 # stdlib만으로 ParamStore와 PARAM_METADATA를 쓴다.
 if __package__:
-    from .k230_display_control import DisplayBacklight
+    from .display_control import DisplayBacklight
 else:
-    from k230_display_control import DisplayBacklight
+    from display_control import DisplayBacklight
 
 
 CONTROLSD_NAME = "k230_controlsd"

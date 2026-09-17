@@ -6,7 +6,8 @@
 //
 // model.bin / control.bin은 녹화 이벤트의 K230ModelState / K230ControlState
 // 원본 바이트다(tools/ui/hud_tools.py inputs가 만든다). 없으면 합성 장면을 쓴다.
-#include "k230_ipc.h"
+#include "overlay_state.h"
+#include "ipc_messages.h"
 #include "overlay_renderer.h"
 
 #include <algorithm>

@@ -1,6 +1,6 @@
 #include "hyundai_can.h"
 
-#include "common_utils.h"
+#include "utils_math.h"
 
 #include <algorithm>
 #include <cmath>
@@ -67,20 +67,6 @@ HyundaiLkas11Values apply_lkas_command(HyundaiLkas11Values values, const Hyundai
 }
 
 }  // namespace
-
-void set_signal_le(std::array<uint8_t, 8> *data, int start_bit, int length, uint32_t raw) {
-  for (int i = 0; i < length; ++i) {
-    const int bit = start_bit + i;
-    const int byte_index = bit / 8;
-    const int bit_index = bit % 8;
-    const uint8_t mask = static_cast<uint8_t>(1U << bit_index);
-    if (raw & (1U << i)) {
-      (*data)[byte_index] |= mask;
-    } else {
-      (*data)[byte_index] &= static_cast<uint8_t>(~mask);
-    }
-  }
-}
 
 HyundaiLkas11Values decode_lkas11(const std::array<uint8_t, 8> &data) {
   HyundaiLkas11Values values;

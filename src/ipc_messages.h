@@ -1,17 +1,19 @@
-#ifndef K230_IPC_H
-#define K230_IPC_H
+#ifndef IPC_MESSAGES_H
+#define IPC_MESSAGES_H
+
+/* 프로세스 사이를 /dev/shm으로 건너가는 메시지 전부: 토픽 이름, 매직/버전,
+ * 채널 헤더, 상태 스냅샷, 그리고 ParsedModelOutput <-> K230ModelState 변환.
+ * 채널 구현은 ipc_channels.h에 있다. 메시지를 쓰기만 하는 코드는 이 헤더만 본다. */
 
 #include "app_config.h"
-#include "common_utils.h"
 #include "model_output.h"
-#include "online_calibrator.h"
 #include "projection.h"
 #include "recording_format.h"
+#include "utils_time.h"
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <string>
 
 constexpr uint32_t kK230IpcMagic = 0x4b323349;
 constexpr uint32_t kK230IpcVersion = 1;
@@ -177,8 +179,11 @@ struct K230CanBatch {
     K230CanFrame frames[kK230CanBatchMaxFrames] = {};
 };
 
-bool k230_can_batch_is_fresh(const K230CanBatch &batch, uint64_t now_ns,
-                             uint64_t max_age_ns);
+inline bool k230_can_batch_is_fresh(const K230CanBatch &batch, uint64_t now_ns,
+                                    uint64_t max_age_ns)
+{
+    return batch.valid && timestamp_fresh_ns(batch.timestamp_ns, now_ns, max_age_ns);
+}
 
 struct K230CanQueueHeader {
     uint32_t magic = kK230CanQueueMagic;
@@ -324,78 +329,7 @@ static_assert(kK230RecordingVersion == 5 && sizeof(K230ModelState) == 3256 &&
                   sizeof(K230ControlState) == 240 && sizeof(K230PandaState) == 96,
               "recording v5 pins these payloads; bump kK230RecordingVersion together");
 
-class K230LatestChannel {
-public:
-    K230LatestChannel() = default;
-    ~K230LatestChannel();
-
-    bool open(const char *name, size_t payload_capacity, bool create);
-    void close();
-    bool publish(const void *payload, size_t payload_size);
-    bool read(void *payload, size_t payload_capacity, uint64_t *seq = nullptr) const;
-    bool read_new(uint64_t *last_seq, void *payload, size_t payload_capacity, int timeout_ms) const;
-    bool valid() const { return header_ != nullptr; }
-
-private:
-    std::string name_;
-    int fd_ = -1;
-    size_t map_size_ = 0;
-    K230IpcHeader *header_ = nullptr;
-    uint8_t *payload_ = nullptr;
-};
-
-class K230CanQueue {
-public:
-    K230CanQueue() = default;
-    ~K230CanQueue();
-
-    bool open(const char *name, unsigned slot_count = kK230CanQueueSlots,
-              bool create = true);
-    void close();
-    void reset();
-    bool push(const K230CanBatch &batch);
-    bool pop(K230CanBatch *batch);
-    uint64_t depth() const;
-    bool valid() const { return header_ != nullptr; }
-
-private:
-    std::string name_;
-    int fd_ = -1;
-    size_t map_size_ = 0;
-    K230CanQueueHeader *header_ = nullptr;
-    K230CanBatch *slots_ = nullptr;
-};
-
-class K230FrameRing {
-public:
-    K230FrameRing() = default;
-    ~K230FrameRing();
-
-    bool open(bool create, unsigned width = kK230AiWidth, unsigned height = kK230AiHeight,
-              unsigned slots = kK230FrameSlots);
-    void close();
-    bool write_slot(unsigned index, uint64_t frame_id, const uint8_t *source,
-                    size_t size);
-    bool copy_slot(unsigned index, uint64_t frame_id, uint8_t *destination,
-                   size_t size) const;
-    /* NV12 슬롯을 Y/UV 목적지로 나눠 복사한다. 소비자가 이미 스트라이드가
-     * 있는 버퍼(예: 인코더 입력)를 쥐고 있을 때 중간 복사를 없앤다. */
-    bool copy_slot_planes(unsigned index, uint64_t frame_id, uint8_t *luma,
-                          size_t luma_stride, uint8_t *chroma,
-                          size_t chroma_stride) const;
-    unsigned slot_count() const { return header_ ? header_->slot_count : 0; }
-    unsigned frame_bytes() const { return header_ ? header_->frame_bytes : 0; }
-    unsigned width() const { return header_ ? header_->width : 0; }
-    unsigned height() const { return header_ ? header_->height : 0; }
-    bool valid() const { return header_ != nullptr; }
-
-private:
-    int fd_ = -1;
-    size_t map_size_ = 0;
-    K230FrameRingHeader *header_ = nullptr;
-    uint8_t *frames_ = nullptr;
-};
-
+/* modeld가 발행 직전에, overlayd와 hud_snapshot이 소비 직후에 쓴다. */
 void k230_fill_model_state(K230ModelState &state, const ParsedModelOutput &parsed,
                            const ProjectionState &projection,
                            const OnlineCalibrator::Snapshot &calibration,

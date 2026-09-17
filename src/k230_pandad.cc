@@ -1,4 +1,6 @@
-#include "k230_ipc.h"
+#include "utils_process.h"
+#include "utils_time.h"
+#include "ipc_channels.h"
 #include "panda_can_codec.h"
 #include "panda_client.h"
 

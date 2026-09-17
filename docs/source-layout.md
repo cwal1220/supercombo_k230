@@ -22,7 +22,7 @@
     intermediate RGB or warped image buffer. Its compact fixed-point LUT is
     16 bytes/sample instead of 24, and the K230 build uses an exact C908 RVV
     kernel with a scalar fallback.
-- `src/calibration_service.*`, `src/online_calibrator.*`
+- `src/calibration_service.*`, `src/calibration_online.*`
   - wrap pose-based online calibration, manual override, projection policy, and
     the model-input calibration feedback loop.
 - `src/projection.*`
@@ -41,7 +41,7 @@
     solver. See [Verification](verification.md#lateral-mpc-solver).
 - `src/lateral_target.h`
   - declares `LateralTarget`, the planner-to-controller interface.
-- `src/lateral_controller.*`, `src/torque_controller.*`,
+- `src/lateral_controller.*`, `src/lateral_torque.*`,
   `src/control_params.*`, `src/hyundai_can.*`
   - apply the planner's lag-adjusted curvature through the validated K7
     torque/CAN path.
@@ -50,8 +50,10 @@
     count). It computes no path geometry; curvature comes from the MPC.
 - `src/adaptive_cruise.*`, `src/departure_alert.*`
   - vision cruise setpoint control and departure alerting.
-- `src/vehicle_can.*`, `src/hyundai_can.*`
-  - K7 YG HEV CAN decode/encode and vehicle state.
+- `src/can_frame.h`, `src/vehicle_can.*`, `src/hyundai_can.*`
+  - `can_frame.h` holds the transport type and the K7 YG HEV address/bus table;
+    `vehicle_can` decodes received frames into vehicle state, `hyundai_can`
+    encodes LKAS11/CLU11/MDPS12 commands.
 
 ### Control safety holds
 
@@ -64,9 +66,16 @@ released after that short hold if they persist.
 
 ## Processes and IPC
 
-- `src/k230_ipc.*`
-  - owns the `/dev/shm` latest-message channels and shared NV12 frame ring used
-    by the split runtime.
+- `src/ipc_messages.*`
+  - every message that crosses `/dev/shm`: topic names, magics, channel headers,
+    the `K230*State` snapshots with their `static_assert`s, and the
+    `ParsedModelOutput` ↔ `K230ModelState` marshalling. Recording v5 stores
+    `K230ModelState`, `K230ControlState`, and `K230PandaState` as-is, so their
+    offsets are pinned here and tied to `kK230RecordingVersion`. Code that only
+    reads or fills a message includes this and nothing else.
+- `src/ipc_channels.*`
+  - the `/dev/shm` channel implementations: latest-message channel, CAN queue,
+    and the shared NV12 frame ring.
 - `src/k230_overlayd.cc`, `src/k230_camerad.cc`, `src/k230_modeld.cc`
   - openpilot-style process split. `k230_overlayd` is the direct DRM overlay
     process; `k230_camerad` and `k230_modeld` keep the camera/model path
@@ -75,10 +84,14 @@ released after that short hold if they persist.
   - draws the HUD (panels, plan/lane/road-edge ribbons, lead marker, turn
     signals, alerts, traffic-signal sprites) with OpenCV into the CPU ARGB8888
     buffer used by the split DRM overlay process. Stateless apart from the
-    preloaded sprites; the turn-signal phase comes from `k230_overlayd`. Also
-    owns the `K230*State` → `OverlayHudState` mapping shared with
-    `hud_snapshot` and the engage-block label table shared with
-    `k230_overlayd`.
+    preloaded sprites; the turn-signal phase comes from `k230_overlayd`.
+- `src/overlay_state.*`
+  - `OverlayHudState`, the `K230*State` → `OverlayHudState` mapping shared by
+    `k230_overlayd` and `hud_snapshot`, and the engage-block label table. No
+    OpenCV, so the mapping can be checked on the host.
+- `src/system_monitor.*`
+  - `/proc`, thermal-zone, and network sampling into `OverlayHudState`, called
+    at 1 Hz by `k230_overlayd`.
 - `src/k230_recordd.cc`, `src/mvx_v4l2_encoder.*`, `src/recording_writer.*`
   - low-priority data recorder, direct MVX V4L2 M2M encoder, timestamp index,
     compact event log, route segmentation, and storage-reserve guard.
@@ -95,9 +108,15 @@ released after that short hold if they persist.
 
 ## Shared helpers
 
-- `src/common_utils.*`
-  - shared-memory channels, `env_flag` environment parsing, clamping, CAN signal
-    extraction, and timestamp freshness.
-- `src/json_utils.*`
+- `src/utils_process.h`
+  - what a process gets from the OS: environment variables (`env_flag` is the
+    one boolean convention), the `params/` directory path, and the
+    SIGINT/SIGTERM → stop-flag hookup used by every `k230_*d` main.
+- `src/utils_math.h`
+  - clamping, openpilot `interp`, degree/radian conversion.
+- `src/utils_time.h`
+  - `k230_now_ns` (the one runtime clock, `CLOCK_BOOTTIME`) and the freshness
+    predicates for ns and CAN-seconds timestamps.
+- `src/utils_json.*`
   - minimal JSON value readers and the clamped `parse_json_optional_*` helpers
     used by every parameter loader.

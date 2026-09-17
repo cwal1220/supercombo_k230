@@ -1,10 +1,10 @@
 #include "supercombo_model.h"
 
-#include "common_utils.h"
+#include "utils_process.h"
+#include "utils_time.h"
 #include "scoped_timing.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -17,12 +17,6 @@
 using namespace nncase::runtime;
 
 namespace {
-
-uint64_t now_ns()
-{
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count());
-}
 
 bool profile_enabled()
 {
@@ -331,7 +325,7 @@ bool SupercomboModel::run_frame(const uint8_t *nv12, int src_w, int src_h,
         return false;
 
     const bool profile = profile_enabled();
-    const uint64_t t1 = profile ? now_ns() : 0;
+    const uint64_t t1 = profile ? k230_now_ns() : 0;
     if (gpu) {
         if (!prepare_images_gpu(nv12)) return false;
     } else {
@@ -340,15 +334,15 @@ bool SupercomboModel::run_frame(const uint8_t *nv12, int src_w, int src_h,
         hrt::sync(input_tensors_[0], sync_op_t::sync_write_back, true).expect("sync input 0 failed");
         hrt::sync(input_tensors_[1], sync_op_t::sync_write_back, true).expect("sync input 1 failed");
     }
-    const uint64_t t2 = profile ? now_ns() : 0;
+    const uint64_t t2 = profile ? k230_now_ns() : 0;
 
     if (!write_temporal_inputs()) return false;
-    const uint64_t t3 = profile ? now_ns() : 0;
+    const uint64_t t3 = profile ? k230_now_ns() : 0;
 
     run();
-    const uint64_t t4 = profile ? now_ns() : 0;
+    const uint64_t t4 = profile ? k230_now_ns() : 0;
     if (!advance_image_history(0) || !advance_image_history(1)) return false;
-    const uint64_t t5 = profile ? now_ns() : 0;
+    const uint64_t t5 = profile ? k230_now_ns() : 0;
     fetch_outputs();
 
     size_t total = 0;
@@ -366,7 +360,7 @@ bool SupercomboModel::run_frame(const uint8_t *nv12, int src_w, int src_h,
     push_feature_history(raw_output);
 
     if (profile) {
-        const uint64_t t6 = now_ns();
+        const uint64_t t6 = k230_now_ns();
         profile_stats().add(t2 - t1, t3 - t2, t4 - t3, t5 - t4, t6 - t5, t6 - t1);
     }
 

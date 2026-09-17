@@ -175,14 +175,14 @@ returns `latAccelFactor` 4.00, the value that route was fit to.
 
 ## Lateral planner replay
 
-`planner_replay` re-runs `LateralPlanner` over a recording and writes
+`replay_planner` re-runs `LateralPlanner` over a recording and writes
 what the planner asked for, one row per `ModelState`. It builds on the host now
 that the MPC has no riscv64 dependency, so a recorded route can be re-planned
 without the board:
 
 ```sh
-cmake --build build-host --target planner_replay -j2
-./build-host/bin/planner_replay out.csv <route>/events/*.bin
+cmake --build build-host --target replay_planner -j2
+./build-host/bin/replay_planner out.csv <route>/events/*.bin
 ```
 
 Columns include the recorded and re-planned desired curvature, the MPC's own

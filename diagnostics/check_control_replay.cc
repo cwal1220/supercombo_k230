@@ -2,11 +2,11 @@
 #include "check_harness.h"
 #include "control_fixtures.h"
 #include "hyundai_can.h"
-#include "k230_ipc.h"
+#include "ipc_messages.h"
 #include "lateral_controller.h"
 #include "model_output.h"
 #include "lateral_path.h"
-#include "torque_controller.h"
+#include "lateral_torque.h"
 #include "vehicle_can.h"
 
 #include <algorithm>

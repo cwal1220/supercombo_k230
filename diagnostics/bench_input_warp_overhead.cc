@@ -1,5 +1,6 @@
 #include "app_config.h"
 #include "model_input_transform.h"
+#include "utils_math.h"
 
 #include <algorithm>
 #include <chrono>

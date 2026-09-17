@@ -1,5 +1,5 @@
-#ifndef ONLINE_CALIBRATOR_H
-#define ONLINE_CALIBRATOR_H
+#ifndef CALIBRATION_ONLINE_H
+#define CALIBRATION_ONLINE_H
 
 #include <cstdint>
 

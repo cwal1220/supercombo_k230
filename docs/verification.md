@@ -100,7 +100,7 @@ control cycle could disappear into a single solve.
 
 ### End-to-end replay
 
-`planner_replay` over three segments of route `2026-09-07--02-21-46-703`
+`replay_planner` over three segments of route `2026-09-07--02-21-46-703`
 (3545 frames, 1217 of them at standstill, 0-76 kph). Both runs are board
 binaries, so nothing here is host/target float noise; the host build produces a
 byte-identical CSV to the board build.
@@ -133,7 +133,7 @@ swept over the three replay segments; only this one earned its place:
 | `lateral_jerk` (0.04) | -2.8%; it is the existing `rate` term with a different speed scaling | dropped as redundant |
 | `lateral_accel` (0.02) | -0.0%; at a weight large enough to matter it distorts highway cornering | dropped |
 
-Command jerk (RMS of `d(des)/dt` from `planner_replay`) with `steering_rate` at
+Command jerk (RMS of `d(des)/dt` from `replay_planner`) with `steering_rate` at
 700, by speed band:
 
 | Segment | 0-5 kph | 5-20 | 20-50 | 50+ |

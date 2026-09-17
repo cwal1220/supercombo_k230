@@ -7,8 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.k230_display_control import duty_cycle_ns
-from scripts.param_server import PARAM_METADATA, ParamStore
+from scripts.display_control import duty_cycle_ns
+from scripts.k230_param_server import PARAM_METADATA, ParamStore
 
 
 class FakeDisplayController:

@@ -52,32 +52,63 @@ else()
   find_package(OpenCV QUIET COMPONENTS core imgproc imgcodecs)
 endif()
 
-# 프로세스 공용 코드. 호스트 검사도 쓴다. glibc는 shm_open이 librt에 있고 macOS는 libc에 있다.
-add_library(k230_common STATIC
+# 호스트에서도 컴파일되는 서브시스템 라이브러리. 각 소스는 정확히 한 곳에만 나열한다.
+function(add_k230_library target)
+  add_library(${target} STATIC ${ARGN})
+  target_include_directories(${target} PUBLIC ${PROJECT_LOCAL_INCLUDES})
+  target_compile_options(${target} PRIVATE ${PROJECT_WARNINGS})
+endfunction()
+
+# 프로세스 공용 코드. glibc는 shm_open이 librt에 있고 macOS는 libc에 있다.
+add_k230_library(common
   src/app_config.cc
-  src/k230_ipc.cc
+  src/ipc_channels.cc
+  src/ipc_messages.cc
   src/model_output.cc
   src/projection.cc
 )
-target_include_directories(k230_common PUBLIC ${PROJECT_LOCAL_INCLUDES})
-target_compile_options(k230_common PRIVATE ${PROJECT_WARNINGS})
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  target_link_libraries(k230_common PUBLIC rt pthread)
+  target_link_libraries(common PUBLIC rt pthread)
 endif()
 
-add_library(control_core STATIC
+add_k230_library(utils_json src/utils_json.cc)
+
+add_k230_library(control_core
+  src/adaptive_cruise.cc
   src/control_params.cc
   src/departure_alert.cc
   src/hyundai_can.cc
-  src/json_utils.cc
-  src/adaptive_cruise.cc
   src/lateral_controller.cc
   src/lateral_path.cc
-  src/torque_controller.cc
+  src/lateral_torque.cc
   src/vehicle_can.cc
 )
-target_include_directories(control_core PUBLIC ${PROJECT_LOCAL_INCLUDES})
-target_compile_options(control_core PRIVATE ${PROJECT_WARNINGS})
+target_link_libraries(control_core PUBLIC utils_json)
+
+add_k230_library(planning
+  src/lateral_mpc.cc
+  src/lateral_planner.cc
+)
+target_link_libraries(planning PUBLIC control_core common)
+
+add_k230_library(perception
+  src/calibration_service.cc
+  src/model_input_transform.cc
+  src/calibration_online.cc
+)
+target_link_libraries(perception PUBLIC common utils_json)
+
+add_k230_library(panda_codec src/panda_can_codec.cc)
+
+# 오버레이 상태 매핑과 렌더러. 렌더러가 OpenCV를 쓰므로 OpenCV가 있는 곳에서만 만든다.
+if(OpenCV_FOUND)
+  add_k230_library(overlay
+    src/overlay_renderer.cc
+    src/overlay_state.cc
+  )
+  target_include_directories(overlay SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
+  target_link_libraries(overlay PUBLIC common ${OpenCV_LIBS})
+endif()
 
 # 호스트 검사·도구: 로컬 헤더와 경고만 붙인 일반 실행 파일.
 function(add_host_tool target)
@@ -128,10 +159,12 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     endif()
   endforeach()
 
-  add_library(mmz STATIC src/mmz.c)
-  target_include_directories(mmz PUBLIC ${PROJECT_LOCAL_INCLUDES})
+  # 보드 전용 라이브러리: 시스템 헤더가 필요하다.
+  add_k230_library(mmz src/mmz.c)
   target_include_directories(mmz SYSTEM PUBLIC ${PROJECT_SYSTEM_INCLUDES})
-  target_compile_options(mmz PRIVATE ${PROJECT_WARNINGS})
+
+  add_k230_library(capture src/input_source.cc)
+  target_include_directories(capture SYSTEM PUBLIC ${PROJECT_SYSTEM_INCLUDES})
 
   # 보드 실행 파일: 시스템 헤더, 링크 경로, 공용 시스템 라이브러리.
   function(configure_k230_target target)
@@ -154,70 +187,54 @@ if(SUPERCOMBO_BUILD_RUNTIME)
     )
   endfunction()
 
-  add_executable(k230_camerad
-    src/k230_camerad.cc
-    src/input_source.cc
-  )
-  configure_k230_target(k230_camerad k230_common mmz ${K230_SHARED_LIBS})
+  add_executable(k230_camerad src/k230_camerad.cc)
+  configure_k230_target(k230_camerad common capture mmz ${K230_SHARED_LIBS})
 
   add_executable(k230_modeld
     src/k230_modeld.cc
-    src/calibration_service.cc
     src/gpu_warp.cc
-    src/input_source.cc
-    src/json_utils.cc
-    src/model_input_transform.cc
-    src/online_calibrator.cc
     src/supercombo_model.cc
   )
-  configure_k230_target(k230_modeld k230_common ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS}
-    ${K230_VGLITE_LIB})
+  configure_k230_target(k230_modeld common perception capture ${NNCASE_STATIC_LIBS} mmz
+    ${K230_SHARED_LIBS} ${K230_VGLITE_LIB})
 
   add_executable(k230_overlayd
     src/k230_overlayd.cc
     src/piezo_buzzer.c
-    src/overlay_renderer.cc
+    src/system_monitor.cc
   )
-  configure_k230_target(k230_overlayd k230_common mmz ${K230_SHARED_LIBS} ${OpenCV_LIBS})
+  configure_k230_target(k230_overlayd common overlay mmz ${K230_SHARED_LIBS})
 
   add_executable(k230_recordd
     src/k230_recordd.cc
-    src/json_utils.cc
     src/mvx_v4l2_encoder.cc
     src/recording_writer.cc
   )
-  configure_k230_target(k230_recordd k230_common)
+  configure_k230_target(k230_recordd common utils_json)
 
   if(SUPERCOMBO_BUILD_PANDA)
     add_executable(k230_pandad
       src/k230_pandad.cc
       src/panda_client.cc
-      src/panda_can_codec.cc
     )
-    configure_k230_target(k230_pandad k230_common ${LIBUSB_LIBRARIES})
+    configure_k230_target(k230_pandad common panda_codec ${LIBUSB_LIBRARIES})
 
-    add_executable(k230_controlsd
-      src/k230_controlsd.cc
-      src/lateral_mpc.cc
-      src/lateral_planner.cc
-    )
-    configure_k230_target(k230_controlsd k230_common control_core)
+    add_executable(k230_controlsd src/k230_controlsd.cc)
+    configure_k230_target(k230_controlsd common control_core planning)
   endif()
 endif()
 
 if(SUPERCOMBO_BUILD_DIAGNOSTICS)
   add_host_tool(check_model_output_parser diagnostics/check_model_output_parser.cc)
-  target_link_libraries(check_model_output_parser PRIVATE k230_common)
+  target_link_libraries(check_model_output_parser PRIVATE common)
 
   add_host_tool(bench_nv12_to_yuv6 diagnostics/bench_nv12_to_yuv6.cc)
 
-  add_host_tool(check_panda_can_codec
-    diagnostics/check_panda_can_codec.cc
-    src/panda_can_codec.cc
-  )
+  add_host_tool(check_panda_can_codec diagnostics/check_panda_can_codec.cc)
+  target_link_libraries(check_panda_can_codec PRIVATE panda_codec)
 
   add_host_tool(check_k230_can_queue diagnostics/check_k230_can_queue.cc)
-  target_link_libraries(check_k230_can_queue PRIVATE k230_common)
+  target_link_libraries(check_k230_can_queue PRIVATE common)
 
   add_host_tool(check_control_replay
     diagnostics/check_control_replay.cc
@@ -234,41 +251,23 @@ if(SUPERCOMBO_BUILD_DIAGNOSTICS)
   add_host_tool(check_adaptive_cruise diagnostics/check_adaptive_cruise.cc)
   target_link_libraries(check_adaptive_cruise PRIVATE control_core)
 
-  add_host_tool(check_lateral_mpc
-    diagnostics/check_lateral_mpc.cc
-    src/lateral_mpc.cc
-  )
+  add_host_tool(check_lateral_mpc diagnostics/check_lateral_mpc.cc)
+  target_link_libraries(check_lateral_mpc PRIVATE planning)
 
-  add_host_tool(planner_replay
-    diagnostics/planner_replay.cc
-    src/lateral_mpc.cc
-    src/lateral_planner.cc
-  )
-  target_link_libraries(planner_replay PRIVATE k230_common control_core)
+  add_host_tool(replay_planner diagnostics/replay_planner.cc)
+  target_link_libraries(replay_planner PRIVATE planning)
 
-  add_host_tool(bench_input_warp_overhead
-    diagnostics/bench_input_warp_overhead.cc
-    src/model_input_transform.cc
-  )
-  target_link_libraries(bench_input_warp_overhead PRIVATE k230_common)
+  add_host_tool(bench_input_warp_overhead diagnostics/bench_input_warp_overhead.cc)
+  target_link_libraries(bench_input_warp_overhead PRIVATE perception)
 
-  add_host_tool(check_calibration_equivalence
-    diagnostics/check_calibration_equivalence.cc
-    src/calibration_service.cc
-    src/json_utils.cc
-    src/model_input_transform.cc
-    src/online_calibrator.cc
-  )
-  target_link_libraries(check_calibration_equivalence PRIVATE k230_common)
+  add_host_tool(check_calibration_equivalence diagnostics/check_calibration_equivalence.cc)
+  target_link_libraries(check_calibration_equivalence PRIVATE perception)
 
-  # HUD 스냅샷·타이밍 도구. 렌더러가 OpenCV를 쓰므로 OpenCV가 있는 곳에서만 만든다.
+  # HUD 스냅샷·타이밍 도구. overlay 라이브러리와 같은 OpenCV 조건을 따른다.
   if(OpenCV_FOUND)
-    add_host_tool(hud_snapshot
-      diagnostics/hud_snapshot.cc
-      src/overlay_renderer.cc
-    )
+    add_host_tool(hud_snapshot diagnostics/hud_snapshot.cc)
     target_include_directories(hud_snapshot SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
-    target_link_libraries(hud_snapshot PRIVATE k230_common ${OpenCV_LIBS})
+    target_link_libraries(hud_snapshot PRIVATE overlay)
   endif()
 
   if(SUPERCOMBO_BUILD_RUNTIME)
@@ -301,8 +300,8 @@ if(SUPERCOMBO_BUILD_RUNTIME)
   if(SUPERCOMBO_BUILD_PANDA)
     install(TARGETS k230_pandad k230_controlsd RUNTIME DESTINATION .)
   endif()
-  install(PROGRAMS scripts/k230_manager.py scripts/param_server.py
-    scripts/k230_display_control.py DESTINATION .)
+  install(PROGRAMS scripts/k230_manager.py scripts/k230_param_server.py
+    scripts/display_control.py DESTINATION .)
   install(FILES scripts/requirements-param-server.txt DESTINATION .)
   install(DIRECTORY models DESTINATION . OPTIONAL FILES_MATCHING PATTERN "*.kmodel")
   install(DIRECTORY params DESTINATION . FILES_MATCHING PATTERN "*.json")

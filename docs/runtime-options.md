@@ -169,7 +169,7 @@ repository copy under `params.defaults/` as a fallback.
 Open the editor at `http://<board-ip>:8080`. It can also be started directly:
 
 ```sh
-python3 scripts/param_server.py --host 0.0.0.0 --port 8080
+python3 scripts/k230_param_server.py --host 0.0.0.0 --port 8080
 ```
 
 > [!WARNING]

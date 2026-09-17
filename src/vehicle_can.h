@@ -1,32 +1,9 @@
 #pragma once
 
+#include "can_frame.h"
+
 #include <array>
 #include <cstdint>
-
-constexpr uint32_t kHyundaiSas11Address = 688;       // 0x2b0
-constexpr uint32_t kHyundaiEsp12Address = 544;       // 0x220
-constexpr uint32_t kHyundaiWhlSpd11Address = 902;    // 0x386
-constexpr uint32_t kHyundaiScc11Address = 1056;      // 0x420
-constexpr uint32_t kHyundaiScc12Address = 1057;      // 0x421
-constexpr uint32_t kHyundaiTcs13Address = 916;       // 0x394
-constexpr uint32_t kHyundaiTcs15Address = 1287;      // 0x507
-constexpr uint32_t kHyundaiEEms11Address = 881;      // 0x371
-constexpr uint32_t kHyundaiElectGearAddress = 882;   // 0x372
-constexpr uint32_t kHyundaiCgw1Address = 1345;       // 0x541
-constexpr uint32_t kHyundaiCgw2Address = 1363;       // 0x553
-constexpr uint32_t kHyundaiLca11Address = 1419;      // 0x58b
-constexpr uint32_t kHyundaiTpms11Address = 1427;     // 0x593
-
-constexpr uint8_t kPowertrainBus = 0;
-constexpr uint8_t kMdpsBus = 1;
-constexpr uint8_t kCameraBus = 2;
-
-struct CanFrame {
-  uint32_t address = 0;
-  uint8_t bus = 0;
-  uint8_t length = 0;
-  std::array<uint8_t, 8> data = {};
-};
 
 struct Sas11Values {
   float steering_angle_deg = 0.0f;

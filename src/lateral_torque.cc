@@ -1,10 +1,10 @@
-#include "torque_controller.h"
+#include "lateral_torque.h"
 
 #include <algorithm>
 #include <cmath>
 #include <utility>
 
-#include "common_utils.h"
+#include "utils_math.h"
 
 namespace {
 

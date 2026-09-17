@@ -1,7 +1,10 @@
 #include "app_config.h"
-#include "common_utils.h"
+#include "utils_process.h"
+#include "utils_time.h"
 #include "display.h"
-#include "k230_ipc.h"
+#include "overlay_state.h"
+#include "ipc_channels.h"
+#include "ipc_messages.h"
 #include "overlay_renderer.h"
 #include "piezo_buzzer.h"
 #include "projection.h"
@@ -352,7 +355,7 @@ private:
 
     static bool fresh(uint64_t timestamp_ns, uint64_t now)
     {
-        return timestamp_ns != 0 && now >= timestamp_ns && now - timestamp_ns <= kStateFreshNs;
+        return timestamp_fresh_ns(timestamp_ns, now, kStateFreshNs);
     }
 
     struct Freshness {

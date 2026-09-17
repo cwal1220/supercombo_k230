@@ -1,4 +1,4 @@
-#include "k230_ipc.h"
+#include "ipc_channels.h"
 #include "check_harness.h"
 
 #include <sys/mman.h>

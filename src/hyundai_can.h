@@ -4,13 +4,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "can_frame.h"
 #include "control_params.h"
-#include "vehicle_can.h"
-
-constexpr uint32_t kHyundaiLkas11Address = 832;   // 0x340
-constexpr uint32_t kHyundaiClu11Address = 1265;   // 0x4f1
-constexpr uint32_t kHyundaiMdps12Address = 593;   // 0x251
-constexpr uint8_t kHyundaiMdps12TxBus = 2;
 
 struct HyundaiSteeringLimits {
   int steer_max = 384;
@@ -98,9 +93,6 @@ struct HyundaiCanConfig {
   bool send_clu11_speed_to_mdps = true;
   float mdps_speed_spoof_kph = 60.0f;
 };
-
-// 리틀엔디언 비트 필드 쓰기. 읽기 짝은 common_utils.h의 get_signal_le.
-void set_signal_le(std::array<uint8_t, 8> *data, int start_bit, int length, uint32_t raw);
 
 HyundaiLkas11Values decode_lkas11(const std::array<uint8_t, 8> &data);
 HyundaiClu11Values decode_clu11(const std::array<uint8_t, 4> &data);
