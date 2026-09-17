@@ -1,22 +1,9 @@
 #include "adaptive_cruise.h"
+#include "check_harness.h"
 
 #include <cmath>
-#include <cstdio>
-#include <stdexcept>
 
 namespace {
-
-void require(bool condition, const char *message) {
-  if (!condition) throw std::runtime_error(message);
-}
-
-bool near_enough(float value, float expected, float tolerance) {
-  return std::fabs(value - expected) < tolerance;
-}
-
-bool near(float value, float expected) {
-  return std::fabs(value - expected) < 0.001f;
-}
 
 /* 버튼을 누르면 차량의 설정 속도가 실제로 움직인다. 예전 픽스처는 이걸
  * 모사하지 않고 driver_set_speed_kph를 고정한 채 컨트롤러 내부 추측값만
@@ -108,8 +95,8 @@ void verify_close_lead_follows_measured_deceleration_rate() {
   Vehicle vehicle;
   AdaptiveCruiseOutput output = activate(&controller, &vehicle);
   require(output.session_valid && output.active &&
-              near(output.maximum_speed_kph, 80.0f) &&
-              near(output.commanded_speed_kph, 80.0f),
+              near(output.maximum_speed_kph, 80.0f, 0.001f) &&
+              near(output.commanded_speed_kph, 80.0f, 0.001f),
           "first SET must capture maximum and commanded speed");
 
   AdaptiveCruiseInput input = base_input(0.01);
@@ -120,12 +107,12 @@ void verify_close_lead_follows_measured_deceleration_rate() {
   input.vision_lead_distance_m = 12.0f;
   input.vision_lead_relative_speed_mps = -4.0f;
   output = tick(&controller, input, &vehicle);
-  require(output.command_button == 0 && near(output.commanded_speed_kph, 80.0f),
+  require(output.command_button == 0 && near(output.commanded_speed_kph, 80.0f, 0.001f),
           "adaptive command must wait one second after SET");
 
   input.now_s = 1.0;
   output = tick(&controller, input, &vehicle);
-  require(output.command_button == 2 && near(output.commanded_speed_kph, 78.0f) &&
+  require(output.command_button == 2 && near(output.commanded_speed_kph, 78.0f, 0.001f) &&
               output.target_speed_kph < output.commanded_speed_kph,
           "close slower lead must issue one SET command");
 
@@ -138,7 +125,7 @@ void verify_close_lead_follows_measured_deceleration_rate() {
   }
   input.now_s = 1.05;
   output = tick(&controller, input, &vehicle);
-  require(output.command_button == 0 && near(output.commanded_speed_kph, 78.0f),
+  require(output.command_button == 0 && near(output.commanded_speed_kph, 78.0f, 0.001f),
           "button pulse must stop after five frames");
 
   input.now_s = 1.9;
@@ -148,11 +135,11 @@ void verify_close_lead_follows_measured_deceleration_rate() {
           "adaptive commands must be rate limited to one start per second");
   input.now_s = 2.0;
   output = tick(&controller, input, &vehicle);
-  require(output.command_button == 0 && near(output.commanded_speed_kph, 78.0f),
+  require(output.command_button == 0 && near(output.commanded_speed_kph, 78.0f, 0.001f),
           "the next SET must wait for the measured deceleration response");
   input.now_s = 2.34;
   output = tick(&controller, input, &vehicle);
-  require(output.command_button == 2 && near(output.commanded_speed_kph, 76.0f),
+  require(output.command_button == 2 && near(output.commanded_speed_kph, 76.0f, 0.001f),
           "persistent close lead must request the next step after its response time");
 }
 
@@ -169,7 +156,7 @@ void verify_closing_lead_prediction_and_resume_delay() {
   AdaptiveCruiseOutput output = tick(&controller, input, &vehicle);
   require(output.target_speed_kph < 64.0f,
           "closing lead distance must be predicted at command response time");
-  require(output.command_button == 2 && near(output.commanded_speed_kph, 78.0f),
+  require(output.command_button == 2 && near(output.commanded_speed_kph, 78.0f, 0.001f),
           "predicted closing lead must request SET");
 
   input.vision_lead_updated = false;
@@ -189,7 +176,7 @@ void verify_closing_lead_prediction_and_resume_delay() {
 
   input.now_s = 3.0;
   output = tick(&controller, input, &vehicle);
-  require(output.command_button == 1 && near(output.commanded_speed_kph, 80.0f),
+  require(output.command_button == 1 && near(output.commanded_speed_kph, 80.0f, 0.001f),
           "RES may restore speed after the configured recovery delay");
 }
 
@@ -203,7 +190,7 @@ void verify_lead_loss_holds_then_restores_maximum() {
   input.vision_lead_distance_m = 10.0f;
   input.vision_lead_relative_speed_mps = -5.0f;
   AdaptiveCruiseOutput output = tick(&controller, input, &vehicle);
-  require(output.command_button == 2 && near(output.commanded_speed_kph, 78.0f),
+  require(output.command_button == 2 && near(output.commanded_speed_kph, 78.0f, 0.001f),
           "lead must lower current command before restore test");
   input.vision_lead_updated = false;
   for (int frame = 1; frame < 5; ++frame) {
@@ -215,12 +202,12 @@ void verify_lead_loss_holds_then_restores_maximum() {
   input.vision_lead_valid = false;
   input.now_s = 2.0;
   output = tick(&controller, input, &vehicle);
-  require(output.command_button == 0 && near(output.commanded_speed_kph, 78.0f),
+  require(output.command_button == 0 && near(output.commanded_speed_kph, 78.0f, 0.001f),
           "short lead loss must hold the reduced setting");
 
   input.now_s = 3.01;
   output = tick(&controller, input, &vehicle);
-  require(output.command_button == 1 && near(output.commanded_speed_kph, 80.0f),
+  require(output.command_button == 1 && near(output.commanded_speed_kph, 80.0f, 0.001f),
           "stable lead loss must restore toward the captured maximum");
 }
 
@@ -279,8 +266,8 @@ void verify_driver_and_pedal_gates() {
   /* 지수 수렴이라 정착 판정 시점에 한 스텝의 1/6 정도가 남는다. 명령 단위가
    * 2 km/h이므로 실질 영향은 없다. */
   /* 앞 단계에서 자동 SET-이 한 번 나가 80 -> 78이 됐으므로 운전자 RES 후는 80이다. */
-  require(near_enough(output.maximum_speed_kph, 80.0f, 0.5f) &&
-              near_enough(output.commanded_speed_kph, 80.0f, 0.5f),
+  require(near(output.maximum_speed_kph, 80.0f, 0.5f) &&
+              near(output.commanded_speed_kph, 80.0f, 0.5f),
           "driver RES must raise the ceiling once the car has settled");
 }
 
@@ -292,7 +279,7 @@ void verify_session_reset_and_minimum_speed() {
   AdaptiveCruiseInput input = base_input(0.0);
   input.driver_button = 2;
   AdaptiveCruiseOutput output = tick(&controller, input, &vehicle);
-  require(output.session_valid && near(output.maximum_speed_kph, 30.0f),
+  require(output.session_valid && near(output.maximum_speed_kph, 30.0f, 0.001f),
           "metric SET speed must not fall below the stock cruise minimum");
 
   input.driver_button = 0;
@@ -312,7 +299,7 @@ void verify_session_reset_and_minimum_speed() {
   input.driver_button = 2;
   output = tick(&imperial_controller, input, &imperial_vehicle);
   require(output.session_valid &&
-              near(output.maximum_speed_kph, 20.0f * 1.609344f),
+              near(output.maximum_speed_kph, 20.0f * 1.609344f, 0.001f),
           "imperial SET speed must use the 20 mph stock cruise minimum");
 
   input.enabled = false;
@@ -381,7 +368,7 @@ void verify_steady_following_issues_no_commands() {
     vehicle.settle(0.01f);
     if (output.command_button != 0) ++commands;
   }
-  require(near(vehicle.set_speed_kph, 80.0f),
+  require(near(vehicle.set_speed_kph, 80.0f, 0.001f),
           "steady following must leave the car's set speed alone");
   require(commands == 0, "steady following must issue no button commands");
   require(output.display_scale > 1.03f && output.display_scale < 1.10f,
@@ -421,9 +408,9 @@ void verify_reengage_does_not_inherit_the_old_ceiling() {
     output = tick(&controller, input, &vehicle);
     vehicle.settle(0.01f);
   }
-  require(near_enough(output.maximum_speed_kph, 60.0f, 1.0f),
+  require(near(output.maximum_speed_kph, 60.0f, 1.0f),
           "re-engaging must capture a new ceiling, not inherit the old one");
-  require(near_enough(vehicle.set_speed_kph, 60.0f, 1.0f),
+  require(near(vehicle.set_speed_kph, 60.0f, 1.0f),
           "re-engaging at a lower speed must not be pushed back up");
 }
 
@@ -457,9 +444,9 @@ void verify_held_driver_set_is_not_undone() {
     output = tick(&controller, input, &vehicle);
     vehicle.settle(0.01f);
   }
-  require(near_enough(vehicle.set_speed_kph, 60.0f, 1.0f),
+  require(near(vehicle.set_speed_kph, 60.0f, 1.0f),
           "a held driver SET- must not be pushed back up afterwards");
-  require(near_enough(output.maximum_speed_kph, 60.0f, 1.0f),
+  require(near(output.maximum_speed_kph, 60.0f, 1.0f),
           "the ceiling must follow where the driver actually left the car");
 }
 
@@ -506,7 +493,7 @@ void verify_no_commands_without_a_learned_scale() {
   }
   require(commands == 0,
           "an implausible cluster/wheel ratio must block all commands");
-  require(near(vehicle.set_speed_kph, 80.0f),
+  require(near(vehicle.set_speed_kph, 80.0f, 0.001f),
           "an implausible cluster/wheel ratio must leave the set speed alone");
 }
 
@@ -553,10 +540,10 @@ void verify_slower_lead_is_actually_followed() {
     vehicle.settle(0.01f);
   }
   const float ego_kph = vehicle.wheel_kph();
-  require(near_enough(ego_kph, 50.0f, 3.0f),
+  require(near(ego_kph, 50.0f, 3.0f),
           "a slower lead must actually be followed at its speed");
   const float desired_gap = 5.0f + 1.8f * ego_kph / 3.6f;
-  require(near_enough(gap, desired_gap, 5.0f),
+  require(near(gap, desired_gap, 5.0f),
           "a slower lead must be followed at roughly the desired gap");
 }
 
@@ -566,10 +553,10 @@ void verify_repository_config_loads() {
   require(load_adaptive_cruise_params_json(
               "params/adaptive_cruise.json", &config, &error),
           error.c_str());
-  require(config.enabled && near(config.following_time_s, 1.8f) &&
-              near(config.standstill_gap_m, 5.0f) &&
-              near(config.deceleration_rate_kph_per_s, 1.5f) &&
-              near(config.command_interval_s, 1.0f) &&
+  require(config.enabled && near(config.following_time_s, 1.8f, 0.001f) &&
+              near(config.standstill_gap_m, 5.0f, 0.001f) &&
+              near(config.deceleration_rate_kph_per_s, 1.5f, 0.001f) &&
+              near(config.command_interval_s, 1.0f, 0.001f) &&
               config.button_pulse_frames == 5,
           "repository adaptive cruise defaults do not match the runtime schema");
 }
@@ -577,7 +564,7 @@ void verify_repository_config_loads() {
 }  // namespace
 
 int main() {
-  try {
+  return run_checks("ADAPTIVE_CRUISE_OK", [] {
     verify_close_lead_follows_measured_deceleration_rate();
     verify_closing_lead_prediction_and_resume_delay();
     verify_lead_loss_holds_then_restores_maximum();
@@ -592,10 +579,5 @@ int main() {
     verify_no_limit_cycle_with_a_coarse_vehicle_step();
     verify_slower_lead_is_actually_followed();
     verify_repository_config_loads();
-    std::puts("ADAPTIVE_CRUISE_OK");
-    return 0;
-  } catch (const std::exception &error) {
-    std::fprintf(stderr, "check_adaptive_cruise: %s\n", error.what());
-    return 1;
-  }
+  });
 }

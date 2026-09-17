@@ -1,4 +1,5 @@
 #include "panda_can_codec.h"
+#include "check_harness.h"
 
 #include <array>
 #include <cstdio>
@@ -34,9 +35,7 @@ bool equal_frame(const PandaCanFrame &a, const PandaCanFrame &b)
            std::memcmp(a.data, b.data, a.data_len) == 0;
 }
 
-} // namespace
-
-int main()
+void verify_panda_can_codec()
 {
     bool ok = true;
 
@@ -105,7 +104,12 @@ int main()
     ok &= expect(panda_can_pack_buffer({}, &packed, &error), "empty TX batch is a no-op");
     ok &= expect(packed.empty(), "empty TX batch produces no bytes");
 
-    if (!ok) return 1;
-    std::puts("check_panda_can_codec: ok");
-    return 0;
+    require(ok, "one or more expectations failed");
+}
+
+} // namespace
+
+int main()
+{
+    return run_checks("check_panda_can_codec: ok", verify_panda_can_codec);
 }

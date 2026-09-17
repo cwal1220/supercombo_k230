@@ -1,17 +1,12 @@
 #include "k230_ipc.h"
+#include "check_harness.h"
 
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include <cstdio>
-#include <stdexcept>
 #include <string>
 
 namespace {
-
-void require(bool condition, const char *message) {
-  if (!condition) throw std::runtime_error(message);
-}
 
 K230CanBatch batch_for(uint32_t value) {
   K230CanBatch batch;
@@ -26,7 +21,7 @@ K230CanBatch batch_for(uint32_t value) {
 
 int main() {
   const std::string name = "/k230_can_queue_test_" + std::to_string(getpid());
-  try {
+  const int status = run_checks("K230_CAN_QUEUE_OK", [&] {
     K230CanQueue producer;
     K230CanQueue consumer;
     require(producer.open(name.c_str(), 8, true), "open producer");
@@ -77,12 +72,7 @@ int main() {
 
     consumer.close();
     producer.close();
-    shm_unlink(name.c_str());
-    std::puts("K230_CAN_QUEUE_OK");
-    return 0;
-  } catch (const std::exception &error) {
-    shm_unlink(name.c_str());
-    std::fprintf(stderr, "check_k230_can_queue: %s\n", error.what());
-    return 1;
-  }
+  });
+  shm_unlink(name.c_str());
+  return status;
 }

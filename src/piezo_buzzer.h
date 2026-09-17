@@ -20,8 +20,9 @@ typedef enum PiezoAlert {
 
 typedef struct PiezoBuzzer PiezoBuzzer;
 
-/* 객체가 워커 스레드를 소유하며 overlay 프레임 루프를 블로킹하지 않는다. */
-PiezoBuzzer *piezo_buzzer_create(void);
+/* 객체가 워커 스레드를 소유하며 overlay 프레임 루프를 블로킹하지 않는다.
+ * enabled=0이면 재생 요청을 조용히 버린다. */
+PiezoBuzzer *piezo_buzzer_create(int enabled);
 void piezo_buzzer_destroy(PiezoBuzzer *buzzer);
 void piezo_buzzer_play(PiezoBuzzer *buzzer, PiezoAlert alert, uint32_t event_id);
 

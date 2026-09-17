@@ -8,7 +8,7 @@ The host self-checks build and run in one step, from the repository root:
 ./scripts/run_host_checks.sh
 ```
 
-That covers every `check_*` and `verify_*` target. The remaining benchmark and
+That covers every `check_*` target. The remaining benchmark and
 diagnostic utilities under `diagnostics/` are not built by default; build them
 explicitly with:
 

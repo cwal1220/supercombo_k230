@@ -11,11 +11,8 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Dict
 
-import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
-
+# fastapi/uvicorn은 서버를 띄울 때만 import한다. diagnostics/check_param_server.py가
+# stdlib만으로 ParamStore와 PARAM_METADATA를 쓴다.
 if __package__:
     from .k230_display_control import DisplayBacklight
 else:
@@ -607,10 +604,6 @@ class ParamStore:
         finally:
             if temporary.exists():
                 temporary.unlink()
-
-
-class ParamPatch(BaseModel):
-    values: Dict[str, Any]
 
 
 HTML = """<!doctype html>
@@ -1226,7 +1219,14 @@ HTML = """<!doctype html>
 """
 
 
-def create_app(store: ParamStore | None = None) -> FastAPI:
+def create_app(store: ParamStore | None = None) -> "FastAPI":
+    from fastapi import FastAPI, HTTPException
+    from fastapi.responses import HTMLResponse
+    from pydantic import BaseModel
+
+    class ParamPatch(BaseModel):
+        values: Dict[str, Any]
+
     param_store = store or ParamStore(display_controller=DisplayBacklight())
     application = FastAPI(title="K7 parameter server", docs_url="/docs")
 
@@ -1255,17 +1255,16 @@ def create_app(store: ParamStore | None = None) -> FastAPI:
     return application
 
 
-app = create_app()
-
-
 def main() -> None:
+    import uvicorn
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default=os.environ.get("K230_PARAM_HOST", "0.0.0.0"))
     parser.add_argument(
         "--port", type=int, default=int(os.environ.get("K230_PARAM_PORT", "8080"))
     )
     args = parser.parse_args()
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    uvicorn.run(create_app(), host=args.host, port=args.port, log_level="info")
 
 
 if __name__ == "__main__":

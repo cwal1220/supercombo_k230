@@ -12,9 +12,6 @@ constexpr int kButtonSetDecel = 2;
 constexpr int kButtonCancel = 4;
 constexpr int kGearDrive = 5;
 constexpr int kSteeringPressedMinCount = 5;
-/* lag 보상에 더하는 plan 나이의 상한. 이 이상 낡은 plan은 staleness gate가
- * 별도로 차단한다. */
-constexpr float kMaxPlanAgeCompS = 0.25f;
 constexpr double kPandaEngageGraceS = 1.0;
 
 bool is_hard_disengage_block(const std::string &block) {
@@ -138,8 +135,8 @@ LateralControlResult LateralController::update(const LateralPath &path,
           static_cast<double>(control_now_ns - target.capture_timestamp_ns) * 1e-9);
     }
   }
-  result.desired_curvature =
-      lag_adjusted_desired_curvature(target, speed_mps, plan_age_s);
+  result.desired_curvature = lag_adjusted_desired_curvature(
+      target, speed_mps, plan_age_s, config_.steering_params.steer_actuator_delay);
   result.active_block = active_block_reason(gated_path, target, vehicle_state, now_s,
                                             result.seeds_ready, result.vehicle_fresh,
                                             panda_ready, panda_controls_allowed,
@@ -456,13 +453,13 @@ std::string LateralController::active_block_reason(
   return "";
 }
 
-float LateralController::lag_adjusted_desired_curvature(
-    const LateralTarget &target, float speed_mps, float plan_age_s) const {
+float lag_adjusted_desired_curvature(const LateralTarget &target, float speed_mps,
+                                     float plan_age_s, float steer_actuator_delay_s) {
   if (!target.valid) return 0.0f;
   /* plan은 카메라 캡처 시점 기준이므로 소비 시점까지의 실측 나이를 actuator
    * delay에 더해 보간한다. 부수 효과로 desired curvature가 20Hz 계단 대신
    * 매 tick plan 위를 따라 전진한다. */
-  const float delay = std::max(0.01f, config_.steering_params.steer_actuator_delay) +
+  const float delay = std::max(0.01f, steer_actuator_delay_s) +
       clamp_float(plan_age_s, 0.0f, kMaxPlanAgeCompS);
   const float current_curvature = target.curvatures[0];
   const float psi = interp_lateral(delay, target.psis);

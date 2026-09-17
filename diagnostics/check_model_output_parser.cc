@@ -1,4 +1,5 @@
 #include "model_output.h"
+#include "check_harness.h"
 
 #include <cstdint>
 #include <cmath>
@@ -21,13 +22,8 @@ constexpr int kLeadStride = kLeadTrajLen * 4 * 2 + kLeadMhpSelection;
 constexpr int kLeadProbOffset = kLeadOffset + kLeadMhpN * kLeadStride;
 constexpr int kDesireStateOffset = kLeadProbOffset + kLeadMhpSelection;
 
-bool near(float actual, float expected, float tolerance = 1e-6f)
-{
-    return std::fabs(actual - expected) <= tolerance;
-}
-
 /* openpilot v0.9.4 출력 레이아웃 검사. */
-int self_test_094()
+void self_test_094()
 {
     // 파서와 같은 방식으로 꼬리에서 역산한다: pose(12) / wide_from_device_euler(6)
     // / sim_pose(12) / road_transform(12) / feature(128) / pad(2).
@@ -62,15 +58,11 @@ int self_test_094()
         parsed.meta.desire_state[3] > parsed.meta.desire_state[0] &&
         parsed.has_pose && near(parsed.pose.trans[2], 22.0f) &&
         near(parsed.pose.trans_std[0], 0.05f);
-    if (!ok) {
-        std::cerr << "v0.9.4 model output layout self-test failed\n";
-        return 1;
-    }
+    require(ok, "v0.9.4 model output layout self-test failed");
 
     std::cout << "MODEL_OUTPUT_094_OK output=" << kModelOutputFloats
               << " feature=" << kModelFeatureLen
               << " pose_offset=" << kPoseOffset094 << "\n";
-    return 0;
 }
 
 template <typename T>
@@ -84,7 +76,7 @@ bool read_exact(std::ifstream &file, T *value)
 
 int main(int argc, char *argv[])
 {
-    if (argc == 1) return self_test_094();
+    if (argc == 1) return run_checks(nullptr, self_test_094);
     if (argc != 2) {
         std::cerr << "Usage: " << argv[0] << " <SCODMP1 raw dump>\n";
         return 1;

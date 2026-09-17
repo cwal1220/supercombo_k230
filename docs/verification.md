@@ -4,7 +4,7 @@
 
 ## Calibration and input-warp equivalence
 
-- `diagnostics/verify_calibration_equivalence.cc` is a host-only verifier for the
+- `diagnostics/check_calibration_equivalence.cc` is a host-only verifier for the
   openpilot-derived calibration and input-warp math. It checks the pose-based
   calibration state machine, manual-vs-online feedback policy,
   medmodel/sbigmodel homography matrices, UV `transform_scale_buffer(0.5)`
@@ -40,8 +40,8 @@ cmake -S . -B build-host \
   -DSUPERCOMBO_BUILD_RUNTIME=OFF \
   -DSUPERCOMBO_BUILD_DIAGNOSTICS=ON
 cmake --build build-host \
-  --target verify_calibration_equivalence bench_input_warp_overhead -j2
-build-host/bin/verify_calibration_equivalence
+  --target check_calibration_equivalence bench_input_warp_overhead -j2
+build-host/bin/check_calibration_equivalence
 build-host/bin/bench_input_warp_overhead 3000
 ```
 
@@ -209,6 +209,8 @@ The same benchmark build produces self-checking binaries that need no board:
 | `check_k230_can_queue` | shared-memory CAN queue |
 | `check_panda_can_codec` | panda USB CAN packing/unpacking |
 | `check_lateral_mpc` | lateral MPC optimality and solve time |
+| `check_calibration_equivalence` | online calibration state machine, model-input homography and YUV6 packing against openpilot references |
+| `check_param_server.py` | parameter store, runtime schema sync, UI metadata coverage of `params/*.json` |
 
 See [Diagnostics](diagnostics.md) for the build command and additional
 on-board tools.

@@ -140,7 +140,7 @@ def read_route_lateral(route: Path) -> RouteLateral:
 
 def route_offsets(route: Path) -> dict[str, float]:
     """The lateral tuning that was active on this drive, from its snapshot."""
-    path = route / "params" / "yg_steering.json"
+    path = route / "params" / "steering.json"
     if not path.exists():
         return {}
     params = json.loads(path.read_text())

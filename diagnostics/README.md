@@ -3,7 +3,7 @@
 This folder keeps standalone experiments out of the production runtime path.
 They are not built by the default CMake target.
 
-The `check_*` and `verify_*` self-checks build and run in one step:
+The `check_*` self-checks build and run in one step:
 
 ```sh
 ./scripts/run_host_checks.sh
@@ -30,7 +30,7 @@ Available utilities:
 - `bench_nv12_to_yuv6`: CPU `NV12 512x256 -> YUV6 float` conversion timing.
 - `bench_input_warp_overhead`: compares direct YUV6 packing with the calibrated
   homography `NV12 -> YUV6` input-warp path.
-- `verify_calibration_equivalence`: checks the pose-based online calibration
+- `check_calibration_equivalence`: checks the pose-based online calibration
   state machine, manual/online model-input feedback policy, medmodel homography
   matrix, `transform_scale_buffer(0.5)` UV handling, and YUV6 plane order
   against independent openpilot-formula references.

@@ -11,20 +11,6 @@ uint32_t clamp_u32(int value, int lo, int hi) {
   return static_cast<uint32_t>(std::min(std::max(value, lo), hi));
 }
 
-void set_signal_le(std::array<uint8_t, 8> *data, int start_bit, int length, uint32_t raw) {
-  for (int i = 0; i < length; ++i) {
-    const int bit = start_bit + i;
-    const int byte_index = bit / 8;
-    const int bit_index = bit % 8;
-    const uint8_t mask = static_cast<uint8_t>(1U << bit_index);
-    if (raw & (1U << i)) {
-      (*data)[byte_index] |= mask;
-    } else {
-      (*data)[byte_index] &= static_cast<uint8_t>(~mask);
-    }
-  }
-}
-
 void set_common_lkas_fields(std::array<uint8_t, 8> *data, const HyundaiLkas11Values &values) {
   set_signal_le(data, 0, 2, clamp_u32(values.ldws_active_mode, 0, 3));
   set_signal_le(data, 2, 4, clamp_u32(values.ldws_sys_state, 0, 15));
@@ -81,6 +67,20 @@ HyundaiLkas11Values apply_lkas_command(HyundaiLkas11Values values, const Hyundai
 }
 
 }  // namespace
+
+void set_signal_le(std::array<uint8_t, 8> *data, int start_bit, int length, uint32_t raw) {
+  for (int i = 0; i < length; ++i) {
+    const int bit = start_bit + i;
+    const int byte_index = bit / 8;
+    const int bit_index = bit % 8;
+    const uint8_t mask = static_cast<uint8_t>(1U << bit_index);
+    if (raw & (1U << i)) {
+      (*data)[byte_index] |= mask;
+    } else {
+      (*data)[byte_index] &= static_cast<uint8_t>(~mask);
+    }
+  }
+}
 
 HyundaiLkas11Values decode_lkas11(const std::array<uint8_t, 8> &data) {
   HyundaiLkas11Values values;

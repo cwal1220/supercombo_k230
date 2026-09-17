@@ -1,4 +1,5 @@
 #include "app_config.h"
+#include "common_utils.h"
 #include "display.h"
 #include "k230_ipc.h"
 #include "overlay_renderer.h"
@@ -9,19 +10,12 @@
 #include "v4l2-drm.h"
 
 #include <drm/drm_fourcc.h>
-#include <arpa/inet.h>
-#include <ifaddrs.h>
 #include <linux/videodev2.h>
-#include <net/if.h>
 #include <signal.h>
-#include <sys/statvfs.h>
 #include <sys/time.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <array>
-#include <cerrno>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -100,7 +94,7 @@ public:
     explicit OverlayDisplay(const AppConfig &config)
         : profile_(config.profile)
     {
-        piezo_buzzer_ = piezo_buzzer_create();
+        piezo_buzzer_ = piezo_buzzer_create(env_flag("K230_PIEZO_BUZZER", true) ? 1 : 0);
         if (!piezo_buzzer_)
             std::fprintf(stderr, "k230_overlayd: piezo buzzer worker unavailable\n");
         default_projection_ = make_projection_state(config.manual_roll,
@@ -326,8 +320,6 @@ private:
         return true;
     }
 
-    /* 새 panda/control/manager 스냅샷이 있으면 true. 모델이 멈춰도 속도·토스트가
-     * 제어 상태를 따라가도록 재그리기 트리거가 된다. */
     /* 새 panda/control/manager 스냅샷이 있으면 true. 모델이 멈춰도 속도·토스트가
      * 제어 상태를 따라가도록 재그리기 트리거가 된다. */
     bool update_aux_state()

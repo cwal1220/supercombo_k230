@@ -252,14 +252,14 @@ if(SUPERCOMBO_BUILD_DIAGNOSTICS)
   )
   target_link_libraries(bench_input_warp_overhead PRIVATE k230_common)
 
-  add_host_tool(verify_calibration_equivalence
-    diagnostics/verify_calibration_equivalence.cc
+  add_host_tool(check_calibration_equivalence
+    diagnostics/check_calibration_equivalence.cc
     src/calibration_service.cc
     src/json_utils.cc
     src/model_input_transform.cc
     src/online_calibrator.cc
   )
-  target_link_libraries(verify_calibration_equivalence PRIVATE k230_common)
+  target_link_libraries(check_calibration_equivalence PRIVATE k230_common)
 
   # HUD 스냅샷·타이밍 도구. 렌더러가 OpenCV를 쓰므로 OpenCV가 있는 곳에서만 만든다.
   if(OpenCV_FOUND)

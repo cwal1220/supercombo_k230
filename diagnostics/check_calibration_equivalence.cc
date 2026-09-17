@@ -1103,10 +1103,10 @@ int main()
     test_projection_and_yuv6();
 
     if (g_failures != 0) {
-        std::fprintf(stderr, "verify_calibration_equivalence: %d failure(s)\n", g_failures);
+        std::fprintf(stderr, "check_calibration_equivalence: %d failure(s)\n", g_failures);
         return 1;
     }
 
-    std::printf("verify_calibration_equivalence: PASS\n");
+    std::printf("check_calibration_equivalence: PASS\n");
     return 0;
 }

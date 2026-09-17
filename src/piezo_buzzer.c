@@ -118,14 +118,6 @@ static const char *const kAlertNames[PIEZO_ALERT_COUNT] = {
     "signal_changed", "unavailable", "engage", "disengage", "unable",
 };
 
-static int env_is_disabled(const char *name)
-{
-  const char *value = getenv(name);
-  return value && (!strcmp(value, "0") || !strcmp(value, "false") ||
-                   !strcmp(value, "FALSE") || !strcmp(value, "off") ||
-                   !strcmp(value, "OFF"));
-}
-
 static int parse_pin(void)
 {
   const char *value = getenv("K230_PIEZO_PIN");
@@ -515,7 +507,7 @@ static void *piezo_thread(void *opaque)
   }
 }
 
-PiezoBuzzer *piezo_buzzer_create(void)
+PiezoBuzzer *piezo_buzzer_create(int enabled)
 {
   PiezoBuzzer *buzzer = (PiezoBuzzer *)calloc(1, sizeof(*buzzer));
   if (!buzzer) return NULL;
@@ -528,7 +520,7 @@ PiezoBuzzer *piezo_buzzer_create(void)
     free(buzzer);
     return NULL;
   }
-  buzzer->enabled = !env_is_disabled("K230_PIEZO_BUZZER");
+  buzzer->enabled = enabled != 0;
   if (buzzer->enabled && pthread_create(&buzzer->thread, NULL, piezo_thread,
                                         buzzer) != 0) {
     pthread_cond_destroy(&buzzer->condition);

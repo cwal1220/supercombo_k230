@@ -99,6 +99,9 @@ struct HyundaiCanConfig {
   float mdps_speed_spoof_kph = 60.0f;
 };
 
+// 리틀엔디언 비트 필드 쓰기. 읽기 짝은 common_utils.h의 get_signal_le.
+void set_signal_le(std::array<uint8_t, 8> *data, int start_bit, int length, uint32_t raw);
+
 HyundaiLkas11Values decode_lkas11(const std::array<uint8_t, 8> &data);
 HyundaiClu11Values decode_clu11(const std::array<uint8_t, 4> &data);
 

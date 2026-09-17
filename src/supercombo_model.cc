@@ -26,10 +26,7 @@ uint64_t now_ns()
 
 bool profile_enabled()
 {
-    static const bool enabled = [] {
-        const char *value = std::getenv("SUPERCOMBO_PROFILE");
-        return value && value[0] != '\0' && std::strcmp(value, "0") != 0;
-    }();
+    static const bool enabled = env_flag("SUPERCOMBO_PROFILE");
     return enabled;
 }
 

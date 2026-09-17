@@ -9,6 +9,8 @@
 #include <net/if.h>
 #include <sys/statvfs.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>

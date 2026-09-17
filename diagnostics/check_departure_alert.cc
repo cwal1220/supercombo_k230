@@ -1,12 +1,7 @@
 #include "departure_alert.h"
-
-#include <stdexcept>
+#include "check_harness.h"
 
 namespace {
-
-void require(bool condition, const char *message) {
-  if (!condition) throw std::runtime_error(message);
-}
 
 DepartureAlertInput stopped_input(double now_s) {
   DepartureAlertInput input;
@@ -200,10 +195,11 @@ void verify_lead_departure_wins_when_plan_opens() {
 }  // namespace
 
 int main() {
-  verify_lead_departure();
-  verify_green_light();
-  verify_three_second_display_uses_total_stop_time();
-  verify_queue_keeps_lead_alert();
-  verify_lead_departure_wins_when_plan_opens();
-  return 0;
+  return run_checks("DEPARTURE_ALERT_OK", [] {
+    verify_lead_departure();
+    verify_green_light();
+    verify_three_second_display_uses_total_stop_time();
+    verify_queue_keeps_lead_alert();
+    verify_lead_departure_wins_when_plan_opens();
+  });
 }

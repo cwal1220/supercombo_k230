@@ -6,6 +6,7 @@
 #include "model_output.h"
 #include "online_calibrator.h"
 #include "projection.h"
+#include "recording_format.h"
 
 #include <atomic>
 #include <cstddef>
@@ -262,16 +263,66 @@ struct K230ControlState {
     float ego_speed_kph = 0.0f;
 };
 
-/* controlsd가 발행하고 overlayd/recordd가 읽는 공유 레이아웃이다. 생산자를
- * 포함한 모든 translation unit에서 검사되도록 헤더에 둔다. */
+/* controlsd가 발행하고 overlayd/recordd가 읽는 공유 레이아웃이다. 기록 v5는 이
+ * 구조체를 그대로 저장하고 tools/model/k230_route.py가 위치로 디코드하므로 필드
+ * 순서까지 전부 고정한다. 같은 크기 필드 둘을 맞바꿔도 여기서 걸린다. */
+#define K230_CONTROL_STATE_AT(field, expected) \
+    static_assert(offsetof(K230ControlState, field) == (expected), \
+                  "K230ControlState." #field " moved: recording v5 layout")
+K230_CONTROL_STATE_AT(timestamp_ns, 0);
+K230_CONTROL_STATE_AT(enabled, 8);
+K230_CONTROL_STATE_AT(engaged, 12);
+K230_CONTROL_STATE_AT(active, 16);
+K230_CONTROL_STATE_AT(should_send, 20);
+K230_CONTROL_STATE_AT(path_usable, 24);
+K230_CONTROL_STATE_AT(seeds_ready, 28);
+K230_CONTROL_STATE_AT(vehicle_fresh, 32);
+K230_CONTROL_STATE_AT(steering_fault, 36);
+K230_CONTROL_STATE_AT(left_blinker, 40);
+K230_CONTROL_STATE_AT(right_blinker, 44);
+K230_CONTROL_STATE_AT(cruise_active, 48);
+K230_CONTROL_STATE_AT(gear, 52);
+K230_CONTROL_STATE_AT(cluster_speed_kph, 56);
+K230_CONTROL_STATE_AT(cruise_max_speed_kph, 60);
+K230_CONTROL_STATE_AT(cruise_command_speed_kph, 64);
+K230_CONTROL_STATE_AT(steering_angle_deg, 68);
+K230_CONTROL_STATE_AT(desired_curvature, 72);
+K230_CONTROL_STATE_AT(actual_curvature, 76);
+K230_CONTROL_STATE_AT(normalized_output, 80);
+K230_CONTROL_STATE_AT(desired_torque, 84);
+K230_CONTROL_STATE_AT(apply_torque, 88);
+K230_CONTROL_STATE_AT(driver_torque, 92);
+K230_CONTROL_STATE_AT(desire, 96);
+K230_CONTROL_STATE_AT(active_block, 100);
+K230_CONTROL_STATE_AT(radar_lead_valid, 132);
+K230_CONTROL_STATE_AT(radar_lead_distance_m, 136);
+K230_CONTROL_STATE_AT(radar_lead_relative_speed_mps, 140);
+K230_CONTROL_STATE_AT(departure_alert_type, 144);
+K230_CONTROL_STATE_AT(departure_alert_event_id, 148);
+K230_CONTROL_STATE_AT(green_light_alert_armed, 152);
+K230_CONTROL_STATE_AT(tpms_valid, 156);
+K230_CONTROL_STATE_AT(tpms_unit, 160);
+K230_CONTROL_STATE_AT(tpms_pressure_fl, 164);
+K230_CONTROL_STATE_AT(tpms_pressure_fr, 168);
+K230_CONTROL_STATE_AT(tpms_pressure_rl, 172);
+K230_CONTROL_STATE_AT(tpms_pressure_rr, 176);
+K230_CONTROL_STATE_AT(tpms_warning, 180);
+K230_CONTROL_STATE_AT(hud_flags, 184);
+K230_CONTROL_STATE_AT(engage_event_id, 188);
+K230_CONTROL_STATE_AT(disengage_event_id, 192);
+K230_CONTROL_STATE_AT(engage_reject_event_id, 196);
+K230_CONTROL_STATE_AT(engage_reject_block, 200);
+K230_CONTROL_STATE_AT(ego_speed_kph, 232);
+#undef K230_CONTROL_STATE_AT
 static_assert(sizeof(K230ControlState) == 240,
-              "K230ControlState layout is shared by controlsd and overlay");
-static_assert(offsetof(K230ControlState, hud_flags) == 184,
-              "K230ControlState HUD flag offset is part of the shared ABI");
-static_assert(offsetof(K230ControlState, engage_event_id) == 188,
-              "K230ControlState engagement event offset is part of the shared ABI");
-static_assert(offsetof(K230ControlState, ego_speed_kph) == 232,
-              "K230ControlState ego speed offset is shared by runtime processes");
+              "K230ControlState layout is shared by controlsd, overlay and recording v5");
+/* recordd가 K230RecordType::PandaState로 그대로 저장한다. */
+static_assert(sizeof(K230PandaState) == 96,
+              "K230PandaState is recorded as-is: bump kK230RecordingVersion");
+/* 기록 버전과 저장 구조체 크기를 한 줄에 묶어, 둘 중 하나만 바꾸면 컴파일이 깨진다. */
+static_assert(kK230RecordingVersion == 5 && sizeof(K230ModelState) == 3256 &&
+                  sizeof(K230ControlState) == 240 && sizeof(K230PandaState) == 96,
+              "recording v5 pins these payloads; bump kK230RecordingVersion together");
 
 class K230LatestChannel {
 public:

@@ -1,4 +1,6 @@
 #include "can_replay.h"
+#include "check_harness.h"
+#include "control_fixtures.h"
 #include "hyundai_can.h"
 #include "k230_ipc.h"
 #include "lateral_controller.h"
@@ -15,22 +17,6 @@
 #include <stdexcept>
 
 namespace {
-
-void require(bool condition, const char *message) {
-  if (!condition) throw std::runtime_error(message);
-}
-
-void set_signal_le(std::array<uint8_t, 8> *data, int start_bit, int length,
-                   uint32_t value) {
-  for (int i = 0; i < length; ++i) {
-    const int bit = start_bit + i;
-    const uint8_t mask = static_cast<uint8_t>(1U << (bit % 8));
-    if ((value & (1U << i)) != 0U)
-      (*data)[bit / 8] |= mask;
-    else
-      (*data)[bit / 8] &= static_cast<uint8_t>(~mask);
-  }
-}
 
 LateralPath replay_path() {
   LateralPath path;
@@ -51,32 +37,6 @@ LateralTarget replay_target() {
     target.curvatures[i] = 0.0008f;
   }
   return target;
-}
-
-VehicleCanState ready_vehicle(double timestamp_s = 1.0) {
-  VehicleCanState vehicle;
-  vehicle.has_lkas11_seed = true;
-  vehicle.has_clu11_seed = true;
-  vehicle.has_mdps12_seed = true;
-  vehicle.lkas11_time_s = timestamp_s;
-  vehicle.clu11_time_s = timestamp_s;
-  vehicle.sas11_time_s = timestamp_s;
-  vehicle.esp12_time_s = timestamp_s;
-  vehicle.mdps12_time_s = timestamp_s;
-  vehicle.tcs13_time_s = timestamp_s;
-  vehicle.tcs15_time_s = timestamp_s;
-  vehicle.e_ems11_time_s = timestamp_s;
-  vehicle.elect_gear_time_s = timestamp_s;
-  vehicle.whl_spd11_time_s = timestamp_s;
-  vehicle.cgw1_time_s = timestamp_s;
-  vehicle.cgw2_time_s = timestamp_s;
-  vehicle.whl_spd11_time_s = timestamp_s;
-  // 저속 조향 게이트를 넘는 주행 상태가 헬퍼의 기본값이다.
-  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
-  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
-  vehicle.cluster_speed_raw = 63.0f;
-  vehicle.gear = 5;
-  return vehicle;
 }
 
 /* lag 보상 곡률의 독립 전사본. 한계값은 lateral_controller.h에서 그대로
@@ -399,26 +359,8 @@ void verify_braking_does_not_disengage() {
   LateralControllerConfig config;
   config.force_engaged = true;
   LateralController controller(config);
-  VehicleCanState vehicle;
-  vehicle.has_lkas11_seed = true;
-  vehicle.has_clu11_seed = true;
-  vehicle.has_mdps12_seed = true;
-  vehicle.lkas11_time_s = 1.0;
-  vehicle.clu11_time_s = 1.0;
-  vehicle.sas11_time_s = 1.0;
-  vehicle.esp12_time_s = 1.0;
-  vehicle.mdps12_time_s = 1.0;
-  vehicle.tcs13_time_s = 1.0;
-  vehicle.tcs15_time_s = 1.0;
-  vehicle.e_ems11_time_s = 1.0;
-  vehicle.elect_gear_time_s = 1.0;
-  vehicle.whl_spd11_time_s = 1.0;
-  vehicle.cgw1_time_s = 1.0;
-  vehicle.cgw2_time_s = 1.0;
-  vehicle.whl_spd11_time_s = 1.0;
-  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
-  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
-  vehicle.gear = 5;
+  VehicleCanState vehicle = ready_vehicle();
+  vehicle.cluster_speed_raw = 0.0f;  // 클러스터 속도 없음
   vehicle.brake_light = true;
 
   const auto brake_light_result =
@@ -438,26 +380,7 @@ void verify_large_angle_fault_avoidance() {
   config.force_engaged = true;
   config.driving_params.vehicle_state_timeout_ms = 2000;
   LateralController controller(config);
-  VehicleCanState vehicle;
-  vehicle.has_lkas11_seed = true;
-  vehicle.has_clu11_seed = true;
-  vehicle.has_mdps12_seed = true;
-  vehicle.lkas11_time_s = 1.0;
-  vehicle.clu11_time_s = 1.0;
-  vehicle.sas11_time_s = 1.0;
-  vehicle.esp12_time_s = 1.0;
-  vehicle.mdps12_time_s = 1.0;
-  vehicle.tcs13_time_s = 1.0;
-  vehicle.tcs15_time_s = 1.0;
-  vehicle.e_ems11_time_s = 1.0;
-  vehicle.elect_gear_time_s = 1.0;
-  vehicle.whl_spd11_time_s = 1.0;
-  vehicle.cgw1_time_s = 1.0;
-  vehicle.cgw2_time_s = 1.0;
-  vehicle.whl_spd11_time_s = 1.0;
-  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
-  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
-  vehicle.gear = 5;
+  VehicleCanState vehicle = ready_vehicle();
   vehicle.cluster_speed_raw = 72.0f;
   vehicle.steering_angle_deg = 85.0f;
 
@@ -730,26 +653,7 @@ void verify_runtime_params_apply_immediately() {
   LateralControllerConfig config;
   config.force_engaged = true;
   LateralController controller(config);
-  VehicleCanState vehicle;
-  vehicle.has_lkas11_seed = true;
-  vehicle.has_clu11_seed = true;
-  vehicle.has_mdps12_seed = true;
-  vehicle.lkas11_time_s = 1.0;
-  vehicle.clu11_time_s = 1.0;
-  vehicle.sas11_time_s = 1.0;
-  vehicle.esp12_time_s = 1.0;
-  vehicle.mdps12_time_s = 1.0;
-  vehicle.tcs13_time_s = 1.0;
-  vehicle.tcs15_time_s = 1.0;
-  vehicle.e_ems11_time_s = 1.0;
-  vehicle.elect_gear_time_s = 1.0;
-  vehicle.whl_spd11_time_s = 1.0;
-  vehicle.cgw1_time_s = 1.0;
-  vehicle.cgw2_time_s = 1.0;
-  vehicle.whl_spd11_time_s = 1.0;
-  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
-  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
-  vehicle.gear = 5;
+  VehicleCanState vehicle = ready_vehicle();
   vehicle.cluster_speed_raw = 72.0f;
 
   const auto active =
@@ -776,26 +680,8 @@ void verify_lkas_hud_state_stability() {
   LateralControllerConfig config;
   config.force_engaged = true;
   LateralController controller(config);
-  VehicleCanState vehicle;
-  vehicle.has_lkas11_seed = true;
-  vehicle.has_clu11_seed = true;
-  vehicle.has_mdps12_seed = true;
-  vehicle.lkas11_time_s = 1.0;
-  vehicle.clu11_time_s = 1.0;
-  vehicle.sas11_time_s = 1.0;
-  vehicle.esp12_time_s = 1.0;
-  vehicle.mdps12_time_s = 1.0;
-  vehicle.tcs13_time_s = 1.0;
-  vehicle.tcs15_time_s = 1.0;
-  vehicle.e_ems11_time_s = 1.0;
-  vehicle.elect_gear_time_s = 1.0;
-  vehicle.whl_spd11_time_s = 1.0;
-  vehicle.cgw1_time_s = 1.0;
-  vehicle.cgw2_time_s = 1.0;
-  vehicle.whl_spd11_time_s = 1.0;
-  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
-  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
-  vehicle.gear = 5;
+  VehicleCanState vehicle = ready_vehicle();
+  vehicle.cluster_speed_raw = 0.0f;  // 클러스터 속도 없음
 
   LateralPath no_lane_path = replay_path();
   no_lane_path.left_valid = false;
@@ -820,26 +706,8 @@ void verify_lkas_hud_state_stability() {
 void verify_panda_gate_and_handoff() {
   LateralControllerConfig config;
   LateralController controller(config);
-  VehicleCanState vehicle;
-  vehicle.has_lkas11_seed = true;
-  vehicle.has_clu11_seed = true;
-  vehicle.has_mdps12_seed = true;
-  vehicle.lkas11_time_s = 1.0;
-  vehicle.clu11_time_s = 1.0;
-  vehicle.sas11_time_s = 1.0;
-  vehicle.esp12_time_s = 1.0;
-  vehicle.mdps12_time_s = 1.0;
-  vehicle.tcs13_time_s = 1.0;
-  vehicle.tcs15_time_s = 1.0;
-  vehicle.e_ems11_time_s = 1.0;
-  vehicle.elect_gear_time_s = 1.0;
-  vehicle.whl_spd11_time_s = 1.0;
-  vehicle.cgw1_time_s = 1.0;
-  vehicle.cgw2_time_s = 1.0;
-  vehicle.whl_spd11_time_s = 1.0;
-  vehicle.wheel_speed_fl_kph = vehicle.wheel_speed_fr_kph = 60.0f;
-  vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
-  vehicle.gear = 5;
+  VehicleCanState vehicle = ready_vehicle();
+  vehicle.cluster_speed_raw = 0.0f;  // 클러스터 속도 없음
 
   vehicle.clu_button = 2;
   const auto set_press =
@@ -918,18 +786,7 @@ void verify_panda_gate_and_handoff() {
   require(!stock_handoff.should_send, "handoff must stop after 3000 ms");
 
   vehicle.lkas11_seed[4] = 9U << 4;
-  vehicle.lkas11_time_s = 4.05;
-  vehicle.clu11_time_s = 4.05;
-  vehicle.sas11_time_s = 4.05;
-  vehicle.esp12_time_s = 4.05;
-  vehicle.mdps12_time_s = 4.05;
-  vehicle.tcs13_time_s = 4.05;
-  vehicle.tcs15_time_s = 4.05;
-  vehicle.e_ems11_time_s = 4.05;
-  vehicle.elect_gear_time_s = 4.05;
-  vehicle.whl_spd11_time_s = 4.05;
-  vehicle.cgw1_time_s = 4.05;
-  vehicle.cgw2_time_s = 4.05;
+  stamp_can_times(&vehicle, 4.05);
   vehicle.clu_button = 2;
   controller.update(replay_path(), replay_target(), vehicle, 4.05, 305, true, true);
   vehicle.clu_button = 0;
@@ -1023,7 +880,7 @@ void verify_model_path_adapter() {
 }  // namespace
 
 int main(int argc, char **argv) {
-  try {
+  return run_checks(argc == 1 ? "CONTROL_SELF_TEST_OK" : nullptr, [&] {
     verify_mdps_speed_spoof();
     verify_lca11();
     verify_whl_spd11();
@@ -1049,10 +906,7 @@ int main(int argc, char **argv) {
     verify_panda_gate_and_handoff();
     verify_cold_start_engage_reports_hard_block();
     verify_model_path_adapter();
-    if (argc == 1) {
-      std::puts("CONTROL_SELF_TEST_OK");
-      return 0;
-    }
+    if (argc == 1) return;
     if (argc != 2) throw std::runtime_error("usage: check_control_replay [fixture.k230can]");
 
     CanReplaySource replay;
@@ -1137,9 +991,5 @@ int main(int argc, char **argv) {
         "max_torque=%d curvature_err=%.8f compute_ms=%.3f\n",
         rx_frames, replay.duration_s(), ticks, active_ticks, generated_frames,
         lkas0, lkas1, clu1, mdps2, max_torque, max_curvature_error, elapsed_ms);
-    return 0;
-  } catch (const std::exception &error) {
-    std::fprintf(stderr, "check_control_replay: %s\n", error.what());
-    return 1;
-  }
+  });
 }
