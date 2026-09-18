@@ -434,7 +434,7 @@ void verify_configured_steering_angle_limit() {
   vehicle.steering_angle_deg = 80.0f;
   const auto at_limit =
       controller.update(replay_path(), replay_target(), vehicle, 1.01, 1);
-  require(!at_limit.active && at_limit.active_block == "steering_angle_limit",
+  require(!at_limit.active && at_limit.active_block == BlockReason::SteeringAngleLimit,
           "configured steering angle limit must apply below 90 degrees");
 }
 
@@ -482,7 +482,7 @@ void verify_engage_allowed_with_unavailable_path() {
   require(engaged.engaged && !engaged.engage_rejected,
           "standstill engage must be accepted with an unavailable path");
   // 정지 + path 무효는 오류가 아니라 대기 상태로 보고한다
-  require(!engaged.active && engaged.active_block == "stopped",
+  require(!engaged.active && engaged.active_block == BlockReason::Stopped,
           "standstill without a path must report stopped, not an error");
   // 대기 중에도 steer_req/스푸프는 유지(토크 0) — 정차 천이 부저 방지
   require(!engaged.frames.empty() &&
@@ -495,7 +495,7 @@ void verify_engage_allowed_with_unavailable_path() {
   vehicle.wheel_speed_rl_kph = vehicle.wheel_speed_rr_kph = 60.0f;
   const auto rolling =
       controller.update(bad, replay_target(), vehicle, 1.02, 2, true, true);
-  require(!rolling.active && rolling.active_block == "path_invalid",
+  require(!rolling.active && rolling.active_block == BlockReason::PathInvalid,
           "unusable path while moving must report path_invalid");
   // 결함은 가용성 대기보다 우선한다 (정차 중 문 열림 -> hard disengage)
   vehicle = ready_vehicle(1.03);
@@ -504,7 +504,7 @@ void verify_engage_allowed_with_unavailable_path() {
   vehicle.door_open = true;
   const auto door =
       controller.update(bad, replay_target(), vehicle, 1.03, 3, true, true);
-  require(door.active_block == "door_open" && !door.engaged,
+  require(door.active_block == BlockReason::DoorOpen && !door.engaged,
           "faults must outrank availability and hard-disengage at standstill");
 }
 
@@ -666,7 +666,7 @@ void verify_runtime_params_apply_immediately() {
   controller.update_params(steering, config.driving_params);
   const auto disabled =
       controller.update(replay_path(), replay_target(), vehicle, 1.01, 1);
-  require(!disabled.active && disabled.active_block == "controller_disabled",
+  require(!disabled.active && disabled.active_block == BlockReason::ControllerDisabled,
           "runtime steering parameters must apply on the next control tick");
 
   steering.enabled = true;
@@ -719,7 +719,7 @@ void verify_panda_gate_and_handoff() {
   const auto panda_blocked =
       controller.update(replay_path(), replay_target(), vehicle, 1.01, 1, true, false);
   require(panda_blocked.engaged && !panda_blocked.active &&
-              panda_blocked.active_block == "panda_controls_off",
+              panda_blocked.active_block == BlockReason::PandaControlsOff,
           "Panda controls gate");
   require(!panda_blocked.engage_rejected,
           "Panda controls handshake must not reject a valid SET request");
@@ -748,7 +748,7 @@ void verify_panda_gate_and_handoff() {
   const auto panda_timeout = panda_timeout_controller.update(
       replay_path(), replay_target(), timeout_vehicle_later, 11.02, 102, true, false);
   require(!panda_timeout.engaged && panda_timeout.engage_rejected &&
-              panda_timeout.active_block == "panda_controls_off",
+              panda_timeout.active_block == BlockReason::PandaControlsOff,
           "persistent Panda mismatch must eventually reject engage");
 
   LateralController deferred_static_controller(config);
@@ -767,7 +767,7 @@ void verify_panda_gate_and_handoff() {
   const auto deferred_static = deferred_static_controller.update(
       replay_path(), deferred_invalid_target, deferred_vehicle, 12.02, 2, true, true);
   require(!deferred_static.engaged && deferred_static.engage_rejected &&
-              deferred_static.active_block == "lateral_plan_invalid",
+              deferred_static.active_block == BlockReason::LateralPlanInvalid,
           "Panda recovery must re-evaluate static engage gates");
 
   const auto active =
@@ -808,7 +808,7 @@ void verify_panda_gate_and_handoff() {
   const auto rejected = rejected_controller.update(
       replay_path(), invalid_target, rejected_vehicle, 1.01, 1, true, true);
   require(!rejected.engaged && rejected.engage_rejected &&
-              rejected.active_block == "lateral_plan_invalid",
+              rejected.active_block == BlockReason::LateralPlanInvalid,
           "static engage gate must reject without latching engaged state");
 }
 
@@ -833,18 +833,18 @@ void verify_cold_start_engage_reports_hard_block() {
 
   const auto belt = cold_start_attempt(false, true, 5);
   require(!belt.engaged && belt.engage_rejected &&
-              belt.active_block == "seatbelt_unlatched",
+              belt.active_block == BlockReason::SeatbeltUnlatched,
           "cold-start SET with seatbelt off must report the seatbelt, not defer on panda");
 
   const auto gear = cold_start_attempt(false, false, 0);
   require(!gear.engaged && gear.engage_rejected &&
-              gear.active_block == "gear_not_drive",
+              gear.active_block == BlockReason::GearNotDrive,
           "cold-start SET out of D must report the gear, not defer on panda");
 
   // 차량이 정상이면 Panda 핸드셰이크 유예는 그대로 살아 있어야 한다.
   const auto handshake = cold_start_attempt(false, false, 5);
   require(handshake.engaged && !handshake.engage_rejected &&
-              handshake.active_block == "panda_not_ready",
+              handshake.active_block == BlockReason::PandaNotReady,
           "cold-start SET with a healthy car must still wait for the panda handshake");
 }
 

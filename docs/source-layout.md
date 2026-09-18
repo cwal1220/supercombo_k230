@@ -68,6 +68,14 @@
     `vehicle_can` decodes received frames into vehicle state, `hyundai_can`
     encodes LKAS11/CLU11/MDPS12 commands.
 
+- `src/control_block.h`
+  - the engage/steer block reasons as one table: enum, wire name, HUD label,
+    and kind (reject / hard disengage / transient Panda handshake /
+    availability). The controller decides in `BlockReason`, `K230ControlState`
+    carries the wire name so recordings and the Python readers stay text, and
+    `overlay_state` labels it from the same rows. `check_overlay_state` proves
+    every reason has a label.
+
 ### Control safety holds
 
 `src/control_holds.*` implements both holds as `PandaHealthGate` and

@@ -1,52 +1,16 @@
 #include "overlay_state.h"
 
+#include "control_block.h"
 #include "utils_math.h"
 
 #include <algorithm>
 #include <cstdio>
-#include <cstring>
-
-namespace {
-
-struct EngageBlockLabel {
-    const char *reason;
-    const char *label;
-};
-
-constexpr EngageBlockLabel kEngageBlockLabels[] = {
-    {"brake_error", "BRAKE ERROR"},
-    {"control_stale", "CONTROL STALE"},
-    {"controller_disabled", "CONTROL OFF"},
-    {"door_open", "DOOR OPEN"},
-    {"esp_disabled", "ESP OFF"},
-    {"esp_stale", "ESP STALE"},
-    {"gear_not_drive", "GEAR NOT D"},
-    {"lateral_plan_invalid", "PLAN INVALID"},
-    {"lateral_plan_stale", "PLAN STALE"},
-    {"mdps_fault", "MDPS FAULT"},
-    {"not_engaged", "STANDBY"},
-    {"panda_controls_off", "PANDA CTRL OFF"},
-    {"panda_not_ready", "PANDA NOT READY"},
-    {"park_brake", "PARK BRAKE"},
-    {"path_invalid", "PATH INVALID"},
-    {"seatbelt_unlatched", "SEATBELT"},
-    {"seeds_missing", "CAN SEEDS"},
-    {"speed_invalid", "SPEED INVALID"},
-    {"stopped", "STOPPED"},
-    {"steering_angle_limit", "ANGLE LIMIT"},
-    {"vehicle_state_stale", "CAR STALE"},
-    {"yaw_rate_invalid", "YAW INVALID"},
-};
-
-} // namespace
 
 const char *engage_block_label(const char *block)
 {
     if (!block || block[0] == '\0') return nullptr;
-    for (const EngageBlockLabel &entry : kEngageBlockLabels) {
-        if (std::strcmp(block, entry.reason) == 0) return entry.label;
-    }
-    return nullptr;
+    const BlockReason reason = block_reason_from_name(block);
+    return reason == BlockReason::Count ? nullptr : block_reason_label(reason);
 }
 
 /* ---- 공유 상태 → HUD 상태 ---- */

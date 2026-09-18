@@ -1,6 +1,7 @@
 /* overlay_state: 제어 스냅샷 → HUD 상태 매핑과 알림 선택 정책. 보드 없이,
  * OpenCV 없이 돈다. */
 #include "check_harness.h"
+#include "control_block.h"
 #include "overlay_state.h"
 
 #include <cstring>
@@ -94,8 +95,15 @@ void verify_control_state_mapping() {
           "a stale snapshot zeroes the HUD and names the staleness");
   require(engage_block_label("panda_not_ready") != nullptr &&
               std::strcmp(engage_block_label("panda_not_ready"), "PANDA NOT READY") == 0 &&
-              engage_block_label("no_such_reason") == nullptr,
+              engage_block_label("no_such_reason") == nullptr &&
+              engage_block_label("") == nullptr,
           "engage block labels resolve known reasons only");
+  for (const BlockReasonRow &row : kBlockReasons) {
+    if (row.reason == BlockReason::None) continue;
+    const char *label = engage_block_label(row.name);
+    require(label != nullptr && label[0] != '\0' && std::strcmp(label, row.label) == 0,
+            "every block reason reaches the HUD with its own label");
+  }
 }
 
 }  // namespace

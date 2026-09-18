@@ -245,7 +245,7 @@ struct EngageEvents {
     if (result.engage_rejected) {
       if (++reject_id == 0) reject_id = 1;
       std::snprintf(reject_block, sizeof(reject_block), "%s",
-                    result.active_block.c_str());
+                    block_reason_name(result.active_block));
       std::fprintf(stderr,
                    "k230_controlsd: engage rejected block=%s event=%u\n",
                    reject_block, reject_id);
@@ -261,7 +261,7 @@ struct EngageEvents {
                    "panda=%u/%u\n",
                    previous_engaged ? 1U : 0U, result.engaged ? 1U : 0U,
                    result.active ? 1U : 0U,
-                   result.active_block.c_str(), vehicle.clu_button,
+                   block_reason_name(result.active_block), vehicle.clu_button,
                    vehicle.gear, panda.ready ? 1U : 0U,
                    panda.controls_allowed ? 1U : 0U);
     }
@@ -273,7 +273,7 @@ struct EngageEvents {
                    "state=%u/%u/%u/%u safety=%u:%u hb=%u fresh=%u\n",
                    previous_active ? 1U : 0U, result.active ? 1U : 0U,
                    result.engaged ? 1U : 0U,
-                   result.active_block.c_str(),
+                   block_reason_name(result.active_block),
                    held.raw.invalid_reason.empty() ? "none" :
                        held.raw.invalid_reason.c_str(),
                    held.raw.point_count, static_cast<double>(held.raw.reach_m),
@@ -410,7 +410,7 @@ K230ControlState make_control_state(const LateralControllerConfig &config,
   state.driver_torque = vehicle.driver_torque;
   state.desire = static_cast<uint32_t>(target.desire);
   std::snprintf(state.active_block, sizeof(state.active_block), "%s",
-                result.active_block.c_str());
+                block_reason_name(result.active_block));
   state.radar_lead_valid = radar_lead_fresh && vehicle.radar_lead_valid ? 1U : 0U;
   state.radar_lead_distance_m = vehicle.radar_lead_distance_m;
   state.radar_lead_relative_speed_mps = vehicle.radar_lead_relative_speed_mps;
@@ -496,7 +496,7 @@ struct TickStats {
                  alert_input.lead_distance_m, alert_input.lead_relative_speed_mps,
                  adaptive_cruise.command_button,
                  vehicle.gas, vehicle.driver_override,
-                 result.active_block.c_str());
+                 block_reason_name(result.active_block));
     *this = TickStats{};
   }
 };

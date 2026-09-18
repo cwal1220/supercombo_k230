@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "control_block.h"
 #include "control_params.h"
 #include "hyundai_can.h"
 #include "lateral_path.h"
@@ -59,7 +60,7 @@ struct LateralControlResult {
   int desired_torque = 0;
   int apply_torque = 0;
   bool cut_steer_temp = false;
-  std::string active_block;
+  BlockReason active_block = BlockReason::None;
   std::vector<CanFrame> frames;
 };
 
@@ -86,7 +87,7 @@ private:
   void update_button_state(int button, double now_s);
 
   // active를 막는 현재 gate reason을 계산한다.
-  std::string active_block_reason(const LateralPath &path,
+  BlockReason active_block_reason(const LateralPath &path,
                                   const LateralTarget &target,
                                   const VehicleCanState &vehicle_state,
                                   double now_s,
@@ -101,8 +102,8 @@ private:
   float steering_angle_limit_deg(float speed_kph) const;
 
   // 조향각 제한으로 LKAS active를 막아야 하는지 확인한다.
-  std::string steering_angle_block(const VehicleCanState &vehicle_state,
-                                   float speed_kph) const;
+  bool steering_angle_blocked(const VehicleCanState &vehicle_state,
+                              float speed_kph) const;
 
   // LKAS fault 회피를 위한 임시 cut-steer 상태를 갱신한다.
   bool update_cut_steer_state(bool active, const VehicleCanState &vehicle_state);
