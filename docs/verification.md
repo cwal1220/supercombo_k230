@@ -206,6 +206,7 @@ The same benchmark build produces self-checking binaries that need no board:
 | `check_departure_alert` | departure alert state machine |
 | `check_adaptive_cruise` | vision cruise button pacing and limits |
 | `check_model_output_parser` | supercombo raw-output layout and temporal-input convention |
+| `check_recording_writer` | route layout on disk: K230LOG1 chunk records, K230IDX1 frame index, manifest, params snapshot, staging drained |
 | `check_overlay_state` | `K230*State` → HUD mapping and the piezo/toast alert selection (baseline, counter reset, priority) |
 | `check_k230_can_queue` | shared-memory CAN queue |
 | `check_panda_can_codec` | panda USB CAN packing/unpacking |

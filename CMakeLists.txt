@@ -101,6 +101,10 @@ target_link_libraries(perception PUBLIC common utils_json)
 
 add_k230_library(panda_codec src/panda_can_codec.cc)
 
+# 기록 라이터는 POSIX만 써서 호스트 검사가 디스크 포맷을 본다. 인코더는 V4L2라 recordd에만.
+add_k230_library(recording_writer src/recording_writer.cc)
+target_link_libraries(recording_writer PUBLIC common)
+
 # 오버레이 상태 매핑·알림 정책은 OpenCV가 없어 호스트 검사가 본다. 렌더러는
 # OpenCV를 쓰므로 OpenCV가 있는 곳에서만 만든다.
 add_k230_library(overlay_state src/overlay_state.cc)
@@ -210,9 +214,8 @@ if(SUPERCOMBO_BUILD_RUNTIME)
   add_executable(k230_recordd
     src/k230_recordd.cc
     src/mvx_v4l2_encoder.cc
-    src/recording_writer.cc
   )
-  configure_k230_target(k230_recordd common utils_json)
+  configure_k230_target(k230_recordd common recording_writer utils_json)
 
   if(SUPERCOMBO_BUILD_PANDA)
     add_executable(k230_pandad
@@ -255,6 +258,9 @@ if(SUPERCOMBO_BUILD_DIAGNOSTICS)
 
   add_host_tool(check_overlay_state diagnostics/check_overlay_state.cc)
   target_link_libraries(check_overlay_state PRIVATE overlay_state)
+
+  add_host_tool(check_recording_writer diagnostics/check_recording_writer.cc)
+  target_link_libraries(check_recording_writer PRIVATE recording_writer)
 
   add_host_tool(check_lateral_mpc diagnostics/check_lateral_mpc.cc)
   target_link_libraries(check_lateral_mpc PRIVATE planning)

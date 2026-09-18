@@ -72,30 +72,110 @@ bool copy_file(const std::string &source, const std::string &destination) {
 
 }  // namespace
 
+/* ---- StagingMover ---- */
+
+void StagingMover::recover(const std::string &staging_root, const std::string &root) {
+  DIR *stale = opendir(staging_root.c_str());
+  if (!stale) return;
+  while (dirent *entry = readdir(stale)) {
+    const std::string name = entry->d_name;
+    if (name == "." || name == "..") continue;
+    std::fprintf(stderr, "recordd: recovering staged route %s\n", name.c_str());
+    enqueue_tree(staging_root + "/" + name, root + "/" + name);
+  }
+  closedir(stale);
+}
+
+void StagingMover::enqueue_file(std::string from, std::string to) {
+  enqueue(Job{false, std::move(from), std::move(to)});
+}
+
+void StagingMover::enqueue_tree(std::string from, std::string to) {
+  enqueue(Job{true, std::move(from), std::move(to)});
+}
+
+void StagingMover::enqueue(Job &&job) {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    queue_.push_back(std::move(job));
+    pending_.store(queue_.size());
+  }
+  cv_.notify_one();
+}
+
+void StagingMover::stop() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    stop_ = true;
+  }
+  cv_.notify_one();
+  if (thread_.joinable()) thread_.join();
+}
+
+void StagingMover::loop() {
+  while (true) {
+    Job job;
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      cv_.wait(lock, [this] { return stop_ || !queue_.empty(); });
+      if (queue_.empty()) {
+        if (stop_) return;
+        continue;
+      }
+      job = std::move(queue_.front());
+      queue_.pop_front();
+      pending_.store(queue_.size());
+    }
+    if (job.tree) {
+      move_tree(job.from, job.to);
+    } else {
+      move_file(job.from, job.to);
+    }
+  }
+}
+
+void StagingMover::move_file(const std::string &from, const std::string &to) {
+  const size_t slash = to.rfind('/');
+  if (slash != std::string::npos) make_directories(to.substr(0, slash));
+  if (!copy_file(from, to)) {
+    std::fprintf(stderr, "recordd: move failed %s -> %s: %s\n",
+                 from.c_str(), to.c_str(), std::strerror(errno));
+    return;
+  }
+  unlink(from.c_str());
+}
+
+void StagingMover::move_tree(const std::string &from, const std::string &to) {
+  DIR *directory = opendir(from.c_str());
+  if (!directory) return;
+  while (dirent *entry = readdir(directory)) {
+    const std::string name = entry->d_name;
+    if (name == "." || name == "..") continue;
+    const std::string source = from + "/" + name;
+    struct stat info = {};
+    if (stat(source.c_str(), &info) != 0) continue;
+    if (S_ISDIR(info.st_mode)) {
+      move_tree(source, to + "/" + name);
+    } else {
+      move_file(source, to + "/" + name);
+    }
+  }
+  closedir(directory);
+  rmdir(from.c_str());
+}
+
+/* ---- RecordingWriter ---- */
+
 RecordingWriter::RecordingWriter(std::string root, std::string params_directory,
                                  unsigned width, unsigned height, unsigned fps,
                                  unsigned bitrate)
     : root_(std::move(root)), params_directory_(std::move(params_directory)),
-      width_(width), height_(height), fps_(fps), bitrate_(bitrate),
-      worker_(&RecordingWriter::worker_loop, this) {
+      width_(width), height_(height), fps_(fps), bitrate_(bitrate) {
   const char *staging = std::getenv("K230_RECORD_STAGING");
   staging_root_ = staging && staging[0] != '\0' ? staging : "/tmp/record_staging";
-  mover_ = std::thread(&RecordingWriter::mover_loop, this);
   /* 이전 세션이 route 도중 죽었으면 스테이징 잔여가 tmpfs(램)를 계속
    * 점유한다. 시작할 때 남아 있는 route를 SD로 회수한다. */
-  if (DIR *stale = opendir(staging_root_.c_str())) {
-    while (dirent *entry = readdir(stale)) {
-      const std::string name = entry->d_name;
-      if (name == "." || name == "..") continue;
-      MoveJob job;
-      job.tree = true;
-      job.from = staging_root_ + "/" + name;
-      job.to = root_ + "/" + name;
-      std::fprintf(stderr, "recordd: recovering staged route %s\n", name.c_str());
-      enqueue_move(std::move(job));
-    }
-    closedir(stale);
-  }
+  mover_.recover(staging_root_, root_);
 }
 
 RecordingWriter::~RecordingWriter() {
@@ -147,11 +227,9 @@ void RecordingWriter::process(PendingWrite &&write) {
                                write.keyframe);
       break;
     case PendingWrite::Kind::Can:
-      write_can_impl(write.record_type, write.can_batch);
-      break;
     case PendingWrite::Kind::State:
-      write_state_impl(write.record_type, write.timestamp_ns, write.data.data(),
-                       write.data.size());
+      write_record_impl(write.record_type, write.timestamp_ns, write.data.data(),
+                        write.data.size());
       break;
     case PendingWrite::Kind::Stop:
       close_route(true);
@@ -345,10 +423,8 @@ void RecordingWriter::close_event_chunk() {
   event_file_ = nullptr;
   std::ostringstream number;
   number << std::setw(3) << std::setfill('0') << event_chunk_index_;
-  MoveJob job;
-  job.from = route_path_ + "/events/" + number.str() + ".bin";
-  job.to = final_route_path_ + "/events/" + number.str() + ".bin";
-  enqueue_move(std::move(job));
+  mover_.enqueue_file(route_path_ + "/events/" + number.str() + ".bin",
+                      final_route_path_ + "/events/" + number.str() + ".bin");
 }
 
 bool RecordingWriter::write_event_header(K230RecordType type, uint64_t timestamp_ns,
@@ -371,26 +447,21 @@ bool RecordingWriter::write_event_header(K230RecordType type, uint64_t timestamp
   return std::fwrite(&header, sizeof(header), 1, event_file_) == 1;
 }
 
+/* 배치를 큐에 넣기 전에 디스크 형식(K230RecordedCanBatchHeader + 프레임)으로
+ * 직렬화한다. 이후 경로는 상태 스냅샷과 같다. */
 void RecordingWriter::write_can(K230RecordType type, const K230CanBatch &batch) {
   if (!requested_enabled_.load() ||
       (type != K230RecordType::CanRx && type != K230RecordType::CanTx)) return;
+  const uint32_t count = std::min<uint32_t>(batch.count, kK230CanBatchMaxFrames);
   PendingWrite write;
   write.kind = PendingWrite::Kind::Can;
   write.record_type = type;
-  write.can_batch = batch;
-  enqueue(std::move(write));
-}
-
-void RecordingWriter::write_can_impl(K230RecordType type,
-                                     const K230CanBatch &batch) {
-  if (!event_file_) return;
-  const uint32_t count = std::min<uint32_t>(batch.count, kK230CanBatchMaxFrames);
-  const uint32_t payload_size = sizeof(K230RecordedCanBatchHeader) +
-      count * sizeof(K230RecordedCanFrame);
-  if (!write_event_header(type, batch.timestamp_ns, payload_size)) return;
-  K230RecordedCanBatchHeader batch_header{count, batch.dropped};
-  std::fwrite(&batch_header, sizeof(batch_header), 1, event_file_);
-  for (uint32_t index = 0; index < count; ++index) {
+  write.timestamp_ns = batch.timestamp_ns;
+  write.data.resize(sizeof(K230RecordedCanBatchHeader) + count * sizeof(K230RecordedCanFrame));
+  const K230RecordedCanBatchHeader batch_header{count, batch.dropped};
+  std::memcpy(write.data.data(), &batch_header, sizeof(batch_header));
+  uint8_t *out = write.data.data() + sizeof(batch_header);
+  for (uint32_t index = 0; index < count; ++index, out += sizeof(K230RecordedCanFrame)) {
     const K230CanFrame &source = batch.frames[index];
     K230RecordedCanFrame recorded;
     recorded.address = source.address;
@@ -399,9 +470,9 @@ void RecordingWriter::write_can_impl(K230RecordType type,
     recorded.data_len = source.data_len;
     recorded.flags = source.flags;
     std::memcpy(recorded.data, source.data, sizeof(recorded.data));
-    std::fwrite(&recorded, sizeof(recorded), 1, event_file_);
+    std::memcpy(out, &recorded, sizeof(recorded));
   }
-  ++event_records_;
+  enqueue(std::move(write));
 }
 
 void RecordingWriter::write_state(K230RecordType type, uint64_t timestamp_ns,
@@ -417,8 +488,8 @@ void RecordingWriter::write_state(K230RecordType type, uint64_t timestamp_ns,
   enqueue(std::move(write));
 }
 
-void RecordingWriter::write_state_impl(K230RecordType type, uint64_t timestamp_ns,
-                                       const void *data, size_t size) {
+void RecordingWriter::write_record_impl(K230RecordType type, uint64_t timestamp_ns,
+                                        const void *data, size_t size) {
   if (!event_file_) return;
   if (!write_event_header(type, timestamp_ns, static_cast<uint32_t>(size))) return;
   if (std::fwrite(data, 1, size, event_file_) == size) ++event_records_;
@@ -434,10 +505,8 @@ void RecordingWriter::close_segment() {
   video_offset_ = 0;
   if (had_files && !segment_relative_.empty()) {
     for (const char *file : {"/road.hevc", "/frames.bin"}) {
-      MoveJob job;
-      job.from = route_path_ + "/" + segment_relative_ + file;
-      job.to = final_route_path_ + "/" + segment_relative_ + file;
-      enqueue_move(std::move(job));
+      mover_.enqueue_file(route_path_ + "/" + segment_relative_ + file,
+                          final_route_path_ + "/" + segment_relative_ + file);
     }
   }
   segment_relative_.clear();
@@ -488,11 +557,7 @@ void RecordingWriter::close_route(bool complete) {
     /* 남은 route 파일(events.bin, manifest, params, 마지막 세그먼트)을
      * 전부 SD로 옮긴다. mover는 순서대로 처리하므로 앞선 파일 이동이
      * 끝난 뒤 잔여만 쓸어 담는다. */
-    MoveJob sweep;
-    sweep.tree = true;
-    sweep.from = route_path_;
-    sweep.to = final_route_path_;
-    enqueue_move(std::move(sweep));
+    mover_.enqueue_tree(route_path_, final_route_path_);
   }
   route_path_.clear();
   final_route_path_.clear();
@@ -507,71 +572,5 @@ void RecordingWriter::close() {
   write.kind = PendingWrite::Kind::Stop;
   enqueue(std::move(write), true);
   if (worker_.joinable()) worker_.join();
-  {
-    std::lock_guard<std::mutex> lock(move_mutex_);
-    mover_stop_ = true;
-  }
-  move_cv_.notify_one();
-  if (mover_.joinable()) mover_.join();
-}
-
-void RecordingWriter::enqueue_move(MoveJob &&job) {
-  {
-    std::lock_guard<std::mutex> lock(move_mutex_);
-    move_queue_.push_back(std::move(job));
-    pending_moves_.store(move_queue_.size());
-  }
-  move_cv_.notify_one();
-}
-
-void RecordingWriter::mover_loop() {
-  while (true) {
-    MoveJob job;
-    {
-      std::unique_lock<std::mutex> lock(move_mutex_);
-      move_cv_.wait(lock, [this] { return mover_stop_ || !move_queue_.empty(); });
-      if (move_queue_.empty()) {
-        if (mover_stop_) return;
-        continue;
-      }
-      job = std::move(move_queue_.front());
-      move_queue_.pop_front();
-      pending_moves_.store(move_queue_.size());
-    }
-    if (job.tree) {
-      move_tree(job.from, job.to);
-    } else {
-      move_file(job.from, job.to);
-    }
-  }
-}
-
-void RecordingWriter::move_file(const std::string &from, const std::string &to) {
-  const size_t slash = to.rfind('/');
-  if (slash != std::string::npos) make_directories(to.substr(0, slash));
-  if (!copy_file(from, to)) {
-    std::fprintf(stderr, "recordd: move failed %s -> %s: %s\n",
-                 from.c_str(), to.c_str(), std::strerror(errno));
-    return;
-  }
-  unlink(from.c_str());
-}
-
-void RecordingWriter::move_tree(const std::string &from, const std::string &to) {
-  DIR *directory = opendir(from.c_str());
-  if (!directory) return;
-  while (dirent *entry = readdir(directory)) {
-    const std::string name = entry->d_name;
-    if (name == "." || name == "..") continue;
-    const std::string source = from + "/" + name;
-    struct stat info = {};
-    if (stat(source.c_str(), &info) != 0) continue;
-    if (S_ISDIR(info.st_mode)) {
-      move_tree(source, to + "/" + name);
-    } else {
-      move_file(source, to + "/" + name);
-    }
-  }
-  closedir(directory);
-  rmdir(from.c_str());
+  mover_.stop();
 }

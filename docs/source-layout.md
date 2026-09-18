@@ -104,6 +104,10 @@ released after that short hold if they persist.
 - `src/k230_recordd.cc`, `src/mvx_v4l2_encoder.*`, `src/recording_writer.*`
   - low-priority data recorder, direct MVX V4L2 M2M encoder, timestamp index,
     compact event log, route segmentation, and storage-reserve guard.
+    `RecordingWriter` serializes every record before it enters the write queue
+    (a queue entry is the packet or record bytes, not a 21 KB CAN batch), and
+    `StagingMover` is the thread that moves closed files from tmpfs to the SD
+    card. `check_recording_writer` pins the on-disk layout on the host.
 - `src/panda_client.*`, `src/panda_can_codec.*`, `src/k230_pandad.cc`
   - optional panda USB bridge. It handles USB, health, heartbeat, receive CAN,
     and the final TX gate, but does not generate vehicle control messages.
