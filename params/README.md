@@ -152,8 +152,8 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 | 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
 |---|---:|---|---|
 | `max_steering_angle_deg` | 90.0 | degree / 0~360 | fault 회피 모드가 꺼졌을 때 자동 조향을 허용할 절대 조향각 한도다. 0이면 gate를 사용하지 않고, 0보다 크고 90 이하이면 설정값을 그대로 적용한다. 90보다 크면 정지 시 설정값+60도에서 20 km/h의 설정값까지 선형으로 줄어든다. |
-| `avoid_lkas_fault_enabled` | true | bool | 큰 조향각이 지속될 때 토크는 유지하고 steer request만 잠시 끊는 RK openpilot 방식의 fault 회피 로직을 사용한다. |
-| `avoid_lkas_fault_max_angle_deg` | 85.0 | degree / 1~180 | fault 회피 카운터를 증가시키는 절대 조향각 기준이다. |
+| `avoid_lkas_fault_enabled` | true | bool | 큰 조향각이 지속될 때 steer request를 잠시 끊는 RK openpilot 방식의 fault 회피 로직을 사용한다. K7 YG HEV 실측(2026-09-18): steer 요청이 켜진 채 85도 위에 약 1.0초 머물면 MDPS가 ToiFlt/FailState를 세우고 각도가 85도 아래로 돌아올 때까지 어시스트를 끊는다. 끄면 안 된다. |
+| `avoid_lkas_fault_max_angle_deg` | 85.0 | degree / 1~180 | fault 회피 카운터를 증가시키는 절대 조향각 기준이다. 이 각도 이상에서는 토크 요청을 0으로 내리고 steer request만 유지한다. 컷과 fault 회복이 토크 0에서 일어나야 어시스트가 빠졌다 돌아오는 충격이 없다. |
 | `avoid_lkas_fault_max_frames` | 89 | frame / 0~300 | 85도 이상 조향각이 지속될 때 허용하는 프레임 수다. 이후 2프레임 동안 request를 끊고 다시 허용한다. |
 
 ## calibration.json

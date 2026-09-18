@@ -196,11 +196,19 @@ LateralControlResult LateralController::update(const LateralPath &path,
   }
 
   if (result.active) {
+    /* MDPS는 steer 요청이 켜진 채 |조향각|이 85도 위에 1초 머물면 fault를 낸다
+     * (2026-09-18 K7 실측 0.98~1.12 s, 토크 크기 무관). 회피 컷(2프레임)은 그대로 두고
+     * 그 위에서는 토크를 0으로 내린다. 컷과 fault 회복이 항상 토크 0에서 일어나
+     * 어시스트가 빠졌다 돌아오는 "탁"이 없다. 적분기도 그동안 얼린다. */
+    const bool above_fault_angle =
+        control_params.avoid_lkas_fault_enabled &&
+        std::fabs(vehicle_state.steering_angle_deg) >=
+            control_params.avoid_lkas_fault_max_angle_deg;
     const int raw_torque = torque_controller_.update(
         true, speed_mps, result.desired_curvature, vehicle_state.steering_angle_deg,
-        steering_pressed, steer_rate_limited_, control_params,
+        steering_pressed, steer_rate_limited_ || above_fault_angle, control_params,
         vehicle_state.yaw_rate_rad_s, yaw_rate_valid, road_bank_lat_accel_);
-    result.desired_torque = static_cast<int>(
+    result.desired_torque = above_fault_angle ? 0 : static_cast<int>(
         std::lround(static_cast<float>(raw_torque) * driver_torque_scale()));
     result.actual_curvature = torque_controller_.actual_curvature();
     result.actual_curvature_vm = torque_controller_.actual_curvature_vm();

@@ -376,6 +376,9 @@ void verify_braking_does_not_disengage() {
           "DriverBraking must not disengage lateral control");
 }
 
+/* K7 MDPS는 steer 요청이 켜진 채 85도 위에 1초 머물면 fault를 낸다(2026-09-18 실측).
+ * 85도 위: 토크는 0으로 내리고 steer 요청은 유지, 89프레임마다 2프레임 컷. 컷과 복귀가
+ * 토크 0에서 일어나야 어시스트가 빠졌다 돌아오는 충격이 없다. */
 void verify_large_angle_fault_avoidance() {
   LateralControllerConfig config;
   config.force_engaged = true;
@@ -383,37 +386,49 @@ void verify_large_angle_fault_avoidance() {
   LateralController controller(config);
   VehicleCanState vehicle = ready_vehicle();
   vehicle.cluster_speed_raw = 72.0f;
-  vehicle.steering_angle_deg = 85.0f;
+  int frame = 0;
+  auto step = [&]() {
+    const int f = frame++;
+    stamp_can_times(&vehicle, 1.0 + f * 0.01);  // 4초 넘게 돌리므로 CAN 신선도를 유지한다
+    return controller.update(replay_path(), replay_target(), vehicle, 1.0 + f * 0.01, f);
+  };
 
-  for (int frame = 0; frame < 89; ++frame) {
-    const auto result =
-        controller.update(replay_path(), replay_target(), vehicle,
-                          1.0 + frame * 0.01, frame);
+  vehicle.steering_angle_deg = 20.0f;
+  LateralControlResult result;
+  for (int i = 0; i < 100; ++i) result = step();
+  require(result.active && result.apply_torque != 0, "torque flows below the MDPS fault angle");
+
+  vehicle.steering_angle_deg = 100.0f;
+  const int crossed = frame;
+  while (frame < crossed + 89) {
+    result = step();
     require(result.active && !result.cut_steer_temp,
             "large-angle control must remain requested before RK fault limit");
+    require(result.desired_torque == 0, "no torque is requested above the fault angle");
+    if (frame > crossed + 60)
+      require(result.apply_torque == 0, "torque must have ramped to zero before the first cut");
   }
-
-  for (int frame = 89; frame < 91; ++frame) {
-    const auto result =
-        controller.update(replay_path(), replay_target(), vehicle,
-                          1.0 + frame * 0.01, frame);
+  for (int i = 0; i < 2; ++i) {
+    result = step();
     require(result.active && result.cut_steer_temp && !result.frames.empty(),
             "large-angle fault avoidance must cut request without disengaging");
     const HyundaiLkas11Values lkas = decode_lkas11(result.frames.front().data);
     require(!lkas.steer_req && lkas.toi_fault,
             "fault-avoidance LKAS11 request and temporary-fault bits");
-    require(lkas.steer_torque == result.apply_torque &&
-                std::abs(result.apply_torque) > 0,
-            "fault avoidance must preserve steering torque");
+    require(lkas.steer_torque == 0 && result.apply_torque == 0,
+            "the cut must happen at zero torque");
   }
-
-  const auto resumed =
-      controller.update(replay_path(), replay_target(), vehicle, 1.91, 91);
-  require(resumed.active && !resumed.cut_steer_temp && !resumed.frames.empty(),
+  result = step();
+  require(result.active && !result.cut_steer_temp && !result.frames.empty(),
           "large-angle steering request must resume after two frames");
-  const HyundaiLkas11Values lkas = decode_lkas11(resumed.frames.front().data);
-  require(lkas.steer_req && !lkas.toi_fault,
-          "resumed LKAS11 request and temporary-fault bits");
+  const HyundaiLkas11Values lkas = decode_lkas11(result.frames.front().data);
+  require(lkas.steer_req && !lkas.toi_fault && result.apply_torque == 0,
+          "resumed LKAS11 request keeps zero torque above the fault angle");
+
+  vehicle.steering_angle_deg = 20.0f;
+  for (int i = 0; i < 30; ++i) result = step();
+  require(result.active && result.apply_torque != 0,
+          "torque resumes with the normal ramp below the fault angle");
 }
 
 void verify_configured_steering_angle_limit() {
