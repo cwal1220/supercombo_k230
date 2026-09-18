@@ -18,8 +18,7 @@ public:
     static constexpr int kDesireHistoryTicks = 100;
     static constexpr int kFeatureHistoryTicks = 99;
     static constexpr int kNavFeatureLen = 256;
-    // hidden_state는 raw 출력 끝의 2 float(pad) 앞 128개다.
-    static constexpr size_t kHiddenOffset = kModelOutputFloats - 2u - kModelFeatureLen;
+    static constexpr size_t kHiddenOffset = model_output_layout::kFeatureOffset;
 
     SupercomboTemporalState()
         : desire_(kDesireLen, 0.0f),

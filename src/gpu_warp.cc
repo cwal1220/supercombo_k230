@@ -1,4 +1,5 @@
 #include "gpu_warp.h"
+#include "utils_math.h"
 
 #include "model_input_transform.h"
 
@@ -60,18 +61,6 @@ bool invert3(const float *m, float *out)
     out[7] = (b * g - a * h) * scale;
     out[8] = (a * e - b * d) * scale;
     return true;
-}
-
-void matmul3(const float *a, const float *b, float *out)
-{
-    for (int row = 0; row < 3; ++row) {
-        for (int column = 0; column < 3; ++column) {
-            float sum = 0.0f;
-            for (int k = 0; k < 3; ++k)
-                sum += a[row * 3 + k] * b[k * 3 + column];
-            out[row * 3 + column] = sum;
-        }
-    }
 }
 
 /* 출력 픽셀 -> 모델 좌표 변환을 접어 넣는다. VGLite는 바이리니어에서 픽셀

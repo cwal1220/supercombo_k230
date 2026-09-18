@@ -1,4 +1,5 @@
 #include "calibration_online.h"
+#include "utils_math.h"
 
 #include <algorithm>
 #include <cmath>
@@ -21,18 +22,6 @@ constexpr float kSanityMargin = 0.005f;
 bool finite3(const float v[3])
 {
     return std::isfinite(v[0]) && std::isfinite(v[1]) && std::isfinite(v[2]);
-}
-
-void matmul3(const float *a, const float *b, float *out)
-{
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 3; ++c) {
-            float sum = 0.0f;
-            for (int k = 0; k < 3; ++k)
-                sum += a[r * 3 + k] * b[k * 3 + c];
-            out[r * 3 + c] = sum;
-        }
-    }
 }
 
 void rot_from_euler(const float rpy[3], float *rot)

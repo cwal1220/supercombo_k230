@@ -13,9 +13,9 @@
 ## Perception
 
 - `src/model_output.*`
-  - owns the supercombo raw-output layout and exposes parsed plan, lanes, road
-    edges, leads, and pose. Also owns the shared `T_IDXS`/`X_IDXS`
-    trajectory grids.
+  - owns the supercombo raw-output layout (`model_output_layout`, every block
+    offset with a `static_assert`) and exposes parsed plan, lanes, road edges,
+    leads, and pose. Also owns the shared `T_IDXS`/`X_IDXS` trajectory grids.
 - `src/model_temporal.h`
   - the supercombo temporal inputs (desire pulse history, feature buffer, the
     constant traffic-convention and nav inputs) without any nncase dependency,
@@ -81,7 +81,8 @@ released after that short hold if they persist.
     reads or fills a message includes this and nothing else.
 - `src/ipc_channels.*`
   - the `/dev/shm` channel implementations: latest-message channel, CAN queue,
-    and the shared NV12 frame ring.
+    and the shared NV12 frame ring, all on one `ShmRegion` (open, size,
+    map, close); each channel keeps only its own size policy.
 - `src/k230_overlayd.cc`, `src/k230_camerad.cc`, `src/k230_modeld.cc`
   - openpilot-style process split. `k230_overlayd` is the direct DRM overlay
     process; `k230_camerad` and `k230_modeld` keep the camera/model path
@@ -133,5 +134,6 @@ released after that short hold if they persist.
     CAN-seconds timestamps. Per-process scheduling may still use
     `std::chrono::steady_clock`.
 - `src/utils_json.*`
-  - minimal JSON value readers and the clamped `parse_json_optional_*` helpers
-    used by every parameter loader.
+  - minimal JSON value readers, the clamped `parse_json_optional_*` helpers, and
+    the `Json*Field` tables that `control_params` and `adaptive_cruise` fill
+    their structs from: one `{key, min, max, member}` row per parameter.

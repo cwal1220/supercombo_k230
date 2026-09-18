@@ -43,6 +43,31 @@ inline float interp(float x, std::initializer_list<float> xp,
   return fs[n - 1];
 }
 
+// row-major 3x3 곱과 3x3·3x4 곱. 결합 순서(k 내부 누적)가 세 호출자 모두 같았다.
+inline void matmul3(const float *a, const float *b, float *out)
+{
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 3; ++c) {
+            float sum = 0.0f;
+            for (int k = 0; k < 3; ++k)
+                sum += a[r * 3 + k] * b[k * 3 + c];
+            out[r * 3 + c] = sum;
+        }
+    }
+}
+
+inline void matmul34(const float *a3, const float *b34, float *out34)
+{
+    for (int r = 0; r < 3; ++r) {
+        for (int c = 0; c < 4; ++c) {
+            float sum = 0.0f;
+            for (int k = 0; k < 3; ++k)
+                sum += a3[r * 3 + k] * b34[k * 4 + c];
+            out34[r * 4 + c] = sum;
+        }
+    }
+}
+
 inline float deg_to_rad(float deg) {
   return deg * 0.017453292519943295f;
 }

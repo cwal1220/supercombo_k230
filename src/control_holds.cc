@@ -1,10 +1,11 @@
 #include "control_holds.h"
 
+#include "utils_time.h"
+
 PandaGateOutput PandaHealthGate::update(const K230PandaState &state, uint64_t now_ns,
                                         bool force_engaged) {
   PandaGateOutput out;
-  out.state_fresh = state.timestamp_ns != 0 && now_ns >= state.timestamp_ns &&
-                    now_ns - state.timestamp_ns <= kPandaStateTimeoutNs;
+  out.state_fresh = timestamp_fresh_ns(state.timestamp_ns, now_ns, kPandaStateTimeoutNs);
   const bool transport_ready = out.state_fresh && state.connected != 0 &&
                                state.comms_healthy != 0 && state.tx_enabled != 0;
   const bool safety_ready = state.heartbeat_lost == 0 &&
@@ -37,8 +38,7 @@ PathHoldOutput PathHoldGate::update(const K230ModelState &model, uint64_t now_ns
     last_usable_ = out.raw;
     last_usable_model_timestamp_ns_ = model.model_timestamp_ns;
   } else if (out.raw.invalid_reason == "path_invalid" && last_usable_.usable_for_steering &&
-             model.model_timestamp_ns != 0 && now_ns >= model.model_timestamp_ns &&
-             now_ns - model.model_timestamp_ns <= model_timeout_ns &&
+             timestamp_fresh_ns(model.model_timestamp_ns, now_ns, model_timeout_ns) &&
              last_usable_model_timestamp_ns_ != 0 &&
              now_ns >= last_usable_model_timestamp_ns_ &&
              now_ns - last_usable_model_timestamp_ns_ <= kPathInvalidHoldNs) {

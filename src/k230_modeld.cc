@@ -166,7 +166,7 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
     std::fprintf(stderr, "modeld replay input format=NV12 frames=%u file=%s target=%u\n",
                  source.frame_count(), config.replay_nv12_path.c_str(), target_frames);
 
-    SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode, replay_config);
+    SupercomboModel model(config.kmodel_path.c_str(), replay_config);
     CalibrationService calibration(config);
     float initial_rpy[3] = {};
     calibration.input_rpy(initial_rpy);
@@ -226,7 +226,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
     }
     if (!frame_ring.valid()) return 1;
 
-    SupercomboModel model(config.kmodel_path.c_str(), config.debug_mode, config);
+    SupercomboModel model(config.kmodel_path.c_str(), config);
     CalibrationService calibration(config);
     float initial_rpy[3] = {};
     calibration.input_rpy(initial_rpy);

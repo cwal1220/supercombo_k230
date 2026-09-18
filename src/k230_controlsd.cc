@@ -309,10 +309,8 @@ struct VisionLead {
 VisionLead observe_vision_lead(const K230ModelState &model, uint64_t now_ns,
                                float ego_speed_mps) {
   VisionLead lead;
-  lead.model_fresh =
-      model.valid != 0 && model.model_timestamp_ns != 0 &&
-      now_ns >= model.model_timestamp_ns &&
-      now_ns - model.model_timestamp_ns <= kAlertModelTimeoutNs;
+  lead.model_fresh = model.valid != 0 &&
+                     timestamp_fresh_ns(model.model_timestamp_ns, now_ns, kAlertModelTimeoutNs);
   lead.signal_valid =
       lead.model_fresh && model.lead.valid != 0 &&
       std::isfinite(model.lead.x) && std::isfinite(model.lead.velocity);
@@ -744,9 +742,7 @@ int main() {
                                       frame, panda.ready, panda.controls_allowed);
       events.update(last_result, vehicle, panda, panda_state, held, model, now_ns);
 
-      const bool radar_lead_fresh =
-          vehicle.scc11_time_s >= 0.0 && now_s >= vehicle.scc11_time_s &&
-          now_s - vehicle.scc11_time_s <= 0.5;
+      const bool radar_lead_fresh = signal_time_fresh(vehicle.scc11_time_s, now_s, 0.5);
       const float ego_speed_kph = vehicle_speed_kph(vehicle, now_s);
       const float ego_speed_mps = ego_speed_kph / 3.6f;
       const VisionLead lead = observe_vision_lead(model, now_ns, ego_speed_mps);

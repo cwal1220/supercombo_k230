@@ -21,7 +21,7 @@
 class SupercomboModel
 {
 public:
-    SupercomboModel(const char *kmodel_file, int debug_mode, const AppConfig &config);
+    SupercomboModel(const char *kmodel_file, const AppConfig &config);
 
     /* modeld가 프레임 링에서 이미 캐시 가능한 버퍼로 복사해 넘겨주므로
      * 여기서 다시 복사하지 않는다. C908 vluxei32.v가 /dev/shm 매핑 위에서
@@ -71,7 +71,7 @@ private:
     bool write_temporal_inputs();
 
     nncase::runtime::interpreter kmodel_interp_;
-    int debug_mode_ = 0;
+    bool profile_ = false;  // SUPERCOMBO_PROFILE: 30프레임마다 단계별 평균 ms
     std::vector<std::vector<int>> input_shapes_;
     std::vector<std::vector<int>> output_shapes_;
     std::vector<nncase::runtime::runtime_tensor> input_tensors_;

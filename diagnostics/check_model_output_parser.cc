@@ -12,24 +12,11 @@
 
 namespace {
 
-constexpr int kPlanStride = kTrajectorySize * 15 * 2 + 1;
-constexpr int kLaneOffset = 5 * kPlanStride;
-constexpr int kLaneLineSize = 4 * kTrajectorySize * 2;
-constexpr int kLaneProbOffset = kLaneOffset + kLaneLineSize * 2;
-constexpr int kRoadEdgeOffset = kLaneProbOffset + 8;
-constexpr int kRoadEdgeMeanSize = 2 * kTrajectorySize * 2;
-constexpr int kLeadOffset = kRoadEdgeOffset + kRoadEdgeMeanSize * 2;
-constexpr int kLeadStride = kLeadTrajLen * 4 * 2 + kLeadMhpSelection;
-constexpr int kLeadProbOffset = kLeadOffset + kLeadMhpN * kLeadStride;
-constexpr int kDesireStateOffset = kLeadProbOffset + kLeadMhpSelection;
+using namespace model_output_layout;
 
 /* openpilot v0.9.4 출력 레이아웃 검사. */
 void self_test_094()
 {
-    // 파서와 같은 방식으로 꼬리에서 역산한다: pose(12) / wide_from_device_euler(6)
-    // / sim_pose(12) / road_transform(12) / feature(128) / pad(2).
-    constexpr int kPoseOffset094 = kModelOutputFloats - 2 - kModelFeatureLen - 12 - 12 - 6 - 12;
-    static_assert(kPoseOffset094 == 5948, "v0.9.4 pose offset moved");
     std::vector<float> raw(kModelOutputFloats, 0.0f);
 
     for (int plan = 0; plan < 5; ++plan)
@@ -46,8 +33,8 @@ void self_test_094()
 
     raw[kDesireStateOffset + 3] = 5.0f;
     for (int i = 0; i < 3; ++i) {
-        raw[kPoseOffset094 + i] = 20.0f + i;
-        raw[kPoseOffset094 + 6 + i] = std::log(0.05f);
+        raw[kPoseOffset + i] = 20.0f + i;
+        raw[kPoseOffset + 6 + i] = std::log(0.05f);
     }
     const ParsedModelOutput parsed = ModelOutputParser::parse(raw);
     ParsedLeadPoint lead;
@@ -63,7 +50,7 @@ void self_test_094()
 
     std::cout << "MODEL_OUTPUT_094_OK output=" << kModelOutputFloats
               << " feature=" << kModelFeatureLen
-              << " pose_offset=" << kPoseOffset094 << "\n";
+              << " pose_offset=" << kPoseOffset << "\n";
 }
 
 template <typename T>

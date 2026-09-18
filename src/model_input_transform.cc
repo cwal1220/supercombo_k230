@@ -16,30 +16,6 @@
 
 namespace {
 
-void matmul3(const float *a, const float *b, float *out)
-{
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 3; ++c) {
-            float sum = 0.0f;
-            for (int k = 0; k < 3; ++k)
-                sum += a[r * 3 + k] * b[k * 3 + c];
-            out[r * 3 + c] = sum;
-        }
-    }
-}
-
-void matmul34(const float *a3, const float *b34, float *out34)
-{
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 4; ++c) {
-            float sum = 0.0f;
-            for (int k = 0; k < 3; ++k)
-                sum += a3[r * 3 + k] * b34[k * 4 + c];
-            out34[r * 4 + c] = sum;
-        }
-    }
-}
-
 bool scalar_warp_forced()
 {
     static const bool forced = [] {

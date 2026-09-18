@@ -10,6 +10,29 @@
 #include <cstdint>
 #include <string>
 
+/* shm_open한 이름 하나와 그 매핑. 세 채널이 열기·크기 조정·매핑·닫기 순서를 공유하고,
+ * 크기 정책(만들 때 늘릴지, 붙을 때 얼마를 요구할지)만 각자 정한다. */
+class ShmRegion {
+public:
+    ShmRegion() = default;
+    ~ShmRegion() { close(); }
+    ShmRegion(const ShmRegion &) = delete;
+    ShmRegion &operator=(const ShmRegion &) = delete;
+
+    bool open(const char *name, bool create);
+    bool file_size(size_t *size) const;
+    bool resize(size_t size);
+    bool map(size_t size);
+    void close();
+    void *data() const { return map_; }
+    size_t size() const { return size_; }
+
+private:
+    int fd_ = -1;
+    void *map_ = nullptr;
+    size_t size_ = 0;
+};
+
 class K230LatestChannel {
 public:
     K230LatestChannel() = default;
@@ -24,8 +47,7 @@ public:
 
 private:
     std::string name_;
-    int fd_ = -1;
-    size_t map_size_ = 0;
+    ShmRegion region_;
     K230IpcHeader *header_ = nullptr;
     uint8_t *payload_ = nullptr;
 };
@@ -46,8 +68,7 @@ public:
 
 private:
     std::string name_;
-    int fd_ = -1;
-    size_t map_size_ = 0;
+    ShmRegion region_;
     K230CanQueueHeader *header_ = nullptr;
     K230CanBatch *slots_ = nullptr;
 };
@@ -76,8 +97,7 @@ public:
     bool valid() const { return header_ != nullptr; }
 
 private:
-    int fd_ = -1;
-    size_t map_size_ = 0;
+    ShmRegion region_;
     K230FrameRingHeader *header_ = nullptr;
     uint8_t *frames_ = nullptr;
 };

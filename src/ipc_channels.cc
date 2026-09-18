@@ -11,6 +11,53 @@
 #include <cstdio>
 #include <cstring>
 
+/* ---- ShmRegion ---- */
+
+bool ShmRegion::open(const char *name, bool create)
+{
+    close();
+    fd_ = shm_open(name, O_RDWR | (create ? O_CREAT : 0), 0664);
+    return fd_ >= 0;
+}
+
+bool ShmRegion::file_size(size_t *size) const
+{
+    struct stat st {};
+    if (fd_ < 0 || fstat(fd_, &st) != 0) return false;
+    *size = static_cast<size_t>(st.st_size);
+    return true;
+}
+
+bool ShmRegion::resize(size_t size)
+{
+    return fd_ >= 0 && ftruncate(fd_, static_cast<off_t>(size)) == 0;
+}
+
+bool ShmRegion::map(size_t size)
+{
+    if (fd_ < 0 || map_) return false;
+    void *mapped = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
+    if (mapped == MAP_FAILED) return false;
+    map_ = mapped;
+    size_ = size;
+    return true;
+}
+
+void ShmRegion::close()
+{
+    if (map_) {
+        munmap(map_, size_);
+        map_ = nullptr;
+    }
+    if (fd_ >= 0) {
+        ::close(fd_);
+        fd_ = -1;
+    }
+    size_ = 0;
+}
+
+/* ---- K230FrameRing ---- */
+
 K230FrameRing::~K230FrameRing()
 {
     close();
@@ -22,35 +69,29 @@ bool K230FrameRing::open(bool create, unsigned width, unsigned height, unsigned 
     if (width == 0 || height == 0 || slots == 0 || slots > kK230FrameSlots)
         return false;
 
-    const int flags = O_RDWR | (create ? O_CREAT : 0);
-    fd_ = shm_open(kK230RoadAiFrameRing, flags, 0664);
-    if (fd_ < 0) return false;
+    if (!region_.open(kK230RoadAiFrameRing, create)) return false;
 
-    const size_t expected_size = sizeof(K230FrameRingHeader) +
+    /* 만들 때는 요청 크기로 자르고, 붙을 때는 생산자가 만든 크기를 그대로 쓴다. */
+    size_t map_size = sizeof(K230FrameRingHeader) +
         static_cast<size_t>(width) * height * 3 / 2 * slots;
-    map_size_ = expected_size;
     if (!create) {
-        struct stat st {};
-        if (fstat(fd_, &st) != 0 || st.st_size < static_cast<off_t>(sizeof(K230FrameRingHeader))) {
+        if (!region_.file_size(&map_size) || map_size < sizeof(K230FrameRingHeader)) {
             close();
             return false;
         }
-        map_size_ = static_cast<size_t>(st.st_size);
     }
-    if (create && ftruncate(fd_, static_cast<off_t>(map_size_)) != 0) {
-        std::perror("ftruncate frame ring");
+    if (create && !region_.resize(map_size)) {
+        std::perror("ipc: ftruncate frame ring");
+        close();
+        return false;
+    }
+    if (!region_.map(map_size)) {
+        std::perror("ipc: mmap frame ring");
         close();
         return false;
     }
 
-    void *map = mmap(nullptr, map_size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
-    if (map == MAP_FAILED) {
-        std::perror("mmap frame ring");
-        close();
-        return false;
-    }
-
-    header_ = static_cast<K230FrameRingHeader *>(map);
+    header_ = static_cast<K230FrameRingHeader *>(region_.data());
     frames_ = reinterpret_cast<uint8_t *>(header_) + sizeof(K230FrameRingHeader);
     if (create && (header_->magic != kK230FrameRingMagic ||
                    header_->version != kK230FrameRingVersion ||
@@ -75,7 +116,7 @@ bool K230FrameRing::open(bool create, unsigned width, unsigned height, unsigned 
         header_->version == kK230FrameRingVersion &&
         header_->slot_count > 0 && header_->slot_count <= kK230FrameSlots &&
         header_->frame_bytes > 0 &&
-        map_size_ >= sizeof(K230FrameRingHeader) +
+        region_.size() >= sizeof(K230FrameRingHeader) +
             static_cast<size_t>(header_->slot_count) * header_->frame_bytes;
     if (!valid) close();
     return valid;
@@ -83,16 +124,9 @@ bool K230FrameRing::open(bool create, unsigned width, unsigned height, unsigned 
 
 void K230FrameRing::close()
 {
-    if (header_) {
-        munmap(header_, map_size_);
-        header_ = nullptr;
-        frames_ = nullptr;
-    }
-    if (fd_ >= 0) {
-        ::close(fd_);
-        fd_ = -1;
-    }
-    map_size_ = 0;
+    region_.close();
+    header_ = nullptr;
+    frames_ = nullptr;
 }
 
 bool K230FrameRing::write_slot(unsigned index, uint64_t frame_id,
@@ -198,38 +232,34 @@ bool K230LatestChannel::open(const char *name, size_t payload_capacity, bool cre
 {
     close();
     name_ = name ? name : "";
-    const int flags = O_RDWR | (create ? O_CREAT : 0);
-    fd_ = shm_open(name_.c_str(), flags, 0664);
-    if (fd_ < 0) return false;
+    if (!region_.open(name_.c_str(), create)) return false;
 
-    map_size_ = sizeof(K230IpcHeader) + payload_capacity;
+    const size_t map_size = sizeof(K230IpcHeader) + payload_capacity;
     if (create) {
-        if (ftruncate(fd_, static_cast<off_t>(map_size_)) != 0) {
-            std::perror("ftruncate ipc channel");
+        if (!region_.resize(map_size)) {
+            std::perror("ipc: ftruncate ipc channel");
             close();
             return false;
         }
     } else {
         // 생산자가 O_CREAT 직후 ftruncate 전이면 shm이 요청보다 작을 수 있다.
         // 그대로 mmap하면 header를 읽는 순간 SIGBUS가 난다.
-        struct stat st {};
-        if (fstat(fd_, &st) != 0 || static_cast<size_t>(st.st_size) < map_size_) {
+        size_t actual = 0;
+        if (!region_.file_size(&actual) || actual < map_size) {
             std::fprintf(stderr,
-                         "ipc channel size mismatch name=%s actual=%lld expected=%zu\n",
-                         name_.c_str(), static_cast<long long>(st.st_size), map_size_);
+                         "ipc: ipc channel size mismatch name=%s actual=%zu expected=%zu\n",
+                         name_.c_str(), actual, map_size);
             close();
             return false;
         }
     }
-
-    void *map = mmap(nullptr, map_size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
-    if (map == MAP_FAILED) {
-        std::perror("mmap ipc channel");
+    if (!region_.map(map_size)) {
+        std::perror("ipc: mmap ipc channel");
         close();
         return false;
     }
 
-    header_ = static_cast<K230IpcHeader *>(map);
+    header_ = static_cast<K230IpcHeader *>(region_.data());
     payload_ = reinterpret_cast<uint8_t *>(header_) + sizeof(K230IpcHeader);
     if (create && (header_->magic != kK230IpcMagic ||
                    header_->version != kK230IpcVersion ||
@@ -251,16 +281,9 @@ bool K230LatestChannel::open(const char *name, size_t payload_capacity, bool cre
 
 void K230LatestChannel::close()
 {
-    if (header_) {
-        munmap(header_, map_size_);
-        header_ = nullptr;
-        payload_ = nullptr;
-    }
-    if (fd_ >= 0) {
-        ::close(fd_);
-        fd_ = -1;
-    }
-    map_size_ = 0;
+    region_.close();
+    header_ = nullptr;
+    payload_ = nullptr;
 }
 
 bool K230LatestChannel::publish(const void *payload, size_t payload_size)
@@ -332,54 +355,49 @@ bool K230CanQueue::open(const char *name, unsigned slot_count, bool create) {
     if (!name || name[0] == '\0' || slot_count == 0) return false;
 
     name_ = name;
-    fd_ = shm_open(name_.c_str(), O_RDWR | (create ? O_CREAT : 0), 0664);
-    if (fd_ < 0) {
-        std::perror("shm_open CAN queue");
+    if (!region_.open(name_.c_str(), create)) {
+        std::perror("ipc: shm_open CAN queue");
         return false;
     }
 
-    map_size_ = queue_map_size(slot_count);
-    if (create) {
-        struct stat st {};
-        if (fstat(fd_, &st) != 0) {
-            std::perror("fstat CAN queue");
-            close();
-            return false;
-        }
-        if (static_cast<size_t>(st.st_size) < map_size_ &&
-            ftruncate(fd_, static_cast<off_t>(map_size_)) != 0) {
-            std::fprintf(stderr,
-                         "CAN queue resize failed name=%s actual=%lld expected=%zu\n",
-                         name_.c_str(), static_cast<long long>(st.st_size), map_size_);
-            std::perror("ftruncate CAN queue");
-            close();
-            return false;
-        }
-    } else {
-        struct stat st {};
-        if (fstat(fd_, &st) != 0 || static_cast<size_t>(st.st_size) < map_size_) {
-            std::fprintf(stderr,
-                         "CAN queue size mismatch name=%s actual=%lld expected=%zu\n",
-                         name_.c_str(), static_cast<long long>(st.st_size), map_size_);
-            close();
-            return false;
-        }
+    /* 만들 때는 작으면 늘리고(기존 큐는 유지), 붙을 때는 요청 크기 이상을 요구한다. */
+    const size_t map_size = queue_map_size(slot_count);
+    size_t actual = 0;
+    if (!region_.file_size(&actual)) {
+        std::perror("ipc: fstat CAN queue");
+        close();
+        return false;
     }
-
-    void *map = mmap(nullptr, map_size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
-    if (map == MAP_FAILED) {
-        std::perror("mmap CAN queue");
+    if (create) {
+        if (actual < map_size && !region_.resize(map_size)) {
+            std::fprintf(stderr,
+                         "ipc: CAN queue resize failed name=%s actual=%zu expected=%zu\n",
+                         name_.c_str(), actual, map_size);
+            std::perror("ipc: ftruncate CAN queue");
+            close();
+            return false;
+        }
+    } else if (actual < map_size) {
+        std::fprintf(stderr,
+                     "ipc: CAN queue size mismatch name=%s actual=%zu expected=%zu\n",
+                     name_.c_str(), actual, map_size);
+        close();
+        return false;
+    }
+    if (!region_.map(map_size)) {
+        std::perror("ipc: mmap CAN queue");
         close();
         return false;
     }
 
+    void *map = region_.data();
     header_ = static_cast<K230CanQueueHeader *>(map);
     slots_ = reinterpret_cast<K230CanBatch *>(
         reinterpret_cast<uint8_t *>(map) + sizeof(K230CanQueueHeader));
     if (create && (header_->magic != kK230CanQueueMagic ||
                    header_->version != kK230CanQueueVersion ||
                    header_->slot_count != slot_count)) {
-        std::memset(map, 0, map_size_);
+        std::memset(map, 0, region_.size());
         header_->magic = kK230CanQueueMagic;
         header_->version = kK230CanQueueVersion;
         header_->slot_count = slot_count;
@@ -391,7 +409,7 @@ bool K230CanQueue::open(const char *name, unsigned slot_count, bool create) {
         header_->version != kK230CanQueueVersion ||
         header_->slot_count != slot_count) {
         std::fprintf(stderr,
-                     "CAN queue header mismatch name=%s magic=0x%x version=%u slots=%u\n",
+                     "ipc: CAN queue header mismatch name=%s magic=0x%x version=%u slots=%u\n",
                      name_.c_str(), header_->magic, header_->version,
                      header_->slot_count);
         close();
@@ -401,16 +419,9 @@ bool K230CanQueue::open(const char *name, unsigned slot_count, bool create) {
 }
 
 void K230CanQueue::close() {
-    if (header_) {
-        munmap(header_, map_size_);
-        header_ = nullptr;
-        slots_ = nullptr;
-    }
-    if (fd_ >= 0) {
-        ::close(fd_);
-        fd_ = -1;
-    }
-    map_size_ = 0;
+    region_.close();
+    header_ = nullptr;
+    slots_ = nullptr;
 }
 
 void K230CanQueue::reset() {

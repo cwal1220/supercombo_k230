@@ -3,36 +3,9 @@
 #include <algorithm>
 #include <cmath>
 
+using namespace model_output_layout;
+
 namespace {
-
-constexpr int kPlanMhpN = 5;
-constexpr int kPlanStride = kTrajectorySize * 15 * 2 + 1;
-constexpr int kLaneOffset = kPlanMhpN * kPlanStride;
-constexpr int kLaneLineSize = 4 * kTrajectorySize * 2;
-constexpr int kLaneProbOffset = kLaneOffset + kLaneLineSize * 2;
-constexpr int kRoadEdgeOffset = kLaneProbOffset + 8;
-constexpr int kRoadEdgeMeanSize = 2 * kTrajectorySize * 2;
-constexpr int kRoadEdgeSize = kRoadEdgeMeanSize * 2;
-constexpr int kLeadElementSize = 4;
-constexpr int kLeadPredictionStride = kLeadTrajLen * kLeadElementSize * 2 + kLeadMhpSelection;
-constexpr int kLeadOffset = kRoadEdgeOffset + kRoadEdgeSize;
-constexpr int kLeadProbOffset = kLeadOffset + kLeadMhpN * kLeadPredictionStride;
-constexpr int kDesireStateOffset = kLeadProbOffset + kLeadMhpSelection;  // 5860
-
-/* meta 블록만 크기를 유도할 수 없어서(desire_state 뒤에 openpilot의 disengage
- * 확률과 desire_pred가 붙는다) pose 이후는 꼬리에서 역산한다. 꼬리 순서는
- * pose(12) / wide_from_device_euler(6) / sim_pose(12) / road_transform(12) /
- * feature(128) / pad(2)로 고정이다. */
-constexpr int kPadFloats = 2;
-constexpr int kRoadTransformFloats = 12;
-constexpr int kSimPoseFloats = 12;
-constexpr int kWideFromDeviceEulerFloats = 6;
-constexpr int kPoseFloats = 12;
-constexpr int kPoseOffset = kModelOutputFloats - kPadFloats - kModelFeatureLen -
-                            kRoadTransformFloats - kSimPoseFloats -
-                            kWideFromDeviceEulerFloats - kPoseFloats;
-static_assert(kPoseOffset > kDesireStateOffset + kDesireLen,
-              "pose block must follow the meta block");
 
 float sigmoid_impl(float x)
 {

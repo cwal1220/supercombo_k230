@@ -104,18 +104,19 @@ static const PiezoTone kUnable[] = {
     {740, 400, PIEZO_DEFAULT_DUTY},
 };
 
-static const PiezoTone *const kSequences[PIEZO_ALERT_COUNT] = {
-    kSignalChanged, kUnavailable, kEngage, kDisengage, kUnable,
-};
-static const size_t kSequenceLengths[PIEZO_ALERT_COUNT] = {
-    sizeof(kSignalChanged) / sizeof(kSignalChanged[0]),
-    sizeof(kUnavailable) / sizeof(kUnavailable[0]),
-    sizeof(kEngage) / sizeof(kEngage[0]),
-    sizeof(kDisengage) / sizeof(kDisengage[0]),
-    sizeof(kUnable) / sizeof(kUnable[0]),
-};
-static const char *const kAlertNames[PIEZO_ALERT_COUNT] = {
-    "signal_changed", "unavailable", "engage", "disengage", "unable",
+/* 알림 -> 시퀀스. 지정 초기화자로 enum 값에 직접 묶어 순서 실수를 막는다. */
+typedef struct PiezoSequence {
+  const PiezoTone *tones;
+  size_t count;
+  const char *name;
+} PiezoSequence;
+#define PIEZO_SEQUENCE(tones, label) {tones, sizeof(tones) / sizeof((tones)[0]), label}
+static const PiezoSequence kAlerts[PIEZO_ALERT_COUNT] = {
+    [PIEZO_ALERT_SIGNAL_CHANGED] = PIEZO_SEQUENCE(kSignalChanged, "signal_changed"),
+    [PIEZO_ALERT_UNAVAILABLE] = PIEZO_SEQUENCE(kUnavailable, "unavailable"),
+    [PIEZO_ALERT_ENGAGE] = PIEZO_SEQUENCE(kEngage, "engage"),
+    [PIEZO_ALERT_DISENGAGE] = PIEZO_SEQUENCE(kDisengage, "disengage"),
+    [PIEZO_ALERT_UNABLE] = PIEZO_SEQUENCE(kUnable, "unable"),
 };
 
 static int parse_pin(void)
@@ -439,8 +440,8 @@ static int play_sequence(PiezoAlert alert)
   pwm_paths(&pwm);
   int result = 0;
 
-  for (size_t i = 0; i < kSequenceLengths[alert]; ++i) {
-    const PiezoTone tone = kSequences[alert][i];
+  for (size_t i = 0; i < kAlerts[alert].count; ++i) {
+    const PiezoTone tone = kAlerts[alert].tones[i];
     if (tone.frequency_hz == 0) {
       if (pwm.enabled && pwm_set_enabled(&pwm, 0) != 0) {
         result = -1;
@@ -481,7 +482,7 @@ static void report_unavailable(PiezoBuzzer *buzzer, PiezoAlert alert,
     fprintf(stderr,
             "k230_overlayd: piezo buzzer unavailable, continuing with LCD "
             "alerts (alert=%s event=%u)\n",
-            alert >= 0 && alert < PIEZO_ALERT_COUNT ? kAlertNames[alert] :
+            alert >= 0 && alert < PIEZO_ALERT_COUNT ? kAlerts[alert].name :
                                                        "unknown",
             event_id);
   }

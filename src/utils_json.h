@@ -27,6 +27,25 @@ void parse_json_optional_int(const std::string &text, const std::string &key,
 
 /* 파라미터 파일 로더 공통 뼈대. 파일을 통째로 읽어 apply(text)를 부르고,
  * 파싱 예외를 error 문자열로 바꾼다. 로더는 키 목록만 쓰면 된다. */
+/* {키, 하한, 상한, 멤버} 표로 파라미터 구조체를 채운다. 없는 키는 기본값을 남기고
+ * 범위 밖은 클램프한다(parse_json_optional_*와 같다). 표가 곧 파라미터 명세다. */
+template <class T> struct JsonBoolField { const char *key; bool T::*member; };
+template <class T> struct JsonIntField { const char *key; int lo; int hi; int T::*member; };
+template <class T> struct JsonFloatField { const char *key; float lo; float hi; float T::*member; };
+
+template <class T, size_t N>
+void parse_json_fields(const std::string &text, const JsonBoolField<T> (&fields)[N], T *out) {
+  for (const auto &f : fields) parse_json_optional_bool(text, f.key, &(out->*f.member));
+}
+template <class T, size_t N>
+void parse_json_fields(const std::string &text, const JsonIntField<T> (&fields)[N], T *out) {
+  for (const auto &f : fields) parse_json_optional_int(text, f.key, f.lo, f.hi, &(out->*f.member));
+}
+template <class T, size_t N>
+void parse_json_fields(const std::string &text, const JsonFloatField<T> (&fields)[N], T *out) {
+  for (const auto &f : fields) parse_json_optional_float(text, f.key, f.lo, f.hi, &(out->*f.member));
+}
+
 bool load_json_param_file(const std::string &path,
                           const std::function<void(const std::string &)> &apply,
                           std::string *error);

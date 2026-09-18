@@ -57,34 +57,37 @@ bool valid_vision_lead(const AdaptiveCruiseInput &input,
 
 }  // namespace
 
+namespace {
+
+constexpr JsonBoolField<AdaptiveCruiseConfig> kAdaptiveBools[] = {
+    {"enabled", &AdaptiveCruiseConfig::enabled},
+};
+constexpr JsonIntField<AdaptiveCruiseConfig> kAdaptiveInts[] = {
+    {"button_pulse_frames", 1, 10, &AdaptiveCruiseConfig::button_pulse_frames},
+};
+constexpr JsonFloatField<AdaptiveCruiseConfig> kAdaptiveFloats[] = {
+    {"lead_probability_threshold", 0.2f, 0.99f, &AdaptiveCruiseConfig::lead_probability_threshold},
+    {"standstill_gap_m", 2.0f, 20.0f, &AdaptiveCruiseConfig::standstill_gap_m},
+    {"following_time_s", 0.8f, 4.0f, &AdaptiveCruiseConfig::following_time_s},
+    {"gap_correction_gain", 0.05f, 1.0f, &AdaptiveCruiseConfig::gap_correction_gain},
+    {"max_slowdown_correction_mps", 0.5f, 10.0f, &AdaptiveCruiseConfig::max_slowdown_correction_mps},
+    {"max_speedup_correction_mps", 0.0f, 5.0f, &AdaptiveCruiseConfig::max_speedup_correction_mps},
+    {"deceleration_rate_kph_per_s", 0.5f, 5.0f, &AdaptiveCruiseConfig::deceleration_rate_kph_per_s},
+    {"lead_hold_s", 0.1f, 2.0f, &AdaptiveCruiseConfig::lead_hold_s},
+    {"lead_restore_delay_s", 1.0f, 10.0f, &AdaptiveCruiseConfig::lead_restore_delay_s},
+    {"command_interval_s", 0.5f, 5.0f, &AdaptiveCruiseConfig::command_interval_s},
+};
+
+}  // namespace
+
 bool load_adaptive_cruise_params_json(
     const std::string &path, AdaptiveCruiseConfig *config,
     std::string *error) {
   if (!config) return false;
   return load_json_param_file(path, [config](const std::string &text) {
-    parse_json_optional_bool(text, "enabled", &config->enabled);
-    parse_json_optional_float(text, "lead_probability_threshold", 0.2f, 0.99f,
-                         &config->lead_probability_threshold);
-    parse_json_optional_float(text, "standstill_gap_m", 2.0f, 20.0f,
-                         &config->standstill_gap_m);
-    parse_json_optional_float(text, "following_time_s", 0.8f, 4.0f,
-                         &config->following_time_s);
-    parse_json_optional_float(text, "gap_correction_gain", 0.05f, 1.0f,
-                         &config->gap_correction_gain);
-    parse_json_optional_float(text, "max_slowdown_correction_mps", 0.5f, 10.0f,
-                         &config->max_slowdown_correction_mps);
-    parse_json_optional_float(text, "max_speedup_correction_mps", 0.0f, 5.0f,
-                         &config->max_speedup_correction_mps);
-    parse_json_optional_float(text, "deceleration_rate_kph_per_s", 0.5f, 5.0f,
-                         &config->deceleration_rate_kph_per_s);
-    parse_json_optional_float(text, "lead_hold_s", 0.1f, 2.0f,
-                         &config->lead_hold_s);
-    parse_json_optional_float(text, "lead_restore_delay_s", 1.0f, 10.0f,
-                         &config->lead_restore_delay_s);
-    parse_json_optional_float(text, "command_interval_s", 0.5f, 5.0f,
-                         &config->command_interval_s);
-    parse_json_optional_int(text, "button_pulse_frames", 1, 10,
-                       &config->button_pulse_frames);
+    parse_json_fields(text, kAdaptiveBools, config);
+    parse_json_fields(text, kAdaptiveInts, config);
+    parse_json_fields(text, kAdaptiveFloats, config);
   }, error);
 }
 

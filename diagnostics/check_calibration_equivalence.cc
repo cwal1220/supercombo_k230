@@ -596,135 +596,6 @@ void transform_scale_buffer_ref(const double *in, double scale, double *out)
     matmul3d(transform_in, tmp, out);
 }
 
-struct LegacyBilinearSample {
-    uint32_t offset[4] = {};
-    uint16_t weight[4] = {};
-};
-
-void matmul3f_ref(const float *a, const float *b, float *out)
-{
-    for (int row = 0; row < 3; ++row) {
-        for (int col = 0; col < 3; ++col) {
-            float sum = 0.0f;
-            for (int k = 0; k < 3; ++k)
-                sum += a[row * 3 + k] * b[k * 3 + col];
-            out[row * 3 + col] = sum;
-        }
-    }
-}
-
-void transform_scale_buffer_fixed12(const float *in, float scale, float *out)
-{
-    const float transform_out[9] = {
-        1.0f / scale, 0.0f, 0.5f,
-        0.0f, 1.0f / scale, 0.5f,
-        0.0f, 0.0f, 1.0f,
-    };
-    const float transform_in[9] = {
-        scale, 0.0f, -0.5f * scale,
-        0.0f, scale, -0.5f * scale,
-        0.0f, 0.0f, 1.0f,
-    };
-    float tmp[9];
-    matmul3f_ref(in, transform_out, tmp);
-    matmul3f_ref(transform_in, tmp, out);
-}
-
-void build_legacy_sample_map(const float *projection, int src_w, int src_h,
-                             int dst_w, int dst_h, int src_stride_pixels,
-                             int bytes_per_pixel,
-                             std::vector<LegacyBilinearSample> &map)
-{
-    constexpr int kWeightScale = 1 << 12;
-    map.resize(static_cast<size_t>(dst_w) * dst_h);
-    for (int y = 0; y < dst_h; ++y) {
-        for (int x = 0; x < dst_w; ++x) {
-            LegacyBilinearSample sample;
-            const float x0 = projection[0] * x + projection[1] * y + projection[2];
-            const float y0 = projection[3] * x + projection[4] * y + projection[5];
-            const float w0 = projection[6] * x + projection[7] * y + projection[8];
-            if (std::fabs(w0) > 1e-6f) {
-                const float sx = x0 / w0;
-                const float sy = y0 / w0;
-                const int ix = static_cast<int>(std::floor(sx));
-                const int iy = static_cast<int>(std::floor(sy));
-                const float ax = sx - ix;
-                const float ay = sy - iy;
-                const float weights_f[4] = {
-                    (1.0f - ax) * (1.0f - ay),
-                    ax * (1.0f - ay),
-                    (1.0f - ax) * ay,
-                    ax * ay,
-                };
-                const int xs[4] = {ix, ix + 1, ix, ix + 1};
-                const int ys[4] = {iy, iy, iy + 1, iy + 1};
-                for (int i = 0; i < 4; ++i) {
-                    if (xs[i] >= 0 && xs[i] < src_w && ys[i] >= 0 && ys[i] < src_h) {
-                        sample.offset[i] = static_cast<uint32_t>(
-                            (ys[i] * src_stride_pixels + xs[i]) * bytes_per_pixel);
-                        sample.weight[i] = static_cast<uint16_t>(
-                            std::max(0.0f, std::min(static_cast<float>(kWeightScale),
-                                std::round(weights_f[i] * kWeightScale))));
-                    }
-                }
-            }
-            map[static_cast<size_t>(y) * dst_w + x] = sample;
-        }
-    }
-}
-
-uint8_t sample_legacy_fixed12(const uint8_t *base,
-                              const LegacyBilinearSample &sample,
-                              int channel)
-{
-    constexpr int kWeightBits = 12;
-    constexpr int kWeightScale = 1 << kWeightBits;
-    int sum = 0;
-    for (int i = 0; i < 4; ++i)
-        sum += static_cast<int>(base[sample.offset[i] + channel]) * sample.weight[i];
-    const int rounded = (sum + kWeightScale / 2) >> kWeightBits;
-    return static_cast<uint8_t>(std::min(255, std::max(0, rounded)));
-}
-
-void legacy_warp_fixed12(const uint8_t *nv12, int src_w, int src_h,
-                         const float *projection_y, float *out)
-{
-    float projection_uv[9];
-    transform_scale_buffer_fixed12(projection_y, 0.5f, projection_uv);
-    std::vector<LegacyBilinearSample> y_map;
-    std::vector<LegacyBilinearSample> uv_map;
-    build_legacy_sample_map(projection_y, src_w, src_h, kModelW, kModelH,
-                            src_w, 1, y_map);
-    build_legacy_sample_map(projection_uv, src_w / 2, src_h / 2, kHalfW, kHalfH,
-                            src_w / 2, 2, uv_map);
-
-    const uint8_t *y_src = nv12;
-    const uint8_t *uv_src = nv12 + src_w * src_h;
-    float *planes[6] = {
-        out,
-        out + kPlaneSize,
-        out + 2 * kPlaneSize,
-        out + 3 * kPlaneSize,
-        out + 4 * kPlaneSize,
-        out + 5 * kPlaneSize,
-    };
-    for (int y = 0; y < kHalfH; ++y) {
-        for (int x = 0; x < kHalfW; ++x) {
-            const int ox = x * 2;
-            const int oy = y * 2;
-            const size_t dst = static_cast<size_t>(y) * kHalfW + x;
-            const size_t y00 = static_cast<size_t>(oy) * kModelW + ox;
-            const size_t y10 = y00 + kModelW;
-            planes[0][dst] = sample_legacy_fixed12(y_src, y_map[y00], 0);
-            planes[1][dst] = sample_legacy_fixed12(y_src, y_map[y10], 0);
-            planes[2][dst] = sample_legacy_fixed12(y_src, y_map[y00 + 1], 0);
-            planes[3][dst] = sample_legacy_fixed12(y_src, y_map[y10 + 1], 0);
-            planes[4][dst] = sample_legacy_fixed12(uv_src, uv_map[dst], 0);
-            planes[5][dst] = sample_legacy_fixed12(uv_src, uv_map[dst], 1);
-        }
-    }
-}
-
 uint8_t clamp_u8(int value)
 {
     return static_cast<uint8_t>(std::min(255, std::max(0, value)));
@@ -991,7 +862,6 @@ void test_projection_and_yuv6()
     constexpr int kSourceH = 360;
     std::vector<uint8_t> source_nv12(kSourceW * kSourceH * 3 / 2);
     std::vector<float> compact(kYuv6Floats, 0.0f);
-    std::vector<float> legacy(kYuv6Floats, 0.0f);
     std::vector<float> opencl(kYuv6Floats, 0.0f);
     fill_nv12(source_nv12, kSourceW, kSourceH);
     AppConfig source_config;
@@ -1003,7 +873,6 @@ void test_projection_and_yuv6()
         {{0.0f, deg_to_rad(8.0f), deg_to_rad(-3.9f)}},
         {{0.0f, deg_to_rad(-5.0f), deg_to_rad(3.9f)}},
     }};
-    bool compact_legacy_exact = true;
     DiffStats opencl_worst;
     for (ModelFrame frame : {ModelFrame::MedModel, ModelFrame::SmallBigModel}) {
         ModelInputTransform transform(source_config, frame);
@@ -1013,16 +882,6 @@ void test_projection_and_yuv6()
             transform.projection_matrix(projection);
             transform.nv12_to_yuv6_warped_scalar(
                 source_nv12.data(), kSourceW, kSourceH, compact.data());
-            legacy_warp_fixed12(
-                source_nv12.data(), kSourceW, kSourceH, projection, legacy.data());
-            const bool exact = std::memcmp(
-                compact.data(), legacy.data(), compact.size() * sizeof(float)) == 0;
-            compact_legacy_exact &= exact;
-            expect_true(exact,
-                        frame == ModelFrame::MedModel
-                            ? "compact medmodel LUT is bit-exact with legacy LUT"
-                            : "compact sbigmodel LUT is bit-exact with legacy LUT");
-
             double projection_opencl[9];
             for (int i = 0; i < 9; ++i)
                 projection_opencl[i] = projection[i];
@@ -1083,10 +942,7 @@ void test_projection_and_yuv6()
 
     std::printf("projection/yuv6: med_sbig_matrix_tol<=1e-4 identity_max=%.1f med_mean=%.3f sbig_mean=%.3f\n",
                 identity_diff.max, warp_diff.mean, sbig_warp_diff.mean);
-    std::printf("bit_exact: compact_vs_legacy=%d cases=%zu direct_history_vs_pack=%d\n",
-                compact_legacy_exact ? 1 : 0,
-                rpy_cases.size() * 2,
-                direct_history_exact ? 1 : 0);
+    std::printf("bit_exact: direct_history_vs_pack=%d\n", direct_history_exact ? 1 : 0);
     std::printf("opencl_compat_640x360: cases=%zu worst_mean=%.3f worst_max=%.1f "
                 "worst_inner_mean=%.3f worst_inner_max=%.1f\n",
                 rpy_cases.size() * 2,

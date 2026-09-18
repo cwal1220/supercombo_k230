@@ -2,7 +2,6 @@
 
 #include "utils_process.h"
 #include "utils_time.h"
-#include "scoped_timing.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -17,12 +16,6 @@
 using namespace nncase::runtime;
 
 namespace {
-
-bool profile_enabled()
-{
-    static const bool enabled = env_flag("SUPERCOMBO_PROFILE");
-    return enabled;
-}
 
 double ns_to_ms(uint64_t ns)
 {
@@ -76,7 +69,6 @@ ProfileStats &profile_stats()
 // nncase 입력 텐서를 만들어 바인딩하고 shape를 기억한다.
 void SupercomboModel::bind_input_tensors()
 {
-    ScopedTiming st("Supercombo set_input init", debug_mode_);
     for (size_t i = 0; i < kmodel_interp_.inputs_size(); ++i) {
         auto desc = kmodel_interp_.input_desc(i);
         auto shape = kmodel_interp_.input_shape(i);
@@ -95,7 +87,6 @@ void SupercomboModel::bind_input_tensors()
 
 void SupercomboModel::bind_output_tensors()
 {
-    ScopedTiming st("Supercombo set_output init", debug_mode_);
     for (size_t i = 0; i < kmodel_interp_.outputs_size(); ++i) {
         auto desc = kmodel_interp_.output_desc(i);
         auto shape = kmodel_interp_.output_shape(i);
@@ -112,13 +103,11 @@ void SupercomboModel::bind_output_tensors()
 
 void SupercomboModel::run()
 {
-    ScopedTiming st("Supercombo run", debug_mode_);
     kmodel_interp_.run().expect("error occurred in running model");
 }
 
 bool SupercomboModel::copy_outputs(std::vector<float> &raw_output)
 {
-    ScopedTiming st("Supercombo get_output", debug_mode_);
     size_t total = 0;
     for (const auto &shape : output_shapes_)
         total += std::accumulate(shape.begin(), shape.end(), size_t{1}, std::multiplies<size_t>());
@@ -139,8 +128,8 @@ bool SupercomboModel::copy_outputs(std::vector<float> &raw_output)
     return true;
 }
 
-SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const AppConfig &config)
-    : debug_mode_(debug_mode),
+SupercomboModel::SupercomboModel(const char *kmodel_file, const AppConfig &config)
+    : profile_(config.profile),
       input_transform_(config, ModelFrame::MedModel),
       big_input_transform_(config, ModelFrame::SmallBigModel)
 {
@@ -313,7 +302,7 @@ bool SupercomboModel::run_frame(const uint8_t *nv12, int src_w, int src_h,
     if (!gpu && !nv12)
         return false;
 
-    const bool profile = profile_enabled();
+    const bool profile = profile_;
     const uint64_t t1 = profile ? k230_now_ns() : 0;
     if (gpu) {
         if (!prepare_images_gpu(nv12)) return false;
