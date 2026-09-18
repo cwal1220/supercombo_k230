@@ -386,74 +386,31 @@ private:
         process_alert_events(f, now);
     }
 
-    /* 이벤트 카운터는 공유 제어 상태에 있다. overlay가 독립적으로 재시작될
-     * 수 있으므로 첫 번째 정상 스냅샷은 새 사용자 이벤트가 아니라 기준값으로
-     * 처리한다. controlsd 재시작으로 카운터가 0부터 다시 시작한 경우에도
-     * 전체 기준값을 다시 설정한다. 기준값을 잡은 프레임이면 true. */
-    bool baseline_event_counters()
+    /* 고른 알림을 울리고 기록한다. engage 거부는 토스트도 띄운다. 울렸으면 true. */
+    bool play_alert(const OverlayAlertEvents::Decision &decision, uint64_t now)
     {
-        const auto counter_reset = [](uint32_t current, uint32_t previous) {
-            return previous != 0 && current < previous;
+        static constexpr struct { PiezoAlert piezo; const char *name; } kAlerts[] = {
+            {PIEZO_ALERT_UNABLE, "unable"},
+            {PIEZO_ALERT_UNABLE, "unable"},
+            {PIEZO_ALERT_ENGAGE, "engage"},
+            {PIEZO_ALERT_DISENGAGE, "disengage"},
+            {PIEZO_ALERT_SIGNAL_CHANGED, "signal_changed"},
         };
-        const bool counters_reset =
-            event_ids_initialized_ &&
-            (counter_reset(latest_control_state_.engage_event_id, last_engage_event_id_) ||
-             counter_reset(latest_control_state_.disengage_event_id, last_disengage_event_id_) ||
-             counter_reset(latest_control_state_.engage_reject_event_id,
-                           last_engage_reject_event_id_) ||
-             counter_reset(latest_control_state_.departure_alert_event_id, last_departure_alert_event_id_));
-        if (event_ids_initialized_ && !counters_reset) return false;
-        last_engage_event_id_ = latest_control_state_.engage_event_id;
-        last_disengage_event_id_ = latest_control_state_.disengage_event_id;
-        last_engage_reject_event_id_ = latest_control_state_.engage_reject_event_id;
-        last_departure_alert_event_id_ = latest_control_state_.departure_alert_event_id;
-        event_ids_initialized_ = true;
-        return true;
-    }
-
-    /* engage 거부 > engage > disengage 중 첫 새 이벤트 하나만. 울렸으면 true. */
-    bool play_engagement_alert(uint64_t now)
-    {
-        const K230ControlState &c = latest_control_state_;
-        if (c.engage_reject_event_id != 0 &&
-            c.engage_reject_event_id != last_engage_reject_event_id_) {
-            last_engage_reject_event_id_ = c.engage_reject_event_id;
+        if (decision.alert == OverlayAlert::none) return false;
+        const auto &alert = kAlerts[static_cast<int>(decision.alert)];
+        if (decision.alert == OverlayAlert::unable) {
+            const K230ControlState &c = latest_control_state_;
             std::snprintf(hud_.engage_alert_message, sizeof(hud_.engage_alert_message),
                           "UNABLE TO ENGAGE: %s", engage_block_text(c.engage_reject_block));
             engage_alert_until_ns_ = now + kEngageAlertNs;
-            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_UNABLE, last_engage_reject_event_id_);
+            piezo_buzzer_play(piezo_buzzer_, alert.piezo, decision.event_id);
             std::fprintf(stderr, "k230_overlayd: piezo alert=unable event=%u block=%s\n",
-                         last_engage_reject_event_id_, c.engage_reject_block);
+                         decision.event_id, c.engage_reject_block);
             return true;
         }
-        if (c.engage_event_id != 0 && c.engage_event_id != last_engage_event_id_) {
-            last_engage_event_id_ = c.engage_event_id;
-            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_ENGAGE, last_engage_event_id_);
-            std::fprintf(stderr, "k230_overlayd: piezo alert=engage event=%u\n",
-                         last_engage_event_id_);
-            return true;
-        }
-        if (c.disengage_event_id != 0 && c.disengage_event_id != last_disengage_event_id_) {
-            last_disengage_event_id_ = c.disengage_event_id;
-            piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_DISENGAGE, last_disengage_event_id_);
-            std::fprintf(stderr, "k230_overlayd: piezo alert=disengage event=%u\n",
-                         last_disengage_event_id_);
-            return true;
-        }
-        return false;
-    }
-
-    /* 두 가지 출발 감지는 모두 도로 상황의 변화로 처리한다. 울렸으면 true. */
-    bool play_departure_alert()
-    {
-        if (hud_.departure_alert_type == DepartureAlertType::none ||
-            latest_control_state_.departure_alert_event_id == 0 ||
-            latest_control_state_.departure_alert_event_id == last_departure_alert_event_id_)
-            return false;
-        last_departure_alert_event_id_ = latest_control_state_.departure_alert_event_id;
-        piezo_buzzer_play(piezo_buzzer_, PIEZO_ALERT_SIGNAL_CHANGED, latest_control_state_.departure_alert_event_id);
-        std::fprintf(stderr, "k230_overlayd: piezo alert=signal_changed event=%u\n",
-                     latest_control_state_.departure_alert_event_id);
+        piezo_buzzer_play(piezo_buzzer_, alert.piezo, decision.event_id);
+        std::fprintf(stderr, "k230_overlayd: piezo alert=%s event=%u\n", alert.name,
+                     decision.event_id);
         return true;
     }
 
@@ -479,11 +436,11 @@ private:
 
     void process_alert_events(const Freshness &f, uint64_t now)
     {
-        const bool process = f.control && !baseline_event_counters();
-        const bool engagement = process && play_engagement_alert(now);
+        OverlayAlertEvents::Decision decision;
+        if (f.control) decision = alert_events_.update(latest_control_state_, hud_.departure_alert_type);
+        const bool played = play_alert(decision, now);
         if (now >= engage_alert_until_ns_) hud_.engage_alert_message[0] = '\0';
-        const bool departure = process && !engagement && play_departure_alert();
-        play_availability_alert(f, engagement || departure);
+        play_availability_alert(f, played);
     }
 
     void redraw_overlay()
@@ -561,11 +518,7 @@ private:
     StageStats present_stats_;
     SystemMonitor system_monitor_;
     PiezoBuzzer *piezo_buzzer_ = nullptr;
-    uint32_t last_departure_alert_event_id_ = 0;
-    uint32_t last_engage_event_id_ = 0;
-    uint32_t last_disengage_event_id_ = 0;
-    uint32_t last_engage_reject_event_id_ = 0;
-    bool event_ids_initialized_ = false;
+    OverlayAlertEvents alert_events_;
     uint32_t next_piezo_event_id_ = 0;
     bool alert_state_initialized_ = false;
     bool previous_unavailable_ = false;

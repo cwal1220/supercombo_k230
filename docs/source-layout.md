@@ -93,8 +93,11 @@ released after that short hold if they persist.
     preloaded sprites; the turn-signal phase comes from `k230_overlayd`.
 - `src/overlay_state.*`
   - `OverlayHudState`, the `K230*State` → `OverlayHudState` mapping shared by
-    `k230_overlayd` and `hud_snapshot`, and the engage-block label table. It
-    has no OpenCV dependency of its own.
+    `k230_overlayd` and `hud_snapshot`, the engage-block label table, and
+    `OverlayAlertEvents`, which turns the controlsd event counters into the one
+    piezo/toast alert a frame may play (baseline on first sight, rebaseline on a
+    controlsd restart, reject > engage > disengage > departure). No OpenCV, so
+    `check_overlay_state` pins all of it on the host.
 - `src/system_monitor.*`
   - `/proc`, thermal-zone, and network sampling into `OverlayHudState`, called
     at 1 Hz by `k230_overlayd`.

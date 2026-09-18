@@ -101,14 +101,15 @@ target_link_libraries(perception PUBLIC common utils_json)
 
 add_k230_library(panda_codec src/panda_can_codec.cc)
 
-# 오버레이 상태 매핑과 렌더러. 렌더러가 OpenCV를 쓰므로 OpenCV가 있는 곳에서만 만든다.
+# 오버레이 상태 매핑·알림 정책은 OpenCV가 없어 호스트 검사가 본다. 렌더러는
+# OpenCV를 쓰므로 OpenCV가 있는 곳에서만 만든다.
+add_k230_library(overlay_state src/overlay_state.cc)
+target_link_libraries(overlay_state PUBLIC common)
+
 if(OpenCV_FOUND)
-  add_k230_library(overlay
-    src/overlay_renderer.cc
-    src/overlay_state.cc
-  )
+  add_k230_library(overlay src/overlay_renderer.cc)
   target_include_directories(overlay SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
-  target_link_libraries(overlay PUBLIC common ${OpenCV_LIBS})
+  target_link_libraries(overlay PUBLIC overlay_state ${OpenCV_LIBS})
 endif()
 
 # 호스트 검사·도구: 로컬 헤더와 경고만 붙인 일반 실행 파일.
@@ -251,6 +252,9 @@ if(SUPERCOMBO_BUILD_DIAGNOSTICS)
 
   add_host_tool(check_adaptive_cruise diagnostics/check_adaptive_cruise.cc)
   target_link_libraries(check_adaptive_cruise PRIVATE control_core)
+
+  add_host_tool(check_overlay_state diagnostics/check_overlay_state.cc)
+  target_link_libraries(check_overlay_state PRIVATE overlay_state)
 
   add_host_tool(check_lateral_mpc diagnostics/check_lateral_mpc.cc)
   target_link_libraries(check_lateral_mpc PRIVATE planning)

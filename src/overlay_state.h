@@ -81,4 +81,31 @@ void hud_apply_model_state(const K230ModelState &model, bool fresh, OverlayHudSt
 void hud_apply_manager_state(const K230ManagerState &manager, bool fresh, bool model_ok,
                              OverlayHudState *hud);
 
+/* 오버레이가 울리는 알림. 열거 순서가 같은 프레임 안의 우선순위다. */
+enum class OverlayAlert { none, unable, engage, disengage, signal_changed };
+
+/* controlsd 이벤트 카운터 → 이 프레임에 울릴 알림 하나. 신선한 제어 스냅샷에만
+ * 부른다. overlay가 독립적으로 재시작될 수 있으므로 첫 스냅샷은 사용자 이벤트가
+ * 아니라 기준값이고, controlsd 재시작으로 카운터가 줄어들면 기준값을 다시 잡는다.
+ * 거부 > engage > disengage > 출발 순으로 새 이벤트 하나만 고르고, 같은 프레임의
+ * 나머지는 다음 프레임에 잡힌다. 출발은 표시 중인 알림 유형이 있을 때만 소비한다. */
+class OverlayAlertEvents {
+public:
+    struct Decision {
+        OverlayAlert alert = OverlayAlert::none;
+        uint32_t event_id = 0;
+    };
+    Decision update(const K230ControlState &control, DepartureAlertType departure_type);
+
+private:
+    // 기준값을 (다시) 잡은 프레임이면 true.
+    bool baseline(const K230ControlState &control);
+
+    bool initialized_ = false;
+    uint32_t last_engage_ = 0;
+    uint32_t last_disengage_ = 0;
+    uint32_t last_reject_ = 0;
+    uint32_t last_departure_ = 0;
+};
+
 #endif

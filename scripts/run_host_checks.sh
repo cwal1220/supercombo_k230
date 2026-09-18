@@ -17,6 +17,7 @@ checks=(
   check_k230_can_queue
   check_lateral_mpc
   check_model_output_parser
+  check_overlay_state
   check_panda_can_codec
   check_calibration_equivalence
 )
