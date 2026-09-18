@@ -39,24 +39,15 @@ uint16_t parse_safety_model(const char *name, uint16_t *default_param)
     return kPandaSafetyNoOutput;
 }
 
-void fill_can_batch(K230CanBatch *batch, const std::vector<PandaCanFrame> &frames)
+K230CanBatch rx_can_batch(const std::vector<PandaCanFrame> &frames)
 {
-    *batch = K230CanBatch{};
-    batch->timestamp_ns = k230_now_ns();
-    batch->valid = 1;
-    batch->count = static_cast<uint32_t>(std::min<size_t>(frames.size(), kK230CanBatchMaxFrames));
-    batch->dropped = frames.size() > kK230CanBatchMaxFrames
-        ? static_cast<uint32_t>(frames.size() - kK230CanBatchMaxFrames)
-        : 0;
-    for (uint32_t i = 0; i < batch->count; ++i) {
-        const PandaCanFrame &src = frames[i];
-        K230CanFrame &dst = batch->frames[i];
-        dst.address = src.address;
-        dst.src = src.bus;
-        dst.data_len = src.data_len;
-        dst.flags = (src.returned ? 0x1U : 0U) | (src.rejected ? 0x2U : 0U);
-        std::memcpy(dst.data, src.data, std::min<size_t>(src.data_len, sizeof(dst.data)));
-    }
+    return k230_make_can_batch(frames, [](K230CanFrame *dst, const PandaCanFrame &src) {
+        dst->address = src.address;
+        dst->src = src.bus;
+        dst->data_len = src.data_len;
+        dst->flags = (src.returned ? 0x1U : 0U) | (src.rejected ? 0x2U : 0U);
+        std::memcpy(dst->data, src.data, std::min<size_t>(src.data_len, sizeof(dst->data)));
+    });
 }
 
 std::vector<PandaCanFrame> frames_from_batch(const K230CanBatch &batch)
@@ -121,6 +112,206 @@ void publish_health(K230LatestChannel &state_pub, PandaClient &panda, bool tx_en
     state_pub.publish(&state, sizeof(state));
 }
 
+/* 1초 창의 브리지 통계. 창이 끝나면 panda 헬스와 함께 한 줄로 찍고 비운다. */
+struct BridgeStats {
+    unsigned rx_frames = 0;
+    unsigned tx_frames = 0;
+    unsigned tx_batches = 0;
+    unsigned rx_queue_full = 0;
+    unsigned rx_log_queue_full = 0;
+    unsigned tx_log_queue_full = 0;
+    unsigned tx_stale = 0;
+    unsigned tx_blocked = 0;
+    unsigned rx_rejected = 0;
+    unsigned errors = 0;
+    std::map<std::pair<uint32_t, uint8_t>, unsigned> rejected_frames;
+
+    void log(PandaClient &panda, unsigned long long tx_depth, unsigned long long rx_depth)
+    {
+        PandaHealth health;
+        const bool got_health = panda.get_health(&health);
+        std::fprintf(stderr,
+                     "k230_pandad: rx=%u tx=%u batches=%u stale=%u "
+                     "queue=%llu/%llu rxFull=%u logFull=%u/%u "
+                     "blocked=%u rejected=%u errors=%u "
+                     "canerr=%u/%u/%u pandaBlocked=%u "
+                     "heartbeatLost=%u controls=%u usb=%u/%u malformed=%u "
+                     "safety=%u:%u ign=%u/%u voltage=%umV current=%umA faults=0x%x\n",
+                     rx_frames, tx_frames, tx_batches, tx_stale,
+                     tx_depth, rx_depth,
+                     rx_queue_full,
+                     rx_log_queue_full, tx_log_queue_full,
+                     tx_blocked, rx_rejected, errors,
+                     got_health ? health.can_rx_errs : 0,
+                     got_health ? health.can_send_errs : 0,
+                     got_health ? health.can_fwd_errs : 0,
+                     got_health ? health.blocked_msg_cnt : 0,
+                     got_health ? health.heartbeat_lost : 0,
+                     got_health ? health.controls_allowed : 0,
+                     panda.usb_tx_timeouts(), panda.usb_tx_retries(),
+                     panda.malformed_rx_batches(),
+                     got_health ? health.safety_mode : 0,
+                     got_health ? health.safety_param : 0,
+                     got_health ? health.ignition_line : 0,
+                     got_health ? health.ignition_can : 0,
+                     got_health ? health.voltage : 0,
+                     got_health ? health.current : 0,
+                     got_health ? health.faults : 0);
+        for (const auto &[key, count] : rejected_frames) {
+            std::fprintf(stderr,
+                         "k230_pandad: rejected addr=0x%x bus=%u count=%u\n",
+                         key.first, key.second, count);
+        }
+        *this = BridgeStats{};
+    }
+};
+
+/* 수신 프레임을 10 ms 또는 256개 단위로 모아 CAN 토픽과 로그 토픽에 올린다. */
+class RxBatcher {
+public:
+    RxBatcher() { pending_.reserve(kK230CanBatchMaxFrames); }
+
+    void clear()
+    {
+        pending_.clear();
+        dropped_ = 0;
+    }
+
+    void reset(uint64_t now_ns)
+    {
+        clear();
+        last_publish_ns_ = now_ns;
+    }
+
+    void add(const std::vector<PandaCanFrame> &frames)
+    {
+        pending_.insert(pending_.end(), frames.begin(), frames.end());
+    }
+
+    bool due(uint64_t now_ns) const
+    {
+        return !pending_.empty() &&
+               (now_ns - last_publish_ns_ >= kCanPublishIntervalNs ||
+                pending_.size() >= kK230CanBatchMaxFrames);
+    }
+
+    void publish(uint64_t now_ns, K230CanQueue &can_pub, K230CanQueue &can_log_pub,
+                 BridgeStats *stats)
+    {
+        if (pending_.size() > kK230CanBatchMaxFrames) {
+            const size_t overflow = pending_.size() - kK230CanBatchMaxFrames;
+            pending_.erase(pending_.begin(), pending_.begin() + overflow);
+            dropped_ += static_cast<unsigned>(overflow);
+        }
+        K230CanBatch batch = rx_can_batch(pending_);
+        batch.dropped += dropped_;
+        if (!can_pub.push(batch)) {
+            ++stats->rx_queue_full;
+            ++stats->errors;
+        }
+        if (!can_log_pub.push(batch)) ++stats->rx_log_queue_full;
+        reset(now_ns);
+    }
+
+private:
+    std::vector<PandaCanFrame> pending_;
+    unsigned dropped_ = 0;
+    uint64_t last_publish_ns_ = 0;
+};
+
+/* USB 연결과 safety 모델 설정. 실패하면 false를 돌려주고 호출자가 다음 루프에서
+ * 다시 시도한다. 연결 자체가 안 되면 1초 쉰다. */
+bool connect_and_configure(PandaClient &panda, uint16_t safety_model, uint16_t safety_param,
+                           BridgeStats *stats)
+{
+    if (!panda.connect()) {
+        std::fprintf(stderr, "k230_pandad: waiting for panda\n");
+        sleep(1);
+        return false;
+    }
+    std::fprintf(stderr,
+                 "k230_pandad: connected serial=%s hw_type=%u health_v=%u can_v=%u\n",
+                 panda.usb_serial().c_str(), panda.hw_type(),
+                 panda.health_packet_version(), panda.can_packet_version());
+    PandaHealth configured_health;
+    if (!panda.set_safety_model(safety_model, safety_param) ||
+        !panda.get_health(&configured_health) ||
+        configured_health.safety_mode != safety_model ||
+        configured_health.safety_param != safety_param) {
+        std::fprintf(stderr,
+                     "k230_pandad: safety setup failed expected=%u:%u actual=%u:%u\n",
+                     safety_model, safety_param,
+                     configured_health.safety_mode,
+                     configured_health.safety_param);
+        ++stats->errors;
+        panda.close();
+        return false;
+    }
+    return true;
+}
+
+enum class RxResult { Idle, Frames, Error };
+
+// USB 수신 한 번. Error면 호출자가 연결을 끊고 다시 잇는다.
+RxResult service_rx(PandaClient &panda, bool log_can, RxBatcher *rx, BridgeStats *stats)
+{
+    std::vector<PandaCanFrame> frames;
+    if (!panda.receive(&frames, 10)) {
+        ++stats->errors;
+        return RxResult::Error;
+    }
+    if (frames.empty()) return RxResult::Idle;
+    for (const PandaCanFrame &frame : frames) {
+        if (frame.rejected) {
+            ++stats->rx_rejected;
+            ++stats->rejected_frames[{frame.address, frame.bus}];
+        }
+    }
+    rx->add(frames);
+    stats->rx_frames += static_cast<unsigned>(frames.size());
+    if (log_can) {
+        for (const PandaCanFrame &frame : frames) {
+            std::fprintf(stderr,
+                         "can rx bus=%u addr=0x%x len=%u returned=%u rejected=%u\n",
+                         frame.bus, frame.address, frame.data_len,
+                         frame.returned ? 1 : 0, frame.rejected ? 1 : 0);
+        }
+    }
+    return RxResult::Frames;
+}
+
+// sendcan 큐를 비워 panda로 보낸다. 배치가 하나라도 있었으면 true.
+bool service_tx(K230CanQueue &sendcan_sub, K230CanQueue &sendcan_log_pub, PandaClient &panda,
+                bool tx_enabled, BridgeStats *stats)
+{
+    bool had_sendcan = false;
+    K230CanBatch send_batch;
+    while (sendcan_sub.pop(&send_batch)) {
+        had_sendcan = true;
+        ++stats->tx_batches;
+        // The producer can publish after the loop sampled its clock. Use a
+        // fresh timestamp here so a new batch is never mistaken for a
+        // future/stale batch and skipped from the torque sequence.
+        const uint64_t tx_now = k230_now_ns();
+        if (!k230_can_batch_is_fresh(send_batch, tx_now, kMaxSendCanAgeNs)) {
+            ++stats->tx_stale;
+            continue;
+        }
+        const std::vector<PandaCanFrame> tx = frames_from_batch(send_batch);
+        if (!sendcan_log_pub.push(send_batch)) ++stats->tx_log_queue_full;
+        if (tx_enabled) {
+            if (panda.send(tx)) {
+                stats->tx_frames += static_cast<unsigned>(tx.size());
+            } else {
+                ++stats->errors;
+            }
+        } else {
+            stats->tx_blocked += static_cast<unsigned>(tx.size());
+        }
+    }
+    return had_sendcan;
+}
+
 } // namespace
 
 int main()
@@ -166,135 +357,32 @@ int main()
         }
 
         PandaClient panda;
+        RxBatcher rx;
+        BridgeStats stats;
         uint64_t last_health_ns = 0;
         uint64_t last_heartbeat_ns = 0;
         uint64_t last_log_ns = 0;
-        uint64_t last_can_publish_ns = 0;
-        std::vector<PandaCanFrame> pending_rx;
-        pending_rx.reserve(kK230CanBatchMaxFrames);
-        unsigned pending_dropped = 0;
-        unsigned rx_frames = 0;
-        unsigned tx_frames = 0;
-        unsigned tx_batches = 0;
-        unsigned rx_queue_full = 0;
-        unsigned rx_log_queue_full = 0;
-        unsigned tx_log_queue_full = 0;
-        unsigned tx_stale = 0;
-        unsigned tx_blocked = 0;
-        unsigned rx_rejected = 0;
-        unsigned errors = 0;
-        std::map<std::pair<uint32_t, uint8_t>, unsigned> rejected_frames;
 
         while (!g_stop) {
             if (!panda.connected()) {
                 publish_disconnected(panda_state_pub, tx_enabled);
-                if (!panda.connect()) {
-                    std::fprintf(stderr, "k230_pandad: waiting for panda\n");
-                    sleep(1);
-                    continue;
-                }
-                std::fprintf(stderr,
-                             "k230_pandad: connected serial=%s hw_type=%u health_v=%u can_v=%u\n",
-                             panda.usb_serial().c_str(), panda.hw_type(),
-                             panda.health_packet_version(), panda.can_packet_version());
-                PandaHealth configured_health;
-                if (!panda.set_safety_model(safety_model, safety_param) ||
-                    !panda.get_health(&configured_health) ||
-                    configured_health.safety_mode != safety_model ||
-                    configured_health.safety_param != safety_param) {
-                    std::fprintf(stderr,
-                                 "k230_pandad: safety setup failed expected=%u:%u actual=%u:%u\n",
-                                 safety_model, safety_param,
-                                 configured_health.safety_mode,
-                                 configured_health.safety_param);
-                    ++errors;
-                    panda.close();
-                    continue;
-                }
+                if (!connect_and_configure(panda, safety_model, safety_param, &stats)) continue;
                 last_health_ns = 0;
                 last_heartbeat_ns = 0;
-                last_can_publish_ns = k230_now_ns();
-                pending_rx.clear();
-                pending_dropped = 0;
+                rx.reset(k230_now_ns());
             }
 
-            std::vector<PandaCanFrame> frames;
-            bool had_rx = false;
-            bool had_sendcan = false;
-            if (panda.receive(&frames, 10)) {
-                if (!frames.empty()) {
-                    had_rx = true;
-                    for (const PandaCanFrame &frame : frames) {
-                        if (frame.rejected) {
-                            ++rx_rejected;
-                            ++rejected_frames[{frame.address, frame.bus}];
-                        }
-                    }
-                    pending_rx.insert(pending_rx.end(), frames.begin(), frames.end());
-                    rx_frames += static_cast<unsigned>(frames.size());
-                    if (log_can) {
-                        for (const PandaCanFrame &frame : frames) {
-                            std::fprintf(stderr,
-                                         "can rx bus=%u addr=0x%x len=%u returned=%u rejected=%u\n",
-                                         frame.bus, frame.address, frame.data_len,
-                                         frame.returned ? 1 : 0, frame.rejected ? 1 : 0);
-                        }
-                    }
-                }
-            } else {
-                ++errors;
-                pending_rx.clear();
-                pending_dropped = 0;
+            const RxResult received = service_rx(panda, log_can, &rx, &stats);
+            if (received == RxResult::Error) {
+                rx.clear();
                 panda.close();
                 continue;
             }
 
             const uint64_t now = k230_now_ns();
-            if (!pending_rx.empty() &&
-                (now - last_can_publish_ns >= kCanPublishIntervalNs ||
-                 pending_rx.size() >= kK230CanBatchMaxFrames)) {
-                if (pending_rx.size() > kK230CanBatchMaxFrames) {
-                    const size_t overflow = pending_rx.size() - kK230CanBatchMaxFrames;
-                    pending_rx.erase(pending_rx.begin(), pending_rx.begin() + overflow);
-                    pending_dropped += static_cast<unsigned>(overflow);
-                }
-                K230CanBatch batch;
-                fill_can_batch(&batch, pending_rx);
-                batch.dropped += pending_dropped;
-                if (!can_pub.push(batch)) {
-                    ++rx_queue_full;
-                    ++errors;
-                }
-                if (!can_log_pub.push(batch)) ++rx_log_queue_full;
-                pending_rx.clear();
-                pending_dropped = 0;
-                last_can_publish_ns = now;
-            }
-
-            K230CanBatch send_batch;
-            while (sendcan_sub.pop(&send_batch)) {
-                had_sendcan = true;
-                ++tx_batches;
-                // The producer can publish after `now` was sampled above. Use a
-                // fresh timestamp here so a new batch is never mistaken for a
-                // future/stale batch and skipped from the torque sequence.
-                const uint64_t tx_now = k230_now_ns();
-                if (!k230_can_batch_is_fresh(send_batch, tx_now, kMaxSendCanAgeNs)) {
-                    ++tx_stale;
-                    continue;
-                }
-                const std::vector<PandaCanFrame> tx = frames_from_batch(send_batch);
-                if (!sendcan_log_pub.push(send_batch)) ++tx_log_queue_full;
-                if (tx_enabled) {
-                    if (panda.send(tx)) {
-                        tx_frames += static_cast<unsigned>(tx.size());
-                    } else {
-                        ++errors;
-                    }
-                } else {
-                    tx_blocked += static_cast<unsigned>(tx.size());
-                }
-            }
+            if (rx.due(now)) rx.publish(now, can_pub, can_log_pub, &stats);
+            const bool had_sendcan =
+                service_tx(sendcan_sub, sendcan_log_pub, panda, tx_enabled, &stats);
 
             if (now - last_heartbeat_ns >= 500000000ULL) {
                 panda.send_heartbeat(heartbeat_engaged && tx_enabled);
@@ -305,48 +393,11 @@ int main()
                 last_health_ns = now;
             }
             if (now - last_log_ns >= 1000000000ULL) {
-                PandaHealth health;
-                const bool got_health = panda.get_health(&health);
-                std::fprintf(stderr,
-                             "k230_pandad: rx=%u tx=%u batches=%u stale=%u "
-                             "queue=%llu/%llu rxFull=%u logFull=%u/%u "
-                             "blocked=%u rejected=%u errors=%u "
-                             "canerr=%u/%u/%u pandaBlocked=%u "
-                             "heartbeatLost=%u controls=%u usb=%u/%u malformed=%u "
-                             "safety=%u:%u ign=%u/%u voltage=%umV current=%umA faults=0x%x\n",
-                             rx_frames, tx_frames, tx_batches, tx_stale,
-                             static_cast<unsigned long long>(sendcan_sub.depth()),
-                             static_cast<unsigned long long>(can_pub.depth()),
-                             rx_queue_full,
-                             rx_log_queue_full, tx_log_queue_full,
-                             tx_blocked, rx_rejected, errors,
-                             got_health ? health.can_rx_errs : 0,
-                             got_health ? health.can_send_errs : 0,
-                             got_health ? health.can_fwd_errs : 0,
-                             got_health ? health.blocked_msg_cnt : 0,
-                             got_health ? health.heartbeat_lost : 0,
-                             got_health ? health.controls_allowed : 0,
-                             panda.usb_tx_timeouts(), panda.usb_tx_retries(),
-                             panda.malformed_rx_batches(),
-                             got_health ? health.safety_mode : 0,
-                             got_health ? health.safety_param : 0,
-                             got_health ? health.ignition_line : 0,
-                             got_health ? health.ignition_can : 0,
-                             got_health ? health.voltage : 0,
-                             got_health ? health.current : 0,
-                             got_health ? health.faults : 0);
-                for (const auto &[key, count] : rejected_frames) {
-                    std::fprintf(stderr,
-                                 "k230_pandad: rejected addr=0x%x bus=%u count=%u\n",
-                                 key.first, key.second, count);
-                }
-                rx_frames = tx_frames = tx_batches = rx_queue_full =
-                    rx_log_queue_full = tx_log_queue_full = tx_stale = tx_blocked =
-                    rx_rejected = errors = 0;
-                rejected_frames.clear();
+                stats.log(panda, static_cast<unsigned long long>(sendcan_sub.depth()),
+                          static_cast<unsigned long long>(can_pub.depth()));
                 last_log_ns = now;
             }
-            if (!had_rx && !had_sendcan && idle_us > 0) {
+            if (received == RxResult::Idle && !had_sendcan && idle_us > 0) {
                 usleep(idle_us);
             }
         }

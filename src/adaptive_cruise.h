@@ -65,6 +65,17 @@ public:
   AdaptiveCruiseOutput update(const AdaptiveCruiseInput &input);
 
 private:
+  /* 한 update()가 입력에서 파생한 값. 아래 단계 함수들이 이 순서로 공유한다. */
+  struct Tick;
+  void teardown_session(const AdaptiveCruiseInput &input, const Tick &tick);
+  void track_driver_adjustment(const AdaptiveCruiseInput &input, Tick *tick);
+  void begin_session_if_ready(const AdaptiveCruiseInput &input, const Tick &tick);
+  void reanchor_after_driver(const AdaptiveCruiseInput &input, Tick *tick);
+  void resolve_command_mismatch(const AdaptiveCruiseInput &input, const Tick &tick);
+  float target_speed(const AdaptiveCruiseInput &input, const Tick &tick, bool *lead_valid);
+  int pace_buttons(const AdaptiveCruiseInput &input, const Tick &tick,
+                   float target_speed_kph, bool active);
+
   void begin_session(float speed_kph, double now_s);
   void update_display_scale(const AdaptiveCruiseInput &input, double dt_s);
   void update_vision_lead(const AdaptiveCruiseInput &input);
@@ -73,8 +84,6 @@ private:
 
   AdaptiveCruiseConfig config_;
   bool session_valid_ = false;
-  bool previous_cruise_active_ = false;
-  int previous_driver_button_ = 0;
   int previous_driver_main_button_ = 0;
   /* 운전자가 의도한 상한. 세션 시작과 운전자 조작이 끝난 뒤에만 정한다. */
   float maximum_speed_kph_ = 0.0f;

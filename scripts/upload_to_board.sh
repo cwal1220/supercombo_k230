@@ -67,6 +67,9 @@ done
   "$BOARD:$DEST/params.defaults/"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
   "for name in calibration.json adaptive_cruise.json steering.json driving.json recording.json display.json; do test -e '$DEST/params/'\"\$name\" || cp '$DEST/params.defaults/'\"\$name\" '$DEST/params/'\"\$name\"; done"
+# 2026-09-18 개명 전 이름. 매니저는 새 이름을 띄우므로 남아 있어도 무해하지만 지운다.
+"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
+  "rm -f '$DEST/param_server.py' '$DEST/k230_display_control.py'"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "rm -rf '$DEST/.upload'; sync"
 # 예전 배포는 model/ 에 넣었다. 매니저는 이제 models/ 만 본다.
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \

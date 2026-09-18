@@ -75,6 +75,7 @@ add_k230_library(utils_json src/utils_json.cc)
 
 add_k230_library(control_core
   src/adaptive_cruise.cc
+  src/control_holds.cc
   src/control_params.cc
   src/departure_alert.cc
   src/hyundai_can.cc

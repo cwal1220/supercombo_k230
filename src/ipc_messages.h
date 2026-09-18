@@ -11,9 +11,11 @@
 #include "recording_format.h"
 #include "utils_time.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 constexpr uint32_t kK230IpcMagic = 0x4b323349;
 constexpr uint32_t kK230IpcVersion = 1;
@@ -183,6 +185,22 @@ inline bool k230_can_batch_is_fresh(const K230CanBatch &batch, uint64_t now_ns,
                                     uint64_t max_age_ns)
 {
     return batch.valid && timestamp_fresh_ns(batch.timestamp_ns, now_ns, max_age_ns);
+}
+
+/* 프레임 목록을 배치 하나로 담는다. 256개를 넘는 꼬리는 dropped로 센다.
+ * fill(dst, src)이 프레임별 필드를 옮긴다. controlsd(CanFrame)와 pandad
+ * (PandaCanFrame)가 같은 껍데기를 쓴다. */
+template <class Frame, class Fill>
+K230CanBatch k230_make_can_batch(const std::vector<Frame> &frames, Fill fill)
+{
+    K230CanBatch batch;
+    batch.timestamp_ns = k230_now_ns();
+    batch.valid = 1;
+    batch.count = static_cast<uint32_t>(
+        std::min<size_t>(frames.size(), kK230CanBatchMaxFrames));
+    batch.dropped = static_cast<uint32_t>(frames.size() - batch.count);
+    for (uint32_t i = 0; i < batch.count; ++i) fill(&batch.frames[i], frames[i]);
+    return batch;
 }
 
 struct K230CanQueueHeader {

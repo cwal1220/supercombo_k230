@@ -12,7 +12,19 @@ from pathlib import Path
 from typing import Any, Callable, Dict
 
 # fastapi/uvicorn은 서버를 띄울 때만 import한다. diagnostics/check_param_server.py가
-# stdlib만으로 ParamStore와 PARAM_METADATA를 쓴다.
+# stdlib만으로 ParamStore와 PARAM_METADATA를 쓴다. 요청 모델만은 모듈 전역에
+# 있어야 한다: `from __future__ import annotations` 때문에 FastAPI가 라우트의
+# 문자열 애너테이션을 모듈 전역에서 해석하므로, 지역 클래스면 NameError로 죽는다.
+try:
+    from pydantic import BaseModel
+except ImportError:  # 호스트 검사: 웹 스택 없이 import된다
+    BaseModel = object  # type: ignore[assignment,misc]
+
+
+class ParamPatch(BaseModel):  # type: ignore[misc,valid-type]
+    values: Dict[str, Any]
+
+
 if __package__:
     from .display_control import DisplayBacklight
 else:
@@ -1222,10 +1234,6 @@ HTML = """<!doctype html>
 def create_app(store: ParamStore | None = None) -> "FastAPI":
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import HTMLResponse
-    from pydantic import BaseModel
-
-    class ParamPatch(BaseModel):
-        values: Dict[str, Any]
 
     param_store = store or ParamStore(display_controller=DisplayBacklight())
     application = FastAPI(title="K7 parameter server", docs_url="/docs")

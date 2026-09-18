@@ -166,28 +166,22 @@ void AdaptiveCruiseController::update_vision_lead(
   last_valid_lead_s_ = input.now_s;
 }
 
-AdaptiveCruiseOutput AdaptiveCruiseController::update(
-    const AdaptiveCruiseInput &input) {
-  const double dt_s = last_update_s_ < 0.0 || input.now_s < last_update_s_
-      ? 0.0 : std::min(0.1, input.now_s - last_update_s_);
-  last_update_s_ = input.now_s;
-  update_display_scale(input, dt_s);
+struct AdaptiveCruiseController::Tick {
+  bool accelerator_override = false;
+  bool driver_main_pressed = false;
+  float minimum_kph = 0.0f;
+  float step_kph = 0.0f;
+  bool speed_valid = false;
+  bool cluster_valid = false;
+  bool driver_adjusting = false;
+  bool cluster_steady = false;
+};
 
-  const bool accelerator_override =
-      input.gas_pressed || input.driver_accelerator_override;
-  if (accelerator_override) last_accelerator_override_s_ = input.now_s;
-
-  const bool driver_main_pressed =
-      input.driver_main_button != 0 && previous_driver_main_button_ == 0;
-  const float minimum_kph = minimum_speed_kph(input.speed_unit_mph);
-  const float step_kph = display_step_kph(input.speed_unit_mph);
-  const bool speed_valid = std::isfinite(input.ego_speed_kph);
-  const bool cluster_valid = std::isfinite(input.cluster_speed_kph) &&
-                             input.cluster_speed_kph > 0.0f;
-
-  /* 세션 종료. cruise_active 는 SCC12와 CLU11 추정이 같은 필드를 쓰므로 한 틱
-   * 깜빡임이 가능하다. 유예를 두되, 실제로 꺼지면 반드시 버린다 — 예전에는
-   * 버리지 않아 다음 engage 때 이전 주행의 천장이 남았다. */
+/* 세션 종료. cruise_active 는 SCC12와 CLU11 추정이 같은 필드를 쓰므로 한 틱
+ * 깜빡임이 가능하다. 유예를 두되, 실제로 꺼지면 반드시 버린다 — 예전에는
+ * 버리지 않아 다음 engage 때 이전 주행의 천장이 남았다. */
+void AdaptiveCruiseController::teardown_session(const AdaptiveCruiseInput &input,
+                                                const Tick &tick) {
   if (input.cruise_active) {
     cruise_inactive_since_s_ = -1.0;
   } else if (cruise_inactive_since_s_ < 0.0) {
@@ -196,7 +190,7 @@ AdaptiveCruiseOutput AdaptiveCruiseController::update(
   const bool cruise_off_settled =
       !input.cruise_active && cruise_inactive_since_s_ >= 0.0 &&
       input.now_s - cruise_inactive_since_s_ >= kCruiseInactiveTeardownS;
-  if (!input.enabled || driver_main_pressed || cruise_off_settled) {
+  if (!input.enabled || tick.driver_main_pressed || cruise_off_settled) {
     session_valid_ = false;
     maximum_speed_kph_ = 0.0f;
     commanded_speed_kph_ = 0.0f;
@@ -207,24 +201,37 @@ AdaptiveCruiseOutput AdaptiveCruiseController::update(
     driver_adjust_until_s_ = -1.0;
     last_auto_command_was_set_ = false;
   }
+}
 
-  /* 운전자가 버튼을 만지는 동안과 뗀 뒤 정착까지는 자동 명령을 쉰다. */
-  /* 세션이 이미 있을 때만 유예한다. 세션을 여는 첫 SET 자체를 막으면 안 된다. */
+/* 운전자가 버튼을 만지는 동안과 뗀 뒤 정착까지는 자동 명령을 쉰다. */
+/* 세션이 이미 있을 때만 유예한다. 세션을 여는 첫 SET 자체를 막으면 안 된다. */
+void AdaptiveCruiseController::track_driver_adjustment(const AdaptiveCruiseInput &input,
+                                                       Tick *tick) {
   if (input.driver_button != 0 && session_valid_) {
     driver_adjust_until_s_ = input.now_s + kDriverSettleS;
     reanchor_pending_ = true;
   }
-  const bool driver_adjusting =
+  tick->driver_adjusting =
       driver_adjust_until_s_ >= 0.0 && input.now_s < driver_adjust_until_s_;
+}
 
-  /* 세션 시작은 차량이 유효한 설정 속도를 보고한 뒤로 미룬다. */
-  if (input.enabled && input.cruise_active && !driver_main_pressed &&
+/* 세션 시작은 차량이 유효한 설정 속도를 보고한 뒤로 미룬다. */
+void AdaptiveCruiseController::begin_session_if_ready(const AdaptiveCruiseInput &input,
+                                                      const Tick &tick) {
+  if (input.enabled && input.cruise_active && !tick.driver_main_pressed &&
       !session_valid_ &&
       valid_set_speed(input.driver_set_speed_kph)) {
-    begin_session(std::max(minimum_kph, input.driver_set_speed_kph), input.now_s);
+    begin_session(std::max(tick.minimum_kph, input.driver_set_speed_kph), input.now_s);
   }
+}
 
-  if (cluster_valid) {
+/* 운전자 조작이 끝나면 추측을 버리고 실측 속도에 다시 앵커한다. 고정형
+ * 크루즈는 정착하면 클러스터 속도가 곧 설정 속도다. 길게 누르기(추정치는
+ * 버튼 엣지 하나만 세므로 실제 감속량을 모른다), 2 km/h가 아닌 스텝,
+ * 펄스 유실이 모두 여기서 흡수된다. */
+void AdaptiveCruiseController::reanchor_after_driver(const AdaptiveCruiseInput &input,
+                                                     Tick *tick) {
+  if (tick->cluster_valid) {
     if (cluster_ref_s_ < 0.0 ||
         std::fabs(input.cluster_speed_kph - cluster_ref_kph_) > kClusterSteadyKph) {
       cluster_ref_kph_ = input.cluster_speed_kph;
@@ -233,17 +240,13 @@ AdaptiveCruiseOutput AdaptiveCruiseController::update(
   } else {
     cluster_ref_s_ = -1.0;
   }
-  const bool cluster_steady = cluster_valid && cluster_ref_s_ >= 0.0 &&
-                              input.now_s - cluster_ref_s_ >= kClusterSteadyHoldS;
+  tick->cluster_steady = tick->cluster_valid && cluster_ref_s_ >= 0.0 &&
+                         input.now_s - cluster_ref_s_ >= kClusterSteadyHoldS;
 
-  /* 운전자 조작이 끝나면 추측을 버리고 실측 속도에 다시 앵커한다. 고정형
-   * 크루즈는 정착하면 클러스터 속도가 곧 설정 속도다. 길게 누르기(추정치는
-   * 버튼 엣지 하나만 세므로 실제 감속량을 모른다), 2 km/h가 아닌 스텝,
-   * 펄스 유실이 모두 여기서 흡수된다. */
   if (session_valid_ && input.cruise_active && reanchor_pending_ &&
-      !driver_adjusting && input.driver_button == 0) {
-    if (cluster_steady) {
-      const float anchor = std::max(minimum_kph, input.cluster_speed_kph);
+      !tick->driver_adjusting && input.driver_button == 0) {
+    if (tick->cluster_steady) {
+      const float anchor = std::max(tick->minimum_kph, input.cluster_speed_kph);
       commanded_speed_kph_ = anchor;
       maximum_speed_kph_ = anchor;
       reanchor_pending_ = false;
@@ -252,11 +255,14 @@ AdaptiveCruiseOutput AdaptiveCruiseController::update(
       last_command_s_ = input.now_s;
     }
   }
+}
 
-  /* 추측 적산이 실제와 오래 어긋나면(펄스 유실, 스텝 크기 불일치) 실측으로
-   * 되돌린다. 천장은 건드리지 않는다 — 운전자 의도가 아니기 때문이다. */
-  if (session_valid_ && input.cruise_active && cluster_valid &&
-      !driver_adjusting && command_frames_remaining_ == 0 &&
+/* 추측 적산이 실제와 오래 어긋나면(펄스 유실, 스텝 크기 불일치) 실측으로
+ * 되돌린다. 천장은 건드리지 않는다 — 운전자 의도가 아니기 때문이다. */
+void AdaptiveCruiseController::resolve_command_mismatch(const AdaptiveCruiseInput &input,
+                                                        const Tick &tick) {
+  if (session_valid_ && input.cruise_active && tick.cluster_valid &&
+      !tick.driver_adjusting && command_frames_remaining_ == 0 &&
       last_command_s_ >= 0.0 &&
       input.now_s - last_command_s_ >= kMismatchHoldS) {
     if (std::fabs(input.cluster_speed_kph - commanded_speed_kph_) > kMismatchKph) {
@@ -267,29 +273,33 @@ AdaptiveCruiseOutput AdaptiveCruiseController::update(
         if (input.cluster_speed_kph > commanded_speed_kph_)
           ineffective_until_s_ = input.now_s + kIneffectiveBackoffS;
         commanded_speed_kph_ = clamp_float(input.cluster_speed_kph,
-                                           minimum_kph, maximum_speed_kph_);
+                                           tick.minimum_kph, maximum_speed_kph_);
         mismatch_since_s_ = -1.0;
       }
     } else {
       mismatch_since_s_ = -1.0;
     }
   }
+}
 
+/* 선행차가 있으면 차간 보정을 더한 추종 속도, 없으면 (복원 지연 뒤) 천장. */
+float AdaptiveCruiseController::target_speed(const AdaptiveCruiseInput &input,
+                                             const Tick &tick, bool *lead_valid) {
   update_vision_lead(input);
 
-  const bool lead_valid = session_valid_ && speed_valid &&
-                          last_valid_lead_s_ >= 0.0 &&
-                          input.now_s >= last_valid_lead_s_ &&
-                          input.now_s - last_valid_lead_s_ <= config_.lead_hold_s;
+  *lead_valid = session_valid_ && tick.speed_valid &&
+                last_valid_lead_s_ >= 0.0 &&
+                input.now_s >= last_valid_lead_s_ &&
+                input.now_s - last_valid_lead_s_ <= config_.lead_hold_s;
   float target_speed_kph = commanded_speed_kph_;
-  if (session_valid_ && lead_valid && display_scale_valid_) {
+  if (session_valid_ && *lead_valid && display_scale_valid_) {
     const float ego_speed_mps = std::max(0.0f, input.ego_speed_kph / 3.6f);
     const float lead_speed_mps =
         std::max(0.0f, ego_speed_mps + filtered_lead_relative_speed_mps_);
     const float desired_gap_m =
         config_.standstill_gap_m + config_.following_time_s * ego_speed_mps;
     const float slowdown_response_s =
-        step_kph / std::max(0.1f, config_.deceleration_rate_kph_per_s);
+        tick.step_kph / std::max(0.1f, config_.deceleration_rate_kph_per_s);
     const float prediction_horizon_s =
         std::min(2.0f, config_.command_interval_s + 0.5f * slowdown_response_s);
     const float predicted_lead_distance_m = std::max(
@@ -306,27 +316,31 @@ AdaptiveCruiseOutput AdaptiveCruiseController::update(
      * 계속 나가 설정 속도가 바닥까지 내려갔다. */
     target_speed_kph = clamp_float(
         (lead_speed_mps + gap_correction_mps) * 3.6f * display_scale_,
-        minimum_kph, maximum_speed_kph_);
+        tick.minimum_kph, maximum_speed_kph_);
   } else if (session_valid_ &&
              (last_valid_lead_s_ < 0.0 ||
               input.now_s - last_valid_lead_s_ >=
                   config_.lead_restore_delay_s)) {
     target_speed_kph = maximum_speed_kph_;
   }
+  return target_speed_kph;
+}
 
-  const bool active = input.enabled && session_valid_ && input.cruise_active;
+/* 명령 게이트와 버튼 펄스. 척도를 모르면 두 척도를 비교할 수 없으므로 아예
+ * 명령하지 않는다. 돌려주는 값이 이 틱에 보낼 버튼. */
+int AdaptiveCruiseController::pace_buttons(const AdaptiveCruiseInput &input, const Tick &tick,
+                                           float target_speed_kph, bool active) {
   const bool accelerator_released =
-      !accelerator_override &&
+      !tick.accelerator_override &&
       (last_accelerator_override_s_ < 0.0 ||
        input.now_s - last_accelerator_override_s_ >=
            kAcceleratorReleaseDelayS);
-  /* 척도를 모르면 두 척도를 비교할 수 없으므로 아예 명령하지 않는다. */
-  const bool command_allowed = active && speed_valid && display_scale_valid_ &&
+  const bool command_allowed = active && tick.speed_valid && display_scale_valid_ &&
                                input.controls_ready && !input.brake_pressed &&
-                               accelerator_released && !driver_adjusting &&
+                               accelerator_released && !tick.driver_adjusting &&
                                (ineffective_until_s_ < 0.0 ||
                                 input.now_s >= ineffective_until_s_) &&
-                               input.driver_button == 0 && !driver_main_pressed;
+                               input.driver_button == 0 && !tick.driver_main_pressed;
   if (!command_allowed) {
     command_button_ = 0;
     command_frames_remaining_ = 0;
@@ -339,10 +353,10 @@ AdaptiveCruiseOutput AdaptiveCruiseController::update(
   } else if (command_allowed) {
     /* 데드밴드는 한 스텝. 0.75스텝이면 한 번 누른 결과가 다시 밴드 밖으로
      * 나가 SET-/RES+가 번갈아 나온다(65 km/h 추종 180초: 87회 -> 37회). */
-    const float command_deadband_kph = step_kph;
+    const float command_deadband_kph = tick.step_kph;
     const bool wants_set =
         target_speed_kph <= commanded_speed_kph_ - command_deadband_kph &&
-        commanded_speed_kph_ > minimum_kph + 0.1f;
+        commanded_speed_kph_ > tick.minimum_kph + 0.1f;
     const bool wants_resume =
         target_speed_kph >= commanded_speed_kph_ + command_deadband_kph &&
         commanded_speed_kph_ < maximum_speed_kph_ - 0.1f;
@@ -350,7 +364,7 @@ AdaptiveCruiseOutput AdaptiveCruiseController::update(
      * 에만 쓴다. */
     const double slowdown_interval_s = std::max(
         static_cast<double>(config_.command_interval_s),
-        static_cast<double>(step_kph) /
+        static_cast<double>(tick.step_kph) /
             std::max(0.1, static_cast<double>(config_.deceleration_rate_kph_per_s)));
     const double button_interval_s = last_auto_command_was_set_
         ? slowdown_interval_s
@@ -363,12 +377,12 @@ AdaptiveCruiseOutput AdaptiveCruiseController::update(
       command_button_ = kCruiseButtonSet;
       last_auto_command_was_set_ = true;
       commanded_speed_kph_ =
-          std::max(minimum_kph, commanded_speed_kph_ - step_kph);
+          std::max(tick.minimum_kph, commanded_speed_kph_ - tick.step_kph);
     } else if (wants_resume && interval_ready) {
       command_button_ = kCruiseButtonResume;
       last_auto_command_was_set_ = false;
       commanded_speed_kph_ =
-          std::min(maximum_speed_kph_, commanded_speed_kph_ + step_kph);
+          std::min(maximum_speed_kph_, commanded_speed_kph_ + tick.step_kph);
     } else {
       command_button_ = 0;
     }
@@ -379,9 +393,37 @@ AdaptiveCruiseOutput AdaptiveCruiseController::update(
       mismatch_since_s_ = -1.0;
     }
   }
+  return output_button;
+}
 
-  previous_cruise_active_ = input.cruise_active;
-  previous_driver_button_ = input.driver_button;
+AdaptiveCruiseOutput AdaptiveCruiseController::update(
+    const AdaptiveCruiseInput &input) {
+  const double dt_s = last_update_s_ < 0.0 || input.now_s < last_update_s_
+      ? 0.0 : std::min(0.1, input.now_s - last_update_s_);
+  last_update_s_ = input.now_s;
+  update_display_scale(input, dt_s);
+
+  Tick tick;
+  tick.accelerator_override = input.gas_pressed || input.driver_accelerator_override;
+  if (tick.accelerator_override) last_accelerator_override_s_ = input.now_s;
+  tick.driver_main_pressed =
+      input.driver_main_button != 0 && previous_driver_main_button_ == 0;
+  tick.minimum_kph = minimum_speed_kph(input.speed_unit_mph);
+  tick.step_kph = display_step_kph(input.speed_unit_mph);
+  tick.speed_valid = std::isfinite(input.ego_speed_kph);
+  tick.cluster_valid = std::isfinite(input.cluster_speed_kph) &&
+                       input.cluster_speed_kph > 0.0f;
+
+  teardown_session(input, tick);
+  track_driver_adjustment(input, &tick);
+  begin_session_if_ready(input, tick);
+  reanchor_after_driver(input, &tick);
+  resolve_command_mismatch(input, tick);
+  bool lead_valid = false;
+  const float target_speed_kph = target_speed(input, tick, &lead_valid);
+  const bool active = input.enabled && session_valid_ && input.cruise_active;
+  const int output_button = pace_buttons(input, tick, target_speed_kph, active);
+
   previous_driver_main_button_ = input.driver_main_button;
 
   AdaptiveCruiseOutput output;

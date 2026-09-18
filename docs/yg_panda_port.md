@@ -47,7 +47,14 @@ The Buildroot SDK configuration must include `BR2_PACKAGE_LIBUSB=y`.
 
 ## Offline Validation
 
-Export the collected drive log to the `K230CAN1` fixture format, then run:
+Export one 60 s chunk of a recording to the `K230CAN1` fixture format, then run
+the checker on it. The chunk must be a continuous driving segment: the checker
+expects the controller to be active for almost the whole minute and to apply
+torque, so a parked or stop-and-go chunk fails those assertions by design.
+
+```sh
+python3 tools/control/export_can_fixture.py <route>/events/003.bin drive.k230can
+```
 
 ```sh
 cmake -S . -B build-host \

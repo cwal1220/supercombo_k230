@@ -57,6 +57,8 @@
 
 ### Control safety holds
 
+`src/control_holds.*` implements both holds as `PandaHealthGate` and
+`PathHoldGate`; `check_control_replay` exercises their boundaries.
 `k230_controlsd` tolerates a single malformed plan frame by holding the last
 usable path for at most 150 ms; the normal 250 ms model freshness timeout remains
 a hard safety gate, so a stale or invalid model still removes control. A
@@ -87,8 +89,8 @@ released after that short hold if they persist.
     preloaded sprites; the turn-signal phase comes from `k230_overlayd`.
 - `src/overlay_state.*`
   - `OverlayHudState`, the `K230*State` → `OverlayHudState` mapping shared by
-    `k230_overlayd` and `hud_snapshot`, and the engage-block label table. No
-    OpenCV, so the mapping can be checked on the host.
+    `k230_overlayd` and `hud_snapshot`, and the engage-block label table. It
+    has no OpenCV dependency of its own.
 - `src/system_monitor.*`
   - `/proc`, thermal-zone, and network sampling into `OverlayHudState`, called
     at 1 Hz by `k230_overlayd`.
@@ -115,8 +117,10 @@ released after that short hold if they persist.
 - `src/utils_math.h`
   - clamping, openpilot `interp`, degree/radian conversion.
 - `src/utils_time.h`
-  - `k230_now_ns` (the one runtime clock, `CLOCK_BOOTTIME`) and the freshness
-    predicates for ns and CAN-seconds timestamps.
+  - `k230_now_ns` (`CLOCK_BOOTTIME`), the clock behind every timestamp that
+    crosses a process boundary, and the freshness predicates for ns and
+    CAN-seconds timestamps. Per-process scheduling may still use
+    `std::chrono::steady_clock`.
 - `src/utils_json.*`
   - minimal JSON value readers and the clamped `parse_json_optional_*` helpers
     used by every parameter loader.

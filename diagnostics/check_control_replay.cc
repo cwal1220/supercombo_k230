@@ -1,6 +1,7 @@
 #include "can_replay.h"
 #include "check_harness.h"
 #include "control_fixtures.h"
+#include "control_holds.h"
 #include "hyundai_can.h"
 #include "ipc_messages.h"
 #include "lateral_controller.h"
@@ -847,7 +848,8 @@ void verify_cold_start_engage_reports_hard_block() {
           "cold-start SET with a healthy car must still wait for the panda handshake");
 }
 
-void verify_model_path_adapter() {
+/* t=1.0 s에 나온, 60 m 이상 뻗은 조향 가능 plan. */
+K230ModelState usable_model_state() {
   K230ModelState state;
   state.valid = 1;
   state.model_timestamp_ns = 1000000000ULL;
@@ -859,6 +861,17 @@ void verify_model_path_adapter() {
     state.plan[i].x = x;
     state.plan[i].y = -0.0004f * x * x;
   }
+  return state;
+}
+
+// 점 수는 충분하지만 몇 미터로 주저앉은 plan.
+void collapse_plan(K230ModelState *state) {
+  for (int i = 0; i < kTrajectorySize; ++i)
+    state->plan[i].x = 1.0f + 0.1f * static_cast<float>(i);
+}
+
+void verify_model_path_adapter() {
+  const K230ModelState state = usable_model_state();
   const LateralPath path =
       path_from_model_state(state, 1100000000ULL, 250000000ULL);
   require(path.usable_for_steering && path.left_valid && path.right_valid,
@@ -868,13 +881,108 @@ void verify_model_path_adapter() {
 
   /* 정차에서 plan이 몇 미터로 주저앉으면 점 수는 충분해도 조향에 못 쓴다. */
   K230ModelState short_state = state;
-  for (int i = 0; i < kTrajectorySize; ++i)
-    short_state.plan[i].x = 1.0f + 0.1f * static_cast<float>(i);
+  collapse_plan(&short_state);
   const LateralPath short_path =
       path_from_model_state(short_state, 1100000000ULL, 250000000ULL);
   require(!short_path.usable_for_steering &&
               short_path.invalid_reason == "path_invalid",
           "short plan reach must fail the steering gate");
+}
+
+/* 문서화된 안전 홀드 1: Panda 헬스 스냅샷 공백은 100 ms까지만, 신선한
+ * controls_allowed=0은 절대 유지하지 않는다. */
+void verify_panda_health_hold() {
+  const uint64_t t0 = 1000000000ULL;
+  K230PandaState ready;
+  ready.timestamp_ns = t0;
+  ready.connected = ready.comms_healthy = ready.tx_enabled = 1;
+  ready.controls_allowed = 1;
+  ready.safety_mode = kExpectedPandaSafetyModel;
+  ready.safety_param = kExpectedPandaSafetyParam;
+  K230PandaState unhealthy = ready;
+  unhealthy.comms_healthy = 0;
+
+  PandaHealthGate gate;
+  PandaGateOutput out = gate.update(ready, t0, false);
+  require(out.state_fresh && out.ready_raw && out.ready && out.controls_allowed &&
+              !out.hold_applied,
+          "a ready panda passes the gate without a hold");
+  out = gate.update(unhealthy, t0 + 50000000ULL, false);
+  require(!out.ready_raw && out.hold_applied && out.ready && out.controls_allowed,
+          "a 50 ms health gap keeps the last verdict");
+  out = gate.update(unhealthy, t0 + 100000000ULL, false);
+  require(out.hold_applied, "the hold still covers exactly 100 ms");
+  out = gate.update(unhealthy, t0 + 100000001ULL, false);
+  require(!out.hold_applied && !out.ready && !out.controls_allowed,
+          "the hold ends after 100 ms");
+  out = gate.update(ready, t0 + 1200000000ULL, false);
+  require(!out.state_fresh && !out.ready_raw && !out.ready,
+          "a 1.2 s old snapshot is stale even if its fields look ready");
+
+  PandaHealthGate explicit_off;
+  explicit_off.update(ready, t0, false);
+  K230PandaState off = ready;
+  off.controls_allowed = 0;
+  off.timestamp_ns = t0 + 10000000ULL;
+  out = explicit_off.update(off, t0 + 10000000ULL, false);
+  require(out.ready_raw && out.controls_off_explicit && !out.hold_applied &&
+              out.ready && !out.controls_allowed,
+          "a fresh, transport-ready controls_allowed=0 is never held");
+  K230PandaState gap = off;
+  gap.comms_healthy = 0;
+  out = explicit_off.update(gap, t0 + 60000000ULL, false);
+  require(out.hold_applied && out.ready && !out.controls_allowed,
+          "a health gap after an explicit off keeps controls off");
+
+  PandaHealthGate cold;
+  out = cold.update(unhealthy, t0, false);
+  require(!out.ready && !out.hold_applied, "no hold before the first ready snapshot");
+  out = cold.update(unhealthy, t0, true);
+  require(out.ready && out.controls_allowed && !out.ready_raw,
+          "force_engaged bypasses the panda gate");
+}
+
+/* 문서화된 안전 홀드 2: 잘못된 plan 프레임은 150 ms까지 마지막 유효 경로로
+ * 덮고, 모델 freshness 타임아웃은 그대로 하드 게이트다. */
+void verify_path_invalid_hold() {
+  const uint64_t timeout_ns = 250000000ULL;
+  const K230ModelState good = usable_model_state();
+
+  PathHoldGate gate;
+  PathHoldOutput out = gate.update(good, 1100000000ULL, timeout_ns);
+  require(out.path.usable_for_steering && !out.hold_applied,
+          "a usable plan passes through the hold");
+  K230ModelState collapsed = good;
+  collapsed.model_timestamp_ns = 1050000000ULL;
+  collapse_plan(&collapsed);
+  out = gate.update(collapsed, 1100000000ULL, timeout_ns);
+  require(out.raw.invalid_reason == "path_invalid" && out.hold_applied &&
+              out.path.usable_for_steering && out.path.invalid_reason.empty(),
+          "one collapsed frame is covered by the last usable path");
+  collapsed.model_timestamp_ns = 1120000000ULL;
+  out = gate.update(collapsed, 1150000000ULL, timeout_ns);
+  require(out.hold_applied, "the hold still covers exactly 150 ms");
+  out = gate.update(collapsed, 1150000001ULL, timeout_ns);
+  require(!out.hold_applied && !out.path.usable_for_steering &&
+              out.path.invalid_reason == "path_invalid",
+          "the hold ends 150 ms after the last usable frame");
+
+  PathHoldGate stale_gate;
+  stale_gate.update(good, 1100000000ULL, timeout_ns);
+  K230ModelState stale = collapsed;
+  stale.model_timestamp_ns = 1000000000ULL;
+  out = stale_gate.update(stale, 1400000000ULL, timeout_ns);
+  require(!out.hold_applied && out.path.invalid_reason == "model_stale",
+          "a stale model is a hard gate, never held");
+
+  PathHoldGate invalid_gate;
+  invalid_gate.update(good, 1100000000ULL, timeout_ns);
+  K230ModelState invalid = good;
+  invalid.valid = 0;
+  invalid.model_timestamp_ns = 1120000000ULL;
+  out = invalid_gate.update(invalid, 1130000000ULL, timeout_ns);
+  require(!out.hold_applied && out.path.invalid_reason == "model_invalid",
+          "an invalid model is not held");
 }
 
 }  // namespace
@@ -906,7 +1014,12 @@ int main(int argc, char **argv) {
     verify_panda_gate_and_handoff();
     verify_cold_start_engage_reports_hard_block();
     verify_model_path_adapter();
+    verify_panda_health_hold();
+    verify_path_invalid_hold();
     if (argc == 1) return;
+    /* 픽스처는 60초 연속 주행 구간이어야 한다(active > 5900틱, 토크 > 0). 정차
+     * 구간은 이 전제에 걸려 실패한다. tools/control/export_can_fixture.py가 녹화
+     * events/NNN.bin 하나를 이 형식으로 내보낸다. */
     if (argc != 2) throw std::runtime_error("usage: check_control_replay [fixture.k230can]");
 
     CanReplaySource replay;
@@ -950,12 +1063,15 @@ int main(int argc, char **argv) {
       }
       const auto result = controller.update(path, target, vehicle, now_s, tick);
       /* 컨트롤러는 휠 속도 평균으로 곡률을 낸다. 클러스터 속도를 먹이면
-       * 참조식이 다른 입력을 보게 되어 비교가 성립하지 않는다. */
-      const float expected_curvature = reference_lag_adjusted_curvature(
-          target, std::max(0.0f, result.control_speed_kph / 3.6f),
-          config.steering_params.steer_actuator_delay);
-      max_curvature_error = std::max(
-          max_curvature_error, std::fabs(result.desired_curvature - expected_curvature));
+       * 참조식이 다른 입력을 보게 되어 비교가 성립하지 않는다. 첫 WHL_SPD11
+       * 전에는 속도가 NaN이고 컨트롤러가 어차피 비활성이라 비교하지 않는다. */
+      if (std::isfinite(result.control_speed_kph)) {
+        const float expected_curvature = reference_lag_adjusted_curvature(
+            target, std::max(0.0f, result.control_speed_kph / 3.6f),
+            config.steering_params.steer_actuator_delay);
+        max_curvature_error = std::max(
+            max_curvature_error, std::fabs(result.desired_curvature - expected_curvature));
+      }
       if (result.active) ++active_ticks;
       max_torque = std::max(max_torque, std::abs(result.apply_torque));
       generated_frames += result.frames.size();
