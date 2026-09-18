@@ -5,6 +5,7 @@
 #include "gpu_warp.h"
 #include "model_input_transform.h"
 #include "model_output.h"
+#include "model_temporal.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -41,7 +42,8 @@ private:
     void bind_input_tensors();
     void bind_output_tensors();
     void run();
-    void fetch_outputs();
+    // 출력 텐서들을 순서대로 이어 raw_output에 복사한다. 매핑은 복사 동안만 산다.
+    bool copy_outputs(std::vector<float> &raw_output);
 
     static constexpr int kModelW = 512;
     static constexpr int kModelH = 256;
@@ -49,13 +51,12 @@ private:
     static constexpr int kHalfH = kModelH / 2;
     static constexpr int kYuv6Floats = 6 * kHalfW * kHalfH;
     static constexpr int kInputImageFloats = 12 * kHalfW * kHalfH;
-    /* 시간축 규약(openpilot v0.9.4 driving.cc와 동일):
-     * desire는 20 Hz 펄스 100틱 이력, 특징 버퍼는 직전 99틱 x 128. 둘 다
-     * 최신 값이 마지막 슬롯이고, 매 프레임 한 칸씩 앞으로 밀린다. */
-    static constexpr int kDesireHistoryTicks = 100;
-    static constexpr int kFeatureHistoryTicks = 99;
-    static constexpr int kNavFeatureLen = 256;
 
+    /* 입력 텐서 index를 access로 매핑해 fn(uint8_t *data)를 부르고 언매핑한다.
+     * 버퍼가 min_bytes보다 작으면 fn을 부르지 않고 false. */
+    template <class Fn>
+    bool with_mapped_input(size_t index, nncase::runtime::map_access_t access,
+                           size_t min_bytes, Fn &&fn);
     bool prepare_image_input(size_t index, ModelInputTransform &transform,
                              const uint8_t *nv12, int src_w, int src_h);
     bool advance_image_history(size_t index);
@@ -65,24 +66,18 @@ private:
     // image 입력 텐서의 원소 크기. float32 kmodel은 4, uint8 kmodel은 1이다.
     size_t image_elem_bytes(size_t index) const;
 
-    void push_desire_pulse();
-    void push_feature_history(const std::vector<float> &raw_output);
+    // traffic convention과 nav features는 상수라 생성 시 한 번만 쓴다.
+    bool write_constant_inputs();
     bool write_temporal_inputs();
 
     nncase::runtime::interpreter kmodel_interp_;
     int debug_mode_ = 0;
     std::vector<std::vector<int>> input_shapes_;
     std::vector<std::vector<int>> output_shapes_;
-    std::vector<float *> outputs_;
     std::vector<nncase::runtime::runtime_tensor> input_tensors_;
     ModelInputTransform input_transform_;
     ModelInputTransform big_input_transform_;
-    std::vector<float> desire_;       // 현재 틱 펄스 (8)
-    std::vector<float> prev_desire_;
-    std::vector<float> traffic_convention_;
-    std::vector<float> desire_history_;    // 펄스 이력 (100 x 8)
-    std::vector<float> feature_history_;   // 특징 버퍼 (99 x 128)
-    std::vector<float> nav_features_;      // 미사용 입력 (0 고정)
+    SupercomboTemporalState temporal_;
     std::unique_ptr<GpuWarp> gpu_;
     /* GPU 타깃은 텐서 주소에 고정이라 매핑을 유지한다. */
     std::vector<nncase::runtime::mapped_buffer> image_maps_;

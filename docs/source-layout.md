@@ -16,6 +16,10 @@
   - owns the supercombo raw-output layout and exposes parsed plan, lanes, road
     edges, leads, and pose. Also owns the shared `T_IDXS`/`X_IDXS`
     trajectory grids.
+- `src/model_temporal.h`
+  - the supercombo temporal inputs (desire pulse history, feature buffer, the
+    constant traffic-convention and nav inputs) without any nncase dependency,
+    so `check_model_output_parser` can pin the v0.9.4 convention on the host.
 - `src/model_input_transform.*`
   - direct `NV12 -> calibrated warped YUV6` input transform. It fuses homography
     sampling and openpilot-compatible YUV6 packing without creating an

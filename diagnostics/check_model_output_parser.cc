@@ -1,4 +1,5 @@
 #include "model_output.h"
+#include "model_temporal.h"
 #include "check_harness.h"
 
 #include <cstdint>
@@ -74,9 +75,52 @@ bool read_exact(std::ifstream &file, T *value)
 
 } // namespace
 
+/* 시간축 입력 규약: rising-edge desire 펄스, 100틱 이력 밀기, hidden_state
+ * 128개가 특징 버퍼 마지막 슬롯에 들어가고 다음 틱에 한 칸 물러난다. */
+void self_test_temporal()
+{
+    static_assert(SupercomboTemporalState::kHiddenOffset == 5990, "hidden state offset moved");
+    SupercomboTemporalState state;
+    const auto &desire = state.desire_history();
+    const size_t last = (SupercomboTemporalState::kDesireHistoryTicks - 1) * kDesireLen;
+    state.set_desire(3);
+    state.push_desire_pulse();
+    require(desire[last + 3] == 1.0f && desire[last + 0] == 0.0f,
+            "a new desire pulses on its own slot, never on slot 0");
+    state.set_desire(3);
+    state.push_desire_pulse();
+    require(desire[last + 3] == 0.0f && desire[last - kDesireLen + 3] == 1.0f,
+            "a held desire pulses once and the pulse moves back one tick");
+    state.set_desire(0);
+    state.set_desire(3);
+    state.push_desire_pulse();
+    require(desire[last + 3] == 1.0f, "releasing and re-requesting a desire pulses again");
+
+    const auto &features = state.feature_history();
+    const size_t newest = (SupercomboTemporalState::kFeatureHistoryTicks - 1) * kModelFeatureLen;
+    std::vector<float> raw(kModelOutputFloats, 0.0f);
+    for (int i = 0; i < kModelFeatureLen; ++i)
+        raw[SupercomboTemporalState::kHiddenOffset + i] = static_cast<float>(i + 1);
+    require(state.push_feature_history(raw.data(), raw.size()),
+            "a full raw output feeds the feature buffer");
+    require(features[newest] == 1.0f && features[newest + kModelFeatureLen - 1] == 128.0f,
+            "hidden_state lands in the newest feature slot");
+    std::vector<float> zeros(kModelOutputFloats, 0.0f);
+    require(state.push_feature_history(zeros.data(), zeros.size()), "second frame");
+    require(features[newest] == 0.0f && features[newest - kModelFeatureLen] == 1.0f,
+            "the previous frame's features move back one slot");
+    require(!state.push_feature_history(raw.data(), 100), "a short raw output is rejected");
+    require(state.traffic_convention() == std::vector<float>{1.0f, 0.0f} &&
+                state.nav_features().size() == SupercomboTemporalState::kNavFeatureLen,
+            "constant inputs keep their v0.9.4 values");
+}
+
 int main(int argc, char *argv[])
 {
-    if (argc == 1) return run_checks(nullptr, self_test_094);
+    if (argc == 1) return run_checks(nullptr, [] {
+        self_test_094();
+        self_test_temporal();
+    });
     if (argc != 2) {
         std::cerr << "Usage: " << argv[0] << " <SCODMP1 raw dump>\n";
         return 1;

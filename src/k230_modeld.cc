@@ -68,6 +68,68 @@ private:
     uint32_t frames_ = 0;
 };
 
+/* 1초 창 통계. 두 루프(라이브·리플레이)가 같은 시계로 fps를 센다. */
+struct RateWindow
+{
+    timeval start{};
+    timeval last{};
+    unsigned last_processed = 0;
+    unsigned last_errors = 0;
+
+    RateWindow()
+    {
+        gettimeofday(&start, nullptr);
+        last = start;
+    }
+
+    // 1초가 지났으면 창을 닫고 true. window_us는 닫힌 창의 길이.
+    bool close_if_due(uint64_t *window_us)
+    {
+        timeval now{};
+        gettimeofday(&now, nullptr);
+        const uint64_t elapsed = timeval_us(now) - timeval_us(last);
+        if (elapsed < 1000000ULL) return false;
+        *window_us = elapsed;
+        last = now;
+        return true;
+    }
+
+    double total_fps(unsigned processed) const
+    {
+        timeval now{};
+        gettimeofday(&now, nullptr);
+        const uint64_t since_start = timeval_us(now) - timeval_us(start);
+        return since_start > 0 ? processed * 1000000.0 / since_start : 0.0;
+    }
+};
+
+/* controlsd 스냅샷에서 모델 입력용 자차 속도와 desire를 읽는다. controlsd가
+ * 아직 없으면 열릴 때까지 마지막 값을 유지한다. */
+class EgoStateReader
+{
+public:
+    void poll()
+    {
+        if (!open_) open_ = sub_.open(kK230ControlStateTopic, sizeof(K230ControlState), false);
+        if (!open_) return;
+        K230ControlState control_state;
+        if (!sub_.read(&control_state, sizeof(control_state))) return;
+        const float ego_speed_kph = control_state.ego_speed_kph > 0.0f
+            ? control_state.ego_speed_kph
+            : control_state.cluster_speed_kph;
+        v_ego_ = std::max(0.0f, ego_speed_kph / 3.6f);
+        desire_ = static_cast<int>(control_state.desire);
+    }
+    float v_ego() const { return v_ego_; }
+    int desire() const { return desire_; }
+
+private:
+    K230LatestChannel sub_;
+    bool open_ = false;
+    float v_ego_ = 0.0f;
+    int desire_ = 0;
+};
+
 bool publish_output(K230LatestChannel &model_pub, SupercomboModel &model, const ParsedModelOutput &parsed,
                     CalibrationService &calibration,
                     uint64_t frame_id, uint64_t capture_timestamp_ns, float model_ms,
@@ -89,8 +151,11 @@ bool publish_output(K230LatestChannel &model_pub, SupercomboModel &model, const 
 int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
 {
     ReplayNv12Source source(config.replay_nv12_path);
-    /* 재생 소스 해상도에 맞춘 기본 워프. */
+    /* 재생 소스 해상도에 맞춘 기본 워프. GPU 워프도 이 크기로 만들어져야
+     * 라이브와 같은 경로를 탄다. */
     AppConfig replay_config = config;
+    replay_config.nv12_width = source.width();
+    replay_config.nv12_height = source.height();
     replay_config.input_warp_fx = default_input_warp_fx(source.width());
     replay_config.input_warp_fy = default_input_warp_fy(source.height());
     replay_config.input_warp_cx = default_input_warp_cx(source.width());
@@ -112,10 +177,7 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
     RawOutputDump raw_dump(std::getenv("SUPERCOMBO_RAW_DUMP"));
     unsigned processed = 0;
     unsigned errors = 0;
-    timeval start {};
-    timeval last {};
-    gettimeofday(&start, nullptr);
-    last = start;
+    RateWindow window;
 
     while (!g_stop && source.read(frame)) {
         const uint64_t t0 = k230_now_ns();
@@ -135,27 +197,18 @@ int run_replay(const AppConfig &config, K230LatestChannel &model_pub)
             ++errors;
         }
 
-        timeval now {};
-        gettimeofday(&now, nullptr);
-        const uint64_t since_last = timeval_us(now) - timeval_us(last);
-        if (since_last >= 1000000ULL) {
-            const uint64_t since_start = timeval_us(now) - timeval_us(start);
-            const double fps = since_start > 0 ? processed * 1000000.0 / since_start : 0.0;
+        uint64_t window_us = 0;
+        if (window.close_if_due(&window_us)) {
             std::fprintf(stderr, "modeld replay: frames=%u/%u fps=%.2f errors=%u          \r",
-                         processed, target_frames, fps, errors);
+                         processed, target_frames, window.total_fps(processed), errors);
             std::fflush(stderr);
-            last = now;
         }
 
         if (config.max_frames > 0 && processed >= config.max_frames) break;
     }
 
-    timeval end {};
-    gettimeofday(&end, nullptr);
-    const uint64_t duration = timeval_us(end) - timeval_us(start);
-    const double fps = duration > 0 ? processed * 1000000.0 / duration : 0.0;
     std::fprintf(stderr, "\nmodeld replay done frames=%u errors=%u fps=%.2f\n",
-                 processed, errors, fps);
+                 processed, errors, window.total_fps(processed));
     return processed > 0 && errors == 0 ? 0 : 1;
 }
 
@@ -178,10 +231,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
     float initial_rpy[3] = {};
     calibration.input_rpy(initial_rpy);
     model.set_input_calibration(initial_rpy);
-    K230LatestChannel control_sub;
-    bool control_sub_open = false;
-    float v_ego = 0.0f;
-    int desire = 0;
+    EgoStateReader ego;
     std::vector<float> raw;
     uint64_t last_frame_seq = 0;
     unsigned processed = 0;
@@ -193,13 +243,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
     const unsigned target_fps = std::max(1U, std::min(config.model_fps, 30U));
     const uint64_t model_interval_ns = 1000000000ULL / target_fps;
     uint64_t next_model_start_ns = 0;
-
-    timeval start {};
-    timeval last {};
-    gettimeofday(&start, nullptr);
-    last = start;
-    unsigned last_processed = 0;
-    unsigned last_errors = 0;
+    RateWindow window;
     /* GPU 워프를 쓰면 링 슬롯을 워프 소스 평면으로 곧장 복사해 중간 버퍼를 없앤다. */
     GpuWarp::Planes planes;
     const bool preload_planes = model.frame_planes(&planes);
@@ -243,21 +287,8 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
             ++errors;
             continue;
         }
-        if (!control_sub_open)
-            control_sub_open = control_sub.open(kK230ControlStateTopic,
-                                                sizeof(K230ControlState), false);
-        if (control_sub_open) {
-            K230ControlState control_state;
-            if (control_sub.read(&control_state, sizeof(control_state))) {
-                const float ego_speed_kph =
-                    control_state.ego_speed_kph > 0.0f
-                        ? control_state.ego_speed_kph
-                        : control_state.cluster_speed_kph;
-                v_ego = std::max(0.0f, ego_speed_kph / 3.6f);
-                desire = static_cast<int>(control_state.desire);
-            }
-        }
-        model.set_desire(desire);
+        ego.poll();
+        model.set_desire(ego.desire());
 
         // The recorder follows the exact frame selected by modeld, rather than
         // sampling camerad's higher-rate latest-frame stream independently.
@@ -275,7 +306,7 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
             ParsedModelOutput parsed = ModelOutputParser::parse(raw);
             const float model_ms = static_cast<float>((t1 - t0) / 1000000.0);
             if (!publish_output(model_pub, model, parsed, calibration,
-                                meta.frame_id, meta.timestamp_ns, model_ms, v_ego)) {
+                                meta.frame_id, meta.timestamp_ns, model_ms, ego.v_ego())) {
                 std::fprintf(stderr, "\nmodeld: publish modelState failed\n");
                 ++errors;
             }
@@ -286,34 +317,25 @@ int run_live(const AppConfig &config, K230LatestChannel &model_pub,
 
         if (config.max_frames > 0 && processed >= config.max_frames) break;
 
-        timeval now {};
-        gettimeofday(&now, nullptr);
-        const uint64_t duration = timeval_us(now) - timeval_us(last);
-        if (duration >= 1000000ULL) {
-            const unsigned frames_delta = processed - last_processed;
-            const unsigned errors_delta = errors - last_errors;
+        uint64_t window_us = 0;
+        if (window.close_if_due(&window_us)) {
             std::fprintf(stderr,
                          "modeld: fps=%.2f frames=%u missed=%u sync=%u errors=%u(+%u) last_ms=%.2f          \r",
-                         frames_delta * 1000000.0 / duration,
+                         (processed - window.last_processed) * 1000000.0 / window_us,
                          processed,
                          missed,
                          frame_sync_failures,
                          errors,
-                         errors_delta,
+                         errors - window.last_errors,
                          ok ? (t1 - t0) / 1000000.0 : 0.0);
             std::fflush(stderr);
-            last = now;
-            last_processed = processed;
-            last_errors = errors;
+            window.last_processed = processed;
+            window.last_errors = errors;
         }
     }
 
-    timeval end {};
-    gettimeofday(&end, nullptr);
-    const uint64_t total_us = timeval_us(end) - timeval_us(start);
-    const double fps = total_us > 0 ? processed * 1000000.0 / total_us : 0.0;
     std::fprintf(stderr, "\nmodeld done frames=%u missed=%u sync=%u errors=%u fps=%.2f\n",
-                 processed, missed, frame_sync_failures, errors, fps);
+                 processed, missed, frame_sync_failures, errors, window.total_fps(processed));
     return processed > 0 && errors == 0 ? 0 : 1;
 }
 

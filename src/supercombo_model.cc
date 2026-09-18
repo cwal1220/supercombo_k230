@@ -116,28 +116,33 @@ void SupercomboModel::run()
     kmodel_interp_.run().expect("error occurred in running model");
 }
 
-void SupercomboModel::fetch_outputs()
+bool SupercomboModel::copy_outputs(std::vector<float> &raw_output)
 {
     ScopedTiming st("Supercombo get_output", debug_mode_);
-    outputs_.clear();
-    for (size_t i = 0; i < kmodel_interp_.outputs_size(); ++i) {
+    size_t total = 0;
+    for (const auto &shape : output_shapes_)
+        total += std::accumulate(shape.begin(), shape.end(), size_t{1}, std::multiplies<size_t>());
+    raw_output.resize(total);
+    size_t offset = 0;
+    for (size_t i = 0; i < output_shapes_.size(); ++i) {
+        const size_t count = std::accumulate(output_shapes_[i].begin(), output_shapes_[i].end(),
+                                             size_t{1}, std::multiplies<size_t>());
         auto out = kmodel_interp_.output_tensor(i).expect("cannot get output tensor");
-        auto buf = out.impl()->to_host().unwrap()->buffer().as_host().unwrap()
-                       .map(nncase::runtime::map_access_::map_read).unwrap().buffer();
-        outputs_.push_back(reinterpret_cast<float *>(buf.data()));
+        auto host_buffer = out.impl()->to_host().unwrap()->buffer().as_host().unwrap();
+        auto mapped = std::move(host_buffer.map(map_access_::map_read).unwrap());
+        auto buffer = mapped.buffer();
+        if (buffer.size() < count * sizeof(float)) return false;
+        std::memcpy(raw_output.data() + offset, buffer.data(), count * sizeof(float));
+        mapped.unmap().expect("unmap output failed");
+        offset += count;
     }
+    return true;
 }
 
 SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const AppConfig &config)
     : debug_mode_(debug_mode),
       input_transform_(config, ModelFrame::MedModel),
-      big_input_transform_(config, ModelFrame::SmallBigModel),
-      desire_(kDesireLen, 0.0f),
-      prev_desire_(kDesireLen, 0.0f),
-      traffic_convention_{1.0f, 0.0f},
-      desire_history_(kDesireHistoryTicks * kDesireLen, 0.0f),
-      feature_history_(kFeatureHistoryTicks * kModelFeatureLen, 0.0f),
-      nav_features_(kNavFeatureLen, 0.0f)
+      big_input_transform_(config, ModelFrame::SmallBigModel)
 {
     std::ifstream kmodel(kmodel_file, std::ios::binary);
     kmodel_interp_.load_model(kmodel).expect("Invalid kmodel");
@@ -159,9 +164,10 @@ SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const 
         output_floats += std::accumulate(shape.begin(), shape.end(), size_t{1},
                                          std::multiplies<size_t>());
     if (input_tensors_.size() != 6 || output_floats != kModelOutputFloats ||
-        shape_count(2) != static_cast<size_t>(kDesireHistoryTicks * kDesireLen) ||
-        shape_count(4) != static_cast<size_t>(kNavFeatureLen) ||
-        shape_count(5) != static_cast<size_t>(kFeatureHistoryTicks * kModelFeatureLen)) {
+        shape_count(2) != temporal_.desire_history().size() ||
+        shape_count(3) != temporal_.traffic_convention().size() ||
+        shape_count(4) != temporal_.nav_features().size() ||
+        shape_count(5) != temporal_.feature_history().size()) {
         throw std::runtime_error("not an openpilot v0.9.4 supercombo kmodel: " +
                                  std::to_string(input_tensors_.size()) +
                                  " inputs, " + std::to_string(output_floats) +
@@ -172,6 +178,8 @@ SupercomboModel::SupercomboModel(const char *kmodel_file, int debug_mode, const 
                  input_tensors_[0].datatype() == nncase::dt_uint8 ? "uint8" : "float32");
     if (!clear_image_input(0) || !clear_image_input(1))
         throw std::runtime_error("initialize image input history failed");
+    if (!write_constant_inputs())
+        throw std::runtime_error("write constant inputs failed");
 
     setup_gpu(config);
 }
@@ -213,33 +221,18 @@ void SupercomboModel::setup_gpu(const AppConfig &config)
     std::fprintf(stderr, "Supercombo warp backend=vglite\n");
 }
 
-void SupercomboModel::push_desire_pulse()
+bool SupercomboModel::write_constant_inputs()
 {
-    // 오래된 틱을 앞으로 밀고 마지막 슬롯에 현재 펄스를 넣는다.
-    std::memmove(desire_history_.data(), desire_history_.data() + kDesireLen,
-                 sizeof(float) * kDesireLen * (kDesireHistoryTicks - 1));
-    std::memcpy(desire_history_.data() + kDesireLen * (kDesireHistoryTicks - 1),
-                desire_.data(), sizeof(float) * kDesireLen);
-}
-
-void SupercomboModel::push_feature_history(const std::vector<float> &raw_output)
-{
-    // hidden_state는 마지막 2 float(pad) 앞의 128개다.
-    constexpr size_t kHiddenOffset = kModelOutputFloats - 2u - kModelFeatureLen;
-    if (raw_output.size() < kHiddenOffset + kModelFeatureLen) return;
-    std::memmove(feature_history_.data(), feature_history_.data() + kModelFeatureLen,
-                 sizeof(float) * kModelFeatureLen * (kFeatureHistoryTicks - 1));
-    std::memcpy(feature_history_.data() + kModelFeatureLen * (kFeatureHistoryTicks - 1),
-                raw_output.data() + kHiddenOffset, sizeof(float) * kModelFeatureLen);
+    return write_input(3, temporal_.traffic_convention().data(),
+                       temporal_.traffic_convention().size()) &&
+           write_input(4, temporal_.nav_features().data(), temporal_.nav_features().size());
 }
 
 bool SupercomboModel::write_temporal_inputs()
 {
-    push_desire_pulse();
-    if (!write_input(2, desire_history_.data(), desire_history_.size())) return false;
-    if (!write_input(3, traffic_convention_.data(), traffic_convention_.size())) return false;
-    if (!write_input(4, nav_features_.data(), nav_features_.size())) return false;
-    return write_input(5, feature_history_.data(), feature_history_.size());
+    temporal_.push_desire_pulse();
+    return write_input(2, temporal_.desire_history().data(), temporal_.desire_history().size()) &&
+           write_input(5, temporal_.feature_history().data(), temporal_.feature_history().size());
 }
 
 size_t SupercomboModel::image_elem_bytes(size_t index) const
@@ -249,11 +242,7 @@ size_t SupercomboModel::image_elem_bytes(size_t index) const
 
 void SupercomboModel::set_desire(int desire)
 {
-    for (int i = 1; i < static_cast<int>(desire_.size()); ++i) {
-        const float current = i == desire ? 1.0f : 0.0f;
-        desire_[i] = current - prev_desire_[i] > 0.99f ? current : 0.0f;
-        prev_desire_[i] = current;
-    }
+    temporal_.set_desire(desire);
 }
 
 void SupercomboModel::set_input_calibration(const float rpy[3])
@@ -343,21 +332,8 @@ bool SupercomboModel::run_frame(const uint8_t *nv12, int src_w, int src_h,
     const uint64_t t4 = profile ? k230_now_ns() : 0;
     if (!advance_image_history(0) || !advance_image_history(1)) return false;
     const uint64_t t5 = profile ? k230_now_ns() : 0;
-    fetch_outputs();
-
-    size_t total = 0;
-    for (const auto &shape : output_shapes_)
-        total += std::accumulate(shape.begin(), shape.end(), size_t{1}, std::multiplies<size_t>());
-
-    raw_output.resize(total);
-    size_t offset = 0;
-    for (size_t i = 0; i < output_shapes_.size(); ++i) {
-        const size_t count = std::accumulate(output_shapes_[i].begin(), output_shapes_[i].end(), size_t{1}, std::multiplies<size_t>());
-        std::memcpy(raw_output.data() + offset, outputs_[i], count * sizeof(float));
-        offset += count;
-    }
-
-    push_feature_history(raw_output);
+    if (!copy_outputs(raw_output)) return false;
+    temporal_.push_feature_history(raw_output.data(), raw_output.size());
 
     if (profile) {
         const uint64_t t6 = k230_now_ns();
@@ -367,65 +343,59 @@ bool SupercomboModel::run_frame(const uint8_t *nv12, int src_w, int src_h,
     return true;
 }
 
+template <class Fn>
+bool SupercomboModel::with_mapped_input(size_t index, map_access_t access, size_t min_bytes,
+                                        Fn &&fn)
+{
+    auto host_buffer = input_tensors_[index].impl()->to_host().unwrap()
+                           ->buffer().as_host().unwrap();
+    auto mapped = std::move(host_buffer.map(access).unwrap());
+    auto buffer = mapped.buffer();
+    if (buffer.size() < min_bytes)
+        return false;
+    fn(reinterpret_cast<uint8_t *>(buffer.data()));
+    mapped.unmap().expect("unmap input failed");
+    return true;
+}
+
 bool SupercomboModel::prepare_image_input(size_t index, ModelInputTransform &transform,
                                           const uint8_t *nv12, int src_w, int src_h)
 {
     if (index >= input_tensors_.size() || shape_count(index) != kInputImageFloats)
         return false;
-
     const size_t elem_bytes = image_elem_bytes(index);
-    auto host_buffer = input_tensors_[index].impl()->to_host().unwrap()
-                           ->buffer().as_host().unwrap();
-    auto mapped = std::move(host_buffer.map(map_access_::map_read_write).unwrap());
-    auto buffer = mapped.buffer();
-    if (buffer.size() < kInputImageFloats * elem_bytes)
-        return false;
-
-    if (elem_bytes == 1) {
-        uint8_t *input = reinterpret_cast<uint8_t *>(buffer.data());
-        transform.nv12_to_yuv6_warped(nv12, src_w, src_h, input + kYuv6Floats);
-    } else {
-        float *input = reinterpret_cast<float *>(buffer.data());
-        transform.nv12_to_yuv6_warped(nv12, src_w, src_h, input + kYuv6Floats);
-    }
-    mapped.unmap().expect("unmap image input failed");
-    return true;
+    return with_mapped_input(index, map_access_::map_read_write, kInputImageFloats * elem_bytes,
+                             [&](uint8_t *data) {
+        if (elem_bytes == 1)
+            transform.nv12_to_yuv6_warped(nv12, src_w, src_h, data + kYuv6Floats);
+        else
+            transform.nv12_to_yuv6_warped(nv12, src_w, src_h,
+                                          reinterpret_cast<float *>(data) + kYuv6Floats);
+    });
 }
 
+// 현재 프레임(뒤쪽 절반)을 이전 프레임 자리(앞쪽 절반)로 내린다.
 bool SupercomboModel::advance_image_history(size_t index)
 {
     if (index >= input_tensors_.size() || shape_count(index) != kInputImageFloats)
         return false;
-
     const size_t elem_bytes = image_elem_bytes(index);
-    auto host_buffer = input_tensors_[index].impl()->to_host().unwrap()
-                           ->buffer().as_host().unwrap();
-    auto mapped = std::move(host_buffer.map(map_access_::map_read_write).unwrap());
-    auto buffer = mapped.buffer();
-    if (buffer.size() < kInputImageFloats * elem_bytes)
-        return false;
-
-    uint8_t *input = reinterpret_cast<uint8_t *>(buffer.data());
-    std::memcpy(input, input + kYuv6Floats * elem_bytes, kYuv6Floats * elem_bytes);
-    mapped.unmap().expect("unmap image history failed");
-    return true;
+    return with_mapped_input(index, map_access_::map_read_write, kInputImageFloats * elem_bytes,
+                             [&](uint8_t *data) {
+        std::memcpy(data, data + kYuv6Floats * elem_bytes, kYuv6Floats * elem_bytes);
+    });
 }
 
 bool SupercomboModel::clear_image_input(size_t index)
 {
     if (index >= input_tensors_.size() || shape_count(index) != kInputImageFloats)
         return false;
-
     const size_t elem_bytes = image_elem_bytes(index);
-    auto host_buffer = input_tensors_[index].impl()->to_host().unwrap()
-                           ->buffer().as_host().unwrap();
-    auto mapped = std::move(host_buffer.map(map_access_::map_write).unwrap());
-    auto buffer = mapped.buffer();
-    if (buffer.size() < kInputImageFloats * elem_bytes)
+    if (!with_mapped_input(index, map_access_::map_write, kInputImageFloats * elem_bytes,
+                           [&](uint8_t *data) {
+            std::memset(data, 0, kInputImageFloats * elem_bytes);
+        }))
         return false;
-
-    std::memset(buffer.data(), 0, kInputImageFloats * elem_bytes);
-    mapped.unmap().expect("unmap cleared image input failed");
     hrt::sync(input_tensors_[index], sync_op_t::sync_write_back, true)
         .expect("sync cleared image input failed");
     return true;
@@ -443,15 +413,11 @@ bool SupercomboModel::write_input(size_t index, const float *data, size_t count)
                   << " app=" << count << std::endl;
         return false;
     }
-
-    auto buf = input_tensors_[index].impl()->to_host().unwrap()->buffer().as_host().unwrap()
-                   .map(map_access_::map_write).unwrap().buffer();
-    if (buf.size() < count * sizeof(float)) {
-        std::cerr << "input " << index << " buffer too small: " << buf.size()
-                  << " < " << count * sizeof(float) << std::endl;
+    if (!with_mapped_input(index, map_access_::map_write, count * sizeof(float),
+                           [&](uint8_t *dst) { std::memcpy(dst, data, count * sizeof(float)); })) {
+        std::cerr << "input " << index << " buffer too small for " << count << " floats" << std::endl;
         return false;
     }
-    std::memcpy(reinterpret_cast<char *>(buf.data()), data, count * sizeof(float));
     hrt::sync(input_tensors_[index], sync_op_t::sync_write_back, true).expect("sync write_back failed");
     return true;
 }
