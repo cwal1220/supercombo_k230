@@ -82,9 +82,11 @@ true.
 - `K230_ENABLE_PANDA=1`
   - manager also starts `k230_pandad`. The binary must have been built with
     `-DSUPERCOMBO_BUILD_PANDA=ON`.
-- `K230_PANDA_SAFETY=nooutput|silent|hyundai|hyundaiCommunity|allOutput`
+- `K230_PANDA_SAFETY=nooutput|silent|elm327|hyundai|hyundaiCommunity|allOutput`
   - panda safety mode for `k230_pandad`. Its standalone default is `nooutput`;
-    the managed full pipeline defaults to `hyundaiCommunity:0`.
+    the managed full pipeline defaults to `hyundaiCommunity:0`. `hyundai`
+    defaults its parameter to `2` (the Hyundai/Kia hybrid path), every other
+    mode to `0`; an unknown name falls back to `nooutput`.
   - collected KIA K7 YG HEV logs from the current openpilot fork report
     `safety=hyundaiCommunity:0`, `sccBus=-1`, `mdpsBus=1`, and `sasBus=1`. Use
     `K230_PANDA_SAFETY=hyundaiCommunity` for shadow/TX experiments unless a newer

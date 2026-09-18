@@ -4,3 +4,5 @@ numpy
 onnx
 onnxruntime
 av
+# tools/ui/hud_tools.py compose
+pillow

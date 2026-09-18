@@ -59,7 +59,7 @@ def main() -> None:
     if len(frames) < args.frames:
         raise SystemExit(f"route yielded only {len(frames)} frames")
 
-    from k230_route import route_segments
+    from recording_reader import route_segments
     segments = route_segments(route)
     width, height = segments[0].width, segments[0].height
     replay = out_dir / "replay.scnv12"

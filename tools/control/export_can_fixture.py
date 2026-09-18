@@ -11,9 +11,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "model"))
-from k230_route import EVENT_LOG_MAGIC, RECORD_CAN_RX  # noqa: E402
+from recording_reader import RECORD_CAN_RX, iter_event_records  # noqa: E402
 
-RECORD_HEADER = struct.Struct("<QHHI")     # K230EventRecordHeader
 BATCH_HEADER = struct.Struct("<II")        # K230RecordedCanBatchHeader
 RECORDED_FRAME = struct.Struct("<IIIII64s")  # K230RecordedCanFrame
 FIXTURE_MAGIC = b"K230CAN1"
@@ -21,28 +20,19 @@ FIXTURE_RECORD = struct.Struct("<QIBB8s2x")  # timestamp_us, address, bus, len, 
 
 
 def export(src: Path, dst: Path) -> tuple[int, float]:
-    data = src.read_bytes()
-    magic, _version, header_size = struct.unpack_from("<8sII", data, 0)
-    if magic != EVENT_LOG_MAGIC:
-        raise ValueError(f"{src}: bad event log magic {magic!r}")
     frames: list[tuple[int, int, int, int, bytes]] = []
-    offset = header_size
-    while offset + RECORD_HEADER.size <= len(data):
-        ts, rtype, _flags, payload = RECORD_HEADER.unpack_from(data, offset)
-        offset += RECORD_HEADER.size
-        if offset + payload > len(data):
-            break  # truncated tail from an unclean stop
-        if rtype == RECORD_CAN_RX:
-            count, _dropped = BATCH_HEADER.unpack_from(data, offset)
-            pos = offset + BATCH_HEADER.size
-            for _ in range(count):
-                if pos + RECORDED_FRAME.size > offset + payload:
-                    break
-                address, bus, _bus_time, length, _flags, raw = RECORDED_FRAME.unpack_from(data, pos)
-                pos += RECORDED_FRAME.size
-                if length <= 8:
-                    frames.append((ts, address, bus, length, raw[:8]))
-        offset += payload
+    for rec in iter_event_records(src):
+        if rec.type != RECORD_CAN_RX:
+            continue
+        count, _dropped = BATCH_HEADER.unpack_from(rec.payload, 0)
+        pos = BATCH_HEADER.size
+        for _ in range(count):
+            if pos + RECORDED_FRAME.size > len(rec.payload):
+                break
+            address, bus, _bus_time, length, _flags, raw = RECORDED_FRAME.unpack_from(rec.payload, pos)
+            pos += RECORDED_FRAME.size
+            if length <= 8:
+                frames.append((rec.timestamp_ns, address, bus, length, raw[:8]))
     if not frames:
         raise ValueError(f"{src}: no CAN frames")
     start_ns = frames[0][0]

@@ -26,6 +26,15 @@
     intermediate RGB or warped image buffer. Its compact fixed-point LUT is
     16 bytes/sample instead of 24, and the K230 build uses an exact C908 RVV
     kernel with a scalar fallback.
+- `src/supercombo_model.*`
+  - the nncase wrapper: loads the kmodel, owns the input tensors, writes the
+    constant and temporal inputs (`model_temporal.h`) and runs one frame. The
+    only file under `src/` that includes nncase headers.
+- `src/gpu_warp.*`
+  - the VGLite (2.5D GPU) input warp: the perspective 3x3 and bilinear
+    sampling run on the GPU and land directly in the model's input tensor.
+    `SUPERCOMBO_WARP_CPU=1` selects the CPU path in `model_input_transform`
+    instead.
 - `src/calibration_service.*`, `src/calibration_online.*`
   - wrap pose-based online calibration, manual override, projection policy, and
     the model-input calibration feedback loop.
@@ -102,13 +111,23 @@ released after that short hold if they persist.
 - `src/system_monitor.*`
   - `/proc`, thermal-zone, and network sampling into `OverlayHudState`, called
     at 1 Hz by `k230_overlayd`.
-- `src/k230_recordd.cc`, `src/mvx_v4l2_encoder.*`, `src/recording_writer.*`
+- `src/k230_recordd.cc`, `src/mvx_v4l2_encoder.*`, `src/recording_writer.*`,
+  `src/recording_format.h`
   - low-priority data recorder, direct MVX V4L2 M2M encoder, timestamp index,
     compact event log, route segmentation, and storage-reserve guard.
     `RecordingWriter` serializes every record before it enters the write queue
     (a queue entry is the packet or record bytes, not a 21 KB CAN batch), and
     `StagingMover` is the thread that moves closed files from tmpfs to the SD
     card. `check_recording_writer` pins the on-disk layout on the host.
+    `recording_format.h` is the on-disk contract (`kK230RecordingVersion`,
+    the `K230LOG1` / `K230IDX1` headers, record types) that
+    `tools/model/recording_reader.py` mirrors.
+- `src/piezo_buzzer.*`
+  - the PWM buzzer: one table of tone sequences per `PiezoAlert`, played from
+    a helper thread so `k230_overlayd` never waits on it.
+- `src/mmz.c`
+  - the K230 SDK's MMZ (physically contiguous memory) allocator shim behind
+    `k230_camerad`'s capture buffers.
 - `src/panda_client.*`, `src/panda_can_codec.*`, `src/k230_pandad.cc`
   - optional panda USB bridge. It handles USB, health, heartbeat, receive CAN,
     and the final TX gate, but does not generate vehicle control messages.
@@ -118,7 +137,35 @@ released after that short hold if they persist.
     planner worker separated from the 100 Hz control loop.
 - `scripts/k230_manager.py`
   - minimal supervisor and heartbeat publisher. It is intentionally not a full
-    openpilot manager clone.
+    openpilot manager clone. One table in start order decides which processes
+    run (`K230_ENABLE_CONTROL`, `K230_ENABLE_PANDA`, `K230_ENABLE_PARAM_SERVER`)
+    and with what nice value.
+- `scripts/k230_param_server.py`, `scripts/display_control.py`
+  - the FastAPI parameter editor (`K230_ENABLE_PARAM_SERVER`) and the
+    backlight/brightness helper it calls.
+
+## Scripts and tools
+
+- `scripts/configure_k230_macos.sh`, `scripts/fetch_nncase_runtime.sh`,
+  `scripts/upload_to_board.sh`, `scripts/run_host_checks.sh`,
+  `scripts/build_supercombo_model.sh`
+  - cross-build configuration, pinned nncase runtime download, deploy, host
+    self-checks, and the ONNX → kmodel pipeline. See
+    [Build and deploy](build-and-deploy.md) and [Verification](verification.md).
+- `tools/model/`
+  - the kmodel pipeline scripts plus the recording readers:
+    `recording_reader.py` decodes `recordd` routes (frame index, event log,
+    HEVC) and is the one Python mirror of `recording_format.h` /
+    `ipc_messages.h`; `lane_bias.py`, `route_frames.py`, `make_replay.py`, and
+    `make_calibration.py` build on it. See `tools/model/README.md`.
+- `tools/control/`
+  - `fit_lateral_params.py` (torque regression and actuator-lag estimate from
+    drives) and `export_can_fixture.py` (recorded CAN → `check_control_replay`
+    fixture).
+- `tools/ui/hud_tools.py`
+  - extracts `hud_snapshot` inputs from a route and composes its frames.
+- `diagnostics/`
+  - host self-checks, benchmarks, and replay tools; see `diagnostics/README.md`.
 
 ## Shared helpers
 

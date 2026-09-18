@@ -7,15 +7,18 @@ fails loudly instead of decoding garbage.
 
 from __future__ import annotations
 
+import functools
 import json
 import struct
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterator
 
 import numpy as np
 
 FRAME_INDEX_MAGIC = b"K230IDX1"
 EVENT_LOG_MAGIC = b"K230LOG1"
+EVENT_RECORD_HEADER = struct.Struct("<QHHI")  # timestamp_ns, type, flags, size
 
 RECORD_CAN_RX = 1
 RECORD_CAN_TX = 2
@@ -87,6 +90,7 @@ TRAJECTORY_SIZE = 33
 IPC_POINT = 12  # K230IpcPoint: three float32
 
 
+@functools.lru_cache(maxsize=None)
 def model_state_layout(version: int) -> dict[str, int]:
     """Byte offsets inside a K230ModelState payload, per recording version.
 
@@ -254,6 +258,57 @@ def route_event_files(route_dir: Path) -> list[Path]:
     return [legacy] if legacy.exists() else []
 
 
+@dataclass
+class EventRecord:
+    """One K230LOG1 record. ``payload`` is a zero-copy view into the chunk."""
+    path: Path
+    version: int
+    timestamp_ns: int
+    type: int
+    payload: memoryview
+
+    def control_state(self) -> np.void:
+        expected = CONTROL_STATE.itemsize + _pad8(CONTROL_STATE.itemsize)
+        if len(self.payload) != expected:
+            raise ValueError(f"{self.path}: control state payload {len(self.payload)} "
+                             f"!= {expected}; K230ControlState changed without a "
+                             f"recording-version bump")
+        return np.frombuffer(self.payload, CONTROL_STATE, count=1)[0]
+
+    def model_layout(self) -> dict[str, int]:
+        """K230ModelState offsets for this record's version, checked against
+        its size: the writer pads records to 8 bytes, so anything outside
+        struct size +0..7 means the layout moved without a version bump."""
+        layout = model_state_layout(self.version)
+        expected = layout["__size__"]
+        if not expected <= len(self.payload) <= expected + 7:
+            raise ValueError(f"{self.path}: model state payload {len(self.payload)} "
+                             f"does not match the v{self.version} layout "
+                             f"({expected}, +0..7 pad)")
+        return layout
+
+
+def iter_event_records(path: Path) -> Iterator[EventRecord]:
+    """Every record of one events chunk in file order; a tail truncated by an
+    unclean stop ends the iteration. A file shorter than its header yields
+    nothing, a wrong magic raises."""
+    data = path.read_bytes()
+    if len(data) < 16:
+        return
+    magic, version, header_size = struct.unpack_from("<8sII", data, 0)
+    if magic != EVENT_LOG_MAGIC:
+        raise ValueError(f"{path}: bad event log magic {magic!r}")
+    view = memoryview(data)
+    offset, end = header_size, len(data)
+    while offset + EVENT_RECORD_HEADER.size <= end:
+        ts, rtype, _flags, size = EVENT_RECORD_HEADER.unpack_from(data, offset)
+        offset += EVENT_RECORD_HEADER.size
+        if offset + size > end:
+            break
+        yield EventRecord(path, version, ts, rtype, view[offset:offset + size])
+        offset += size
+
+
 def read_route_events(route_dir: Path) -> RouteEvents | None:
     paths = [p for p in route_event_files(route_dir) if p.stat().st_size > 32]
     if not paths:
@@ -262,37 +317,19 @@ def read_route_events(route_dir: Path) -> RouteEvents | None:
     controls, control_ts = [], []
     model_fid, model_cts, model_rpy, model_blocks = [], [], [], []
     for path in paths:
-        data = path.read_bytes()
-        magic, version, header_size = struct.unpack_from("<8sII", data, 0)
-        if magic != EVENT_LOG_MAGIC:
-            raise ValueError(f"{path}: bad event log magic {magic!r}")
-        offset = header_size
-        end = len(data)
-        while offset + 16 <= end:
-            ts, rtype, flags, payload = struct.unpack_from("<QHHI", data, offset)
-            offset += 16
-            if offset + payload > end:
-                break  # truncated tail from an unclean stop
-            if rtype == RECORD_CONTROL_STATE:
-                if payload != CONTROL_STATE.itemsize + _pad8(CONTROL_STATE.itemsize):
-                    raise ValueError(f"control state payload {payload} != "
-                                     f"{CONTROL_STATE.itemsize} (+pad)")
-                controls.append(np.frombuffer(data, CONTROL_STATE, count=1, offset=offset)[0])
-                control_ts.append(ts)
-            elif rtype == RECORD_MODEL_STATE:
-                head = np.frombuffer(data, MODEL_STATE_HEAD, count=1, offset=offset)[0]
-                # v4 and v5 end exactly on the calibration block. v3 and older
-                # still carried stop_line, which left 4 bytes of trailing
-                # padding after it (payload 4080).
-                tail_pad = 0 if version >= 4 else 4
-                calib = np.frombuffer(
-                    data, CALIBRATION_STATE, count=1,
-                    offset=offset + payload - CALIBRATION_STATE.itemsize - tail_pad)[0]
+        for rec in iter_event_records(path):
+            if rec.type == RECORD_CONTROL_STATE:
+                controls.append(rec.control_state())
+                control_ts.append(rec.timestamp_ns)
+            elif rec.type == RECORD_MODEL_STATE:
+                layout = rec.model_layout()
+                head = np.frombuffer(rec.payload, MODEL_STATE_HEAD, count=1)[0]
+                calib = np.frombuffer(rec.payload, CALIBRATION_STATE, count=1,
+                                      offset=layout["calibration"])[0]
                 model_fid.append(head["frame_id"])
                 model_cts.append(head["capture_timestamp_ns"])
                 model_rpy.append((calib["roll"], calib["pitch"], calib["yaw"]))
                 model_blocks.append(calib["valid_blocks"])
-            offset += payload
 
     if not model_fid and not controls:
         return None

@@ -140,7 +140,7 @@ struct K230ModelState {
 };
 
 /* 이 크기가 녹화 ModelState 레코드의 페이로드 크기다. 바뀌면 기존 녹화를
- * 읽는 tools/model/k230_route.py와 어긋나므로 recording_format.h의
+ * 읽는 tools/model/recording_reader.py와 어긋나므로 recording_format.h의
  * kK230RecordingVersion도 함께 올려야 한다. */
 static_assert(sizeof(K230ModelState) == 3256,
               "K230ModelState layout is shared with the recording reader");
@@ -287,7 +287,7 @@ struct K230ControlState {
 };
 
 /* controlsd가 발행하고 overlayd/recordd가 읽는 공유 레이아웃이다. 기록 v5는 이
- * 구조체를 그대로 저장하고 tools/model/k230_route.py가 위치로 디코드하므로 필드
+ * 구조체를 그대로 저장하고 tools/model/recording_reader.py가 위치로 디코드하므로 필드
  * 순서까지 전부 고정한다. 같은 크기 필드 둘을 맞바꿔도 여기서 걸린다. */
 #define K230_CONTROL_STATE_AT(field, expected) \
     static_assert(offsetof(K230ControlState, field) == (expected), \

@@ -142,7 +142,9 @@ Version 2 also kept a
 single route-level `events.bin`; CAN logging alone (~0.5 MB/s) filled the 988 MB
 tmpfs staging in about 30 minutes on long drives and silently killed the rest of
 the recording, which is why version 3 rotates event chunks alongside video
-segments. `tools/model/k230_route.py` reads both the v3 and v4 layouts.
+segments. `tools/model/recording_reader.py` reads the v3, v4, and v5 layouts;
+`lane_bias.py`, `hud_tools.py`, `fit_lateral_params.py lag`, and
+`export_can_fixture.py` all walk the event log through its `iter_event_records`.
 
 ## Lateral dataset extraction
 

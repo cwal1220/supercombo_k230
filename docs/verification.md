@@ -212,7 +212,7 @@ The same benchmark build produces self-checking binaries that need no board:
 | `check_panda_can_codec` | panda USB CAN packing/unpacking |
 | `check_lateral_mpc` | lateral MPC optimality and solve time |
 | `check_calibration_equivalence` | online calibration state machine, model-input homography and YUV6 packing against openpilot references |
-| `check_param_server.py` | parameter store, runtime schema sync, UI metadata coverage of `params/*.json` |
+| `check_param_server.py` | parameter store, runtime schema sync, UI metadata coverage of `params/*.json`, UI min/max equal to the C++ `Json*Field` clamp tables |
 
 See [Diagnostics](diagnostics.md) for the build command and additional
 on-board tools.

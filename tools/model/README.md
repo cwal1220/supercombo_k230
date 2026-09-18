@@ -42,7 +42,7 @@ python3 -m venv ~/Documents/k230/.model-venv
 ## Recording-driven helpers
 
 These read `k230_recordd` routes and reproduce the device's input pipeline
-(`k230_route.py` decodes the route, `model_warp.py` is a numpy port of
+(`recording_reader.py` decodes the route, `model_warp.py` is a numpy port of
 `src/model_input_transform.cc`, `route_frames.py` joins them, and
 `op094_runner.py` drives the model with the same desire/feature history the
 runtime keeps).

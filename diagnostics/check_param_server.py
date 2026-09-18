@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -145,6 +146,31 @@ class ParamStoreTest(unittest.TestCase):
                         self.assertIsInstance(
                             metadata.get(field), (int, float), f"{group}.{key}.{field}"
                         )
+
+    def test_ui_ranges_match_runtime_clamps(self):
+        """The loaders clamp to their Json*Field tables; the editor must show
+        the same min/max or it accepts values the runtime silently changes."""
+        root = Path(__file__).resolve().parents[1]
+        row = re.compile(r'\{"(\w+)",\s*(-?[\d.]+)f?,\s*(-?[\d.]+)f?,\s*&\w+::\w+\}')
+        tables = {
+            "steering": ("src/control_params.cc", ("kSteeringInts", "kSteeringFloats")),
+            "driving": ("src/control_params.cc", ("kDrivingInts", "kDrivingFloats")),
+            "adaptive_cruise": ("src/adaptive_cruise.cc", ("kAdaptiveInts", "kAdaptiveFloats")),
+        }
+        for group, (source, names) in tables.items():
+            text = (root / source).read_text(encoding="utf-8")
+            runtime = {}
+            for name in names:
+                body = re.search(name + r"\[\] = \{(.*?)\n\};", text, re.S)
+                self.assertIsNotNone(body, f"{source}: {name}")
+                runtime.update({key: (float(low), float(high))
+                                for key, low, high in row.findall(body.group(1))})
+            self.assertTrue(runtime, f"{source}: no rows parsed")
+            ui = {key: meta for key, meta in PARAM_METADATA[group].items() if "min" in meta}
+            self.assertEqual(set(runtime), set(ui), group)
+            for key, (low, high) in runtime.items():
+                self.assertEqual((float(ui[key]["min"]), float(ui[key]["max"])), (low, high),
+                                 f"{group}.{key}")
 
 
 if __name__ == "__main__":

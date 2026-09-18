@@ -22,14 +22,17 @@ import struct
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "model"))
-import k230_route as kr  # noqa: E402
+from recording_reader import (RECORD_CONTROL_STATE, RECORD_MODEL_STATE,  # noqa: E402
+                              iter_event_records, route_event_files,
+                              route_segments)
 
-MODEL_STATE_SIZE = 3256
+MODEL_STATE_SIZE = 3256   # hud_snapshot replays the v5 K230ModelState only
 CONTROL_STATE_SIZE = 240
 FRAME_MAGIC = b"K230ARGB"
 LOGICAL = (800, 480)
@@ -37,40 +40,39 @@ LOGICAL = (800, 480)
 
 # ---- inputs ----
 
-def scan(route: Path):
-    layout = kr.model_state_layout(5)
-    assert layout["__size__"] == MODEL_STATE_SIZE
+class ModelMoment(NamedTuple):
+    ts: int
+    payload: memoryview
+    frame_id: int
+    lanes: tuple[float, float, float, float]
+    lead_valid: int
+
+
+def scan(route: Path) -> tuple[list[tuple[int, np.void]], list[ModelMoment]]:
     controls, models = [], []
-    for path in kr.route_event_files(route):
-        data = path.read_bytes()
-        _, _, header_size = struct.unpack_from("<8sII", data, 0)
-        offset, end = header_size, len(data)
-        while offset + 16 <= end:
-            ts, rtype, _, payload = struct.unpack_from("<QHHI", data, offset)
-            offset += 16
-            if offset + payload > end:
-                break
-            if rtype == kr.RECORD_CONTROL_STATE:
-                controls.append((ts, np.frombuffer(data, kr.CONTROL_STATE, count=1, offset=offset)[0]))
-            elif rtype == kr.RECORD_MODEL_STATE and payload == MODEL_STATE_SIZE:
-                frame_id, = struct.unpack_from("<Q", data, offset)
-                lanes = struct.unpack_from("<4f", data, offset + layout["lane_probabilities"])
-                lead_valid, = struct.unpack_from("<I", data, offset + layout["lead"])
-                models.append((ts, path, offset, frame_id, lanes, lead_valid))
-            offset += payload
+    for path in route_event_files(route):
+        for rec in iter_event_records(path):
+            if rec.type == RECORD_CONTROL_STATE:
+                controls.append((rec.timestamp_ns, rec.control_state()))
+            elif rec.type == RECORD_MODEL_STATE and len(rec.payload) == MODEL_STATE_SIZE:
+                layout = rec.model_layout()
+                frame_id, = struct.unpack_from("<Q", rec.payload, 0)
+                lanes = struct.unpack_from("<4f", rec.payload, layout["lane_probabilities"])
+                lead_valid, = struct.unpack_from("<I", rec.payload, layout["lead"])
+                models.append(ModelMoment(rec.timestamp_ns, rec.payload, frame_id, lanes, lead_valid))
     return controls, models
 
 
-def score(control, model) -> float:
+def score(control: np.void, model: ModelMoment) -> float:
     if control["active"] != 1:
         return -1.0
     speed = float(control["speed_kph"])
     if not 40.0 <= speed <= 95.0:
         return -1.0
-    lanes = model[4]
+    lanes = model.lanes
     value = 1.0 + 2.0 * min(lanes[1], lanes[2]) + 0.5 * (lanes[0] + lanes[3])
     value += 1.5 if control["radar_lead_valid"] else 0.0
-    value += 1.0 if model[5] else 0.0
+    value += 1.0 if model.lead_valid else 0.0
     value += 0.5 if control["tpms_valid"] else 0.0
     return value
 
@@ -80,7 +82,7 @@ def cmd_inputs(args: argparse.Namespace) -> int:
     if not controls or not models:
         sys.exit("route has no control/model records")
     control_ts = np.array([c[0] for c in controls], dtype=np.uint64)
-    model_ts = np.array([m[0] for m in models], dtype=np.uint64)
+    model_ts = np.array([m.ts for m in models], dtype=np.uint64)
 
     if args.time is not None:
         target = int(model_ts[0]) + int(args.time * 1e9)
@@ -88,7 +90,7 @@ def cmd_inputs(args: argparse.Namespace) -> int:
     else:
         best = (-2.0, 0)
         for i in range(0, len(models), 3):
-            j = int(np.searchsorted(control_ts, models[i][0]))
+            j = int(np.searchsorted(control_ts, models[i].ts))
             if j >= len(controls):
                 break
             value = score(controls[j][1], models[i])
@@ -96,21 +98,20 @@ def cmd_inputs(args: argparse.Namespace) -> int:
                 best = (value, i)
         mi = best[1]
     model = models[mi]
-    cj = min(int(np.searchsorted(control_ts, model[0])), len(controls) - 1)
+    cj = min(int(np.searchsorted(control_ts, model.ts)), len(controls) - 1)
     control = controls[cj][1]
 
     args.out.mkdir(parents=True, exist_ok=True)
-    data = model[1].read_bytes()
-    (args.out / "model.bin").write_bytes(data[model[2]:model[2] + MODEL_STATE_SIZE])
+    (args.out / "model.bin").write_bytes(bytes(model.payload))
     raw = control.tobytes()
     (args.out / "control.bin").write_bytes(raw + b"\0" * (CONTROL_STATE_SIZE - len(raw)))
-    seconds = (int(model[0]) - int(model_ts[0])) / 1e9
-    print(f"moment t={seconds:.1f}s frame_id={model[3]} speed={control['speed_kph']:.1f} "
-          f"active={control['active']} lanes={np.round(model[4], 2)} lead={model[5]}")
+    seconds = (int(model.ts) - int(model_ts[0])) / 1e9
+    print(f"moment t={seconds:.1f}s frame_id={model.frame_id} speed={control['speed_kph']:.1f} "
+          f"active={control['active']} lanes={np.round(model.lanes, 2)} lead={model.lead_valid}")
 
-    for segment in kr.route_segments(args.route):
+    for segment in route_segments(args.route):
         frames = segment.frames
-        hits = np.nonzero(frames["frame_id"] == model[3])[0]
+        hits = np.nonzero(frames["frame_id"] == model.frame_id)[0]
         if not len(hits):
             continue
         index = int(frames["encode_index"][hits[0]]) - int(frames["encode_index"][0])

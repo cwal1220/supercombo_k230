@@ -40,9 +40,9 @@ from pathlib import Path
 
 import numpy as np
 
-from k230_route import (CONTROL_STATE, EVENT_LOG_MAGIC, RECORD_CONTROL_STATE,
-                        RECORD_MODEL_STATE, TRAJECTORY_SIZE, _pad8,
-                        model_state_layout, route_event_files)
+from recording_reader import (RECORD_CONTROL_STATE, RECORD_MODEL_STATE,
+                              TRAJECTORY_SIZE, iter_event_records,
+                              route_event_files)
 
 # openpilot X_IDXS: the distance each trajectory point sits at.
 X_IDXS = np.array([192.0 * (i / (TRAJECTORY_SIZE - 1.0)) ** 2
@@ -75,66 +75,38 @@ class RouteLateral:
         return self
 
 
-def _floats(data: bytes, offset: int, count: int) -> np.ndarray:
+def _floats(data: memoryview, offset: int, count: int) -> np.ndarray:
     return np.frombuffer(data, "<f4", count, offset)
 
 
 def read_route_lateral(route: Path) -> RouteLateral:
     out = RouteLateral()
-    control_payload = CONTROL_STATE.itemsize + _pad8(CONTROL_STATE.itemsize)
-    layouts: dict[int, dict[str, int]] = {}
-
     for path in route_event_files(route):
-        data = path.read_bytes()
-        if len(data) < 16:
-            continue
-        magic, version, header_size = struct.unpack_from("<8sII", data, 0)
-        if magic != EVENT_LOG_MAGIC:
-            raise ValueError(f"{path}: bad event log magic {magic!r}")
-        if version not in layouts:
-            layouts[version] = model_state_layout(version)
-        layout = layouts[version]
-
-        offset, end = header_size, len(data)
-        while offset + 16 <= end:
-            _, rtype, _, payload = struct.unpack_from("<QHHI", data, offset)
-            ts, = struct.unpack_from("<Q", data, offset)
-            offset += 16
-            if offset + payload > end:
-                break  # truncated tail from an unclean stop
-            if rtype == RECORD_MODEL_STATE:
-                # The writer pads records to 8 bytes, so the payload is the
-                # struct size rounded up -- anything else means the layout
-                # moved without a recording-version bump.
-                expected = layout["__size__"]
-                if not expected <= payload <= expected + 7:
-                    raise ValueError(
-                        f"{path}: model state payload {payload} does not match "
-                        f"the v{version} layout ({expected}, +0..7 pad); "
-                        f"K230ModelState changed without a version bump")
-                lanes = offset + layout["lanes"]
+        for rec in iter_event_records(path):
+            if rec.type == RECORD_MODEL_STATE:
+                layout = rec.model_layout()
+                lanes = layout["lanes"]
                 stride = TRAJECTORY_SIZE * 12
-                left = _floats(data, lanes + stride, TRAJECTORY_SIZE * 3)[1::3]
-                right = _floats(data, lanes + 2 * stride, TRAJECTORY_SIZE * 3)[1::3]
-                plan = _floats(data, offset + layout["plan"], TRAJECTORY_SIZE * 3)
-                probs = _floats(data, offset + layout["lane_probabilities"], 4)
+                left = _floats(rec.payload, lanes + stride, TRAJECTORY_SIZE * 3)[1::3]
+                right = _floats(rec.payload, lanes + 2 * stride, TRAJECTORY_SIZE * 3)[1::3]
+                plan = _floats(rec.payload, layout["plan"], TRAJECTORY_SIZE * 3)
+                probs = _floats(rec.payload, layout["lane_probabilities"], 4)
                 out.lane_offset.append((left + right) / 2.0)
                 out.plan_y.append(plan[1::3])
                 out.left_prob.append(probs[1])
                 out.right_prob.append(probs[2])
                 out.model_ts.append(
-                    struct.unpack_from("<Q", data,
-                                       offset + layout["capture_timestamp_ns"])[0])
-            elif rtype == RECORD_CONTROL_STATE and payload == control_payload:
-                state = np.frombuffer(data, CONTROL_STATE, count=1, offset=offset)[0]
-                out.control["ts"].append(ts)
+                    struct.unpack_from("<Q", rec.payload,
+                                       layout["capture_timestamp_ns"])[0])
+            elif rec.type == RECORD_CONTROL_STATE:
+                state = rec.control_state()
+                out.control["ts"].append(rec.timestamp_ns)
                 out.control["active"].append(int(state["active"]))
                 out.control["speed_kph"].append(float(state["speed_kph"]))
                 out.control["steer_deg"].append(float(state["steering_angle_deg"]))
                 out.control["desired_curv"].append(float(state["desired_curvature"]))
                 out.control["actual_curv"].append(float(state["actual_curvature"]))
                 out.control["driver_torque"].append(int(state["driver_torque"]))
-            offset += payload
     return out.finish()
 
 

@@ -23,10 +23,13 @@ import argparse
 import glob
 import os
 import re
-import struct
 import sys
+from pathlib import Path
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "model"))
+from recording_reader import RECORD_CONTROL_STATE, iter_event_records  # noqa: E402
 
 # ---------------------------------------------------------------- fit ----
 
@@ -191,17 +194,6 @@ def cmd_fit(args):
 
 # ---------------------------------------------------------------- lag ----
 
-# recording_format.h와 일치해야 한다.
-EVENT_FILE_MAGIC = b"K230LOG1"
-RECORD_HEADER = struct.Struct("<QHHI")           # timestamp_ns, type, flags, size
-TYPE_CONTROL_STATE = 4
-CONTROL_STATE_SIZE_V3 = 240
-# K230ControlState 내부 오프셋 (v3, 240 B)
-OFF_ACTIVE = 16
-OFF_SPEED_KPH = 56
-OFF_DESIRED_CURV = 72
-OFF_ACTUAL_CURV = 76
-
 MIN_LAG_S = 0.10
 MAX_LAG_S = 0.65
 MIN_CORR = 0.95   # lagd MIN_NCC
@@ -212,33 +204,21 @@ MIN_LAT_ACCEL_RANGE = 0.5   # 창 안에 이만큼의 횡가속 변화가 있어
 
 
 def read_control_states(paths):
+    """[t_s, active, speed_kph, desired_curv, actual_curv] per ControlState record."""
     rows = []
     for path in paths:
-        with open(path, "rb") as f:
-            head = f.read(24)
-            if len(head) < 24 or head[:8] != EVENT_FILE_MAGIC:
-                print(f"건너뜀(헤더 아님): {path}", file=sys.stderr)
-                continue
-            version, header_size = struct.unpack_from("<II", head, 8)
-            if version < 3:
-                print(f"건너뜀(v{version}, ControlState 없음): {path}", file=sys.stderr)
-                continue
-            f.seek(header_size)
-            while True:
-                rh = f.read(RECORD_HEADER.size)
-                if len(rh) < RECORD_HEADER.size:
-                    break
-                ts, rtype, _flags, size = RECORD_HEADER.unpack(rh)
-                payload = f.read(size)
-                if len(payload) < size:
-                    break
-                if rtype != TYPE_CONTROL_STATE or size < CONTROL_STATE_SIZE_V3:
+        try:
+            for rec in iter_event_records(Path(path)):
+                if rec.version < 3:
+                    raise ValueError(f"{path}: v{rec.version} has no ControlState")
+                if rec.type != RECORD_CONTROL_STATE:
                     continue
-                active = struct.unpack_from("<I", payload, OFF_ACTIVE)[0]
-                speed = struct.unpack_from("<f", payload, OFF_SPEED_KPH)[0]
-                desired = struct.unpack_from("<f", payload, OFF_DESIRED_CURV)[0]
-                actual = struct.unpack_from("<f", payload, OFF_ACTUAL_CURV)[0]
-                rows.append((ts * 1e-9, active, speed, desired, actual))
+                state = rec.control_state()
+                rows.append((rec.timestamp_ns * 1e-9, int(state["active"]),
+                             float(state["speed_kph"]), float(state["desired_curvature"]),
+                             float(state["actual_curvature"])))
+        except ValueError as error:
+            print(f"건너뜀: {error}", file=sys.stderr)
     return np.array(rows)
 
 

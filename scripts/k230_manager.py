@@ -22,8 +22,6 @@ _MANAGER_STATE_BODY = 8 + 4 + 4 + PROCESS.size * MAX_PROCESSES
 MANAGER_STATE_SIZE = (_MANAGER_STATE_BODY + 7) // 8 * 8
 DISPLAY_READY_FILE = "/tmp/k230_display_ready"
 DISPLAY_READY_TIMEOUT_MS = 7000
-START_ORDER = ("k230_overlayd", "k230_camerad", "k230_recordd", "k230_modeld")
-PROCESS_ORDER = ("k230_camerad", "k230_modeld", "k230_overlayd", "k230_recordd")
 DEFAULT_KMODEL_PATH = "models/supercombo.kmodel"
 DEFAULT_DEBUG_MODE = "0"
 
@@ -108,6 +106,27 @@ class ProcSpec:
     nice: int = 0
 
 
+def process_specs(kmodel: str, debug: str) -> List[ProcSpec]:
+    """시작 순서대로. camerad는 overlayd의 display-ready 신호를 기다린 뒤 뜬다."""
+    enable_control = env_enabled("K230_ENABLE_CONTROL", True)
+    specs = [
+        ProcSpec("k230_overlayd", ["./k230_overlayd"], 10),
+        ProcSpec("k230_camerad", ["./k230_camerad"], 0),
+        ProcSpec("k230_recordd", ["./k230_recordd"], 15),
+        ProcSpec("k230_modeld", ["./k230_modeld", kmodel, debug], -15),
+    ]
+    if env_enabled("K230_ENABLE_PANDA") or enable_control:
+        specs.append(ProcSpec("k230_pandad", ["./k230_pandad"], -10))
+    if enable_control:
+        specs.append(ProcSpec("k230_controlsd", ["./k230_controlsd"], -8))
+    if env_enabled("K230_ENABLE_PARAM_SERVER", enable_control):
+        server_script = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "k230_param_server.py"
+        )
+        specs.append(ProcSpec("param_server", [sys.executable, server_script], 10))
+    return specs
+
+
 @dataclass
 class ProcState:
     spec: ProcSpec
@@ -155,36 +174,11 @@ class Manager:
         )
         self.shutdown = False
         self.manager_state = LatestPublisher("/k230_manager_state", MANAGER_STATE_SIZE)
-        self.procs: Dict[str, ProcState] = {}
-
-        self.start_order = list(START_ORDER)
-        self.process_order = list(PROCESS_ORDER)
-        enable_control = env_enabled("K230_ENABLE_CONTROL", True)
-        specs = [
-            ProcSpec("k230_camerad", ["./k230_camerad"], 0),
-            ProcSpec("k230_modeld", ["./k230_modeld", self.kmodel, self.debug], -15),
-            ProcSpec("k230_overlayd", ["./k230_overlayd"], 10),
-            ProcSpec("k230_recordd", ["./k230_recordd"], 15),
-        ]
-        if env_enabled("K230_ENABLE_PANDA") or enable_control:
-            specs.append(ProcSpec("k230_pandad", ["./k230_pandad"], -10))
-            self.start_order.append("k230_pandad")
-            self.process_order.append("k230_pandad")
-        if enable_control:
-            specs.append(ProcSpec("k230_controlsd", ["./k230_controlsd"], -8))
-            self.start_order.append("k230_controlsd")
-            self.process_order.append("k230_controlsd")
-        if env_enabled("K230_ENABLE_PARAM_SERVER", enable_control):
-            server_script = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), "k230_param_server.py"
-            )
-            specs.append(
-                ProcSpec("param_server", [sys.executable, server_script], 10)
-            )
-            self.start_order.append("param_server")
-            self.process_order.append("param_server")
-        for spec in specs:
-            self.procs[spec.name] = ProcState(spec=spec)
+        # 시작 순서 = 상태 테이블 순서. dict는 삽입 순서를 지킨다.
+        self.procs: Dict[str, ProcState] = {
+            spec.name: ProcState(spec=spec)
+            for spec in process_specs(self.kmodel, self.debug)
+        }
         self.display_ready_file = DISPLAY_READY_FILE
 
     def start_proc(self, state: ProcState):
@@ -209,9 +203,8 @@ class Manager:
     def publish_state(self):
         timestamp = now_ns()
         payload = struct.pack("<QII", timestamp, min(len(self.procs), MAX_PROCESSES), 0)
-        for name in self.process_order[:MAX_PROCESSES]:
-            state = self.procs[name]
-            proc_name = name.encode("ascii")[:15].ljust(16, b"\x00")
+        for state in list(self.procs.values())[:MAX_PROCESSES]:
+            proc_name = state.spec.name.encode("ascii")[:15].ljust(16, b"\x00")
             payload += PROCESS.pack(proc_name, 1 if state.running() else 0)
         payload += b"\x00" * (MANAGER_STATE_SIZE - len(payload))
         self.manager_state.publish(payload)
@@ -234,10 +227,10 @@ class Manager:
             print(f"manager: failed to remove display ready file {self.display_ready_file}: {exc}",
                   flush=True)
 
-        for name in self.start_order:
-            if name == "k230_camerad":
+        for state in self.procs.values():
+            if state.spec.name == "k230_camerad":
                 self.wait_for_display_ready()
-            self.start_proc(self.procs[name])
+            self.start_proc(state)
             time.sleep(0.3)
 
         last_publish = 0.0
