@@ -431,28 +431,6 @@ void verify_large_angle_fault_avoidance() {
           "torque resumes with the normal ramp below the fault angle");
 }
 
-void verify_configured_steering_angle_limit() {
-  LateralControllerConfig config;
-  config.force_engaged = true;
-  config.driving_params.vehicle_state_timeout_ms = 2000;
-  config.steering_params.avoid_lkas_fault_enabled = false;
-  config.steering_params.max_steering_angle_deg = 80.0f;
-  LateralController controller(config);
-  VehicleCanState vehicle = ready_vehicle();
-  vehicle.cluster_speed_raw = 72.0f;
-
-  vehicle.steering_angle_deg = 79.9f;
-  const auto below_limit =
-      controller.update(replay_path(), replay_target(), vehicle, 1.0, 0);
-  require(below_limit.active, "steering below configured angle limit must remain active");
-
-  vehicle.steering_angle_deg = 80.0f;
-  const auto at_limit =
-      controller.update(replay_path(), replay_target(), vehicle, 1.01, 1);
-  require(!at_limit.active && at_limit.active_block == BlockReason::SteeringAngleLimit,
-          "configured steering angle limit must apply below 90 degrees");
-}
-
 // 정지 부근 path 깜빡임: active 재진입은 0.5s 연속 유효 후에만.
 void verify_path_flicker_debounce() {
   LateralControllerConfig config;
@@ -1054,7 +1032,6 @@ int main(int argc, char **argv) {
     verify_mdps_fault_filter();
     verify_braking_does_not_disengage();
     verify_large_angle_fault_avoidance();
-    verify_configured_steering_angle_limit();
     verify_fixed_max_curvature();
     verify_delay_compensated_error();
     verify_reengage_has_no_stale_buffer_spike();

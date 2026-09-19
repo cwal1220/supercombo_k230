@@ -37,12 +37,6 @@ constexpr JsonBoolField<SteeringParams> kSteeringBools[] = {
     {"live_bank_compensation", &SteeringParams::live_bank_compensation},
 };
 constexpr JsonIntField<SteeringParams> kSteeringInts[] = {
-    {"steer_max", 0, 384, &SteeringParams::steer_max},
-    {"steer_delta_up", 0, 20, &SteeringParams::steer_delta_up},
-    {"steer_delta_down", 0, 30, &SteeringParams::steer_delta_down},
-    {"steer_driver_allowance", 0, 300, &SteeringParams::steer_driver_allowance},
-    {"steer_driver_multiplier", 0, 10, &SteeringParams::steer_driver_multiplier},
-    {"steer_driver_factor", 0, 5, &SteeringParams::steer_driver_factor},
     {"steering_pressed_threshold", 0, 500, &SteeringParams::steering_pressed_threshold},
     {"torque_max_lat_accel_raw", 1, 80, &SteeringParams::torque_max_lat_accel_raw},
     {"torque_kp_raw", 0, 100, &SteeringParams::torque_kp_raw},
@@ -56,7 +50,6 @@ constexpr JsonFloatField<SteeringParams> kSteeringFloats[] = {
     {"steer_ratio", 8.0f, 25.0f, &SteeringParams::steer_ratio},
     {"tire_stiffness_factor", 0.2f, 2.0f, &SteeringParams::tire_stiffness_factor},
     {"steer_actuator_delay", 0.01f, 1.0f, &SteeringParams::steer_actuator_delay},
-    {"max_steering_angle_deg", 0.0f, 360.0f, &SteeringParams::max_steering_angle_deg},
     {"avoid_lkas_fault_max_angle_deg", 1.0f, 180.0f, &SteeringParams::avoid_lkas_fault_max_angle_deg},
     {"angle_offset_deg", -10.0f, 10.0f, &SteeringParams::angle_offset_deg},
     {"torque_lat_accel_offset", -1.0f, 1.0f, &SteeringParams::torque_lat_accel_offset},

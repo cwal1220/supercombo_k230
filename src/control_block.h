@@ -44,7 +44,6 @@ enum class BlockKind : uint8_t {
   X(PathInvalid,        "path_invalid",         "PATH INVALID",    BlockKind::Availability) \
   X(LateralPlanInvalid, "lateral_plan_invalid", "PLAN INVALID",    BlockKind::Reject)       \
   X(LateralPlanStale,   "lateral_plan_stale",   "PLAN STALE",      BlockKind::Reject)       \
-  X(SteeringAngleLimit, "steering_angle_limit", "ANGLE LIMIT",     BlockKind::Reject)       \
   X(ControlStale,       "control_stale",        "CONTROL STALE",   BlockKind::Reject)
 
 enum class BlockReason : uint8_t {

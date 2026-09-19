@@ -102,15 +102,16 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 
 ### 기본 토크 제한
 
+`steer_max`(384), `steer_delta_up`(3), `steer_delta_down`(7), `steer_driver_allowance`(50),
+`steer_driver_multiplier`(2), `steer_driver_factor`(1)은 panda의 hyundai safety가 같은 숫자를
+강제하므로(`safety_hyundai.h`) 런타임 항목에서 뺐다. 올리면 panda가 프레임을 거부하고 내리면
+순정보다 약해지기만 한다. 바꾸려면 panda 펌웨어와 함께 바꾸고 `src/control_params.h`를 고친다.
+조향각 게이트(`max_steering_angle_deg`)는 fault 회피가 켜져 있으면 실행되지 않는 죽은 경로라
+파라미터와 코드를 함께 제거했다. 2026-09-18 실측에서 fault 회피는 끌 수 없는 것으로 확인됐다.
+
 | 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
 |---|---:|---|---|
 | `enabled` | true | bool | `false`면 조향 컨트롤러를 비활성화한다. |
-| `steer_max` | 384 | CAN torque / 0~384 | 가변 제한 또는 fault 회피 모드에서 사용할 최대 요청 토크이자 전체 상한이다. |
-| `steer_delta_up` | 3 | CAN torque/frame / 0~20 | 가변 제한 또는 fault 회피 모드의 프레임당 토크 증가 한도다. |
-| `steer_delta_down` | 7 | CAN torque/frame / 0~30 | 가변 제한 또는 fault 회피 모드의 프레임당 토크 감소 한도다. |
-| `steer_driver_allowance` | 50 | MDPS raw torque / 0~300 | 운전자 토크 제한 계산에서 허용하는 기본 여유값이다. |
-| `steer_driver_multiplier` | 2 | 배수 / 0~10 | 운전자 토크가 최종 허용 토크에 미치는 배율이다. |
-| `steer_driver_factor` | 1 | 배수 / 0~5 | MDPS 운전자 토크 입력에 적용하는 계수다. |
 | `steering_pressed_threshold` | 150 | MDPS raw torque / 0~500 | 토크 PID의 적분을 멈추는 운전자 조향 감지 기준이다. RK openpilot과 같이 5프레임 필터를 거치며, CAN 안전 제한용 `steer_driver_allowance`와는 별개다. |
 
 ### OpenPilot 토크 컨트롤러
@@ -152,7 +153,6 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 
 | 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
 |---|---:|---|---|
-| `max_steering_angle_deg` | 90.0 | degree / 0~360 | fault 회피 모드가 꺼졌을 때 자동 조향을 허용할 절대 조향각 한도다. 0이면 gate를 사용하지 않고, 0보다 크고 90 이하이면 설정값을 그대로 적용한다. 90보다 크면 정지 시 설정값+60도에서 20 km/h의 설정값까지 선형으로 줄어든다. |
 | `avoid_lkas_fault_enabled` | true | bool | 큰 조향각이 지속될 때 steer request를 잠시 끊는 RK openpilot 방식의 fault 회피 로직을 사용한다. K7 YG HEV 실측(2026-09-18): steer 요청이 켜진 채 85도 위에 약 1.0초 머물면 MDPS가 ToiFlt/FailState를 세우고 각도가 85도 아래로 돌아올 때까지 어시스트를 끊는다. 끄면 안 된다. |
 | `avoid_lkas_fault_max_angle_deg` | 85.0 | degree / 1~180 | fault 회피 카운터를 증가시키는 절대 조향각 기준이다. 이 각도 이상에서는 토크 요청을 0으로 내리고 steer request만 유지한다. 컷과 fault 회복이 토크 0에서 일어나야 어시스트가 빠졌다 돌아오는 충격이 없다. |
 | `avoid_lkas_fault_max_frames` | 89 | frame / 0~300 | 85도 이상 조향각이 지속될 때 허용하는 프레임 수다. 이후 2프레임 동안 request를 끊고 다시 허용한다. |

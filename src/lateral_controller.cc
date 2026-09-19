@@ -272,23 +272,6 @@ void LateralController::update_button_state(int button, double now_s) {
   last_button_ = button;
 }
 
-// openpilot K7 조향각 제한값을 현재 속도에 맞게 계산한다.
-float LateralController::steering_angle_limit_deg(float speed_kph) const {
-  const float limit = config_.steering_params.max_steering_angle_deg;
-  if (limit <= 0.0f) return 0.0f;
-  if (limit <= 90.0f) return limit;
-  const float speed = clamp_float(speed_kph, 0.0f, 20.0f);
-  return (limit + 60.0f) + (speed / 20.0f) * (limit - (limit + 60.0f));
-}
-
-// 조향각 제한으로 LKAS active를 막아야 하는지 확인한다.
-bool LateralController::steering_angle_blocked(
-    const VehicleCanState &vehicle_state, float speed_kph) const {
-  if (config_.steering_params.avoid_lkas_fault_enabled) return false;
-  const float limit = steering_angle_limit_deg(speed_kph);
-  return limit > 0.0f && std::fabs(vehicle_state.steering_angle_deg) >= limit;
-}
-
 // LKAS fault 회피를 위한 임시 cut-steer 상태를 갱신한다.
 bool LateralController::update_cut_steer_state(
     bool active, const VehicleCanState &vehicle_state) {
@@ -424,7 +407,6 @@ BlockReason LateralController::active_block_reason(
                        1000.0f) {
     return BlockReason::LateralPlanStale;
   }
-  if (steering_angle_blocked(vehicle_state, speed_kph)) return BlockReason::SteeringAngleLimit;
   return BlockReason::None;
 }
 

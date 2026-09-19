@@ -12,6 +12,11 @@
 struct SteeringParams {
   bool enabled = true;
 
+  /* panda의 hyundai safety가 같은 숫자를 강제한다(safety_hyundai.h: MAX_STEER 384,
+   * MAX_RATE_UP 3, MAX_RATE_DOWN 7, DRIVER_TORQUE_ALLOWANCE 50, DRIVER_TORQUE_FACTOR 2).
+   * 올리면 panda가 프레임을 거부하고 내리면 순정보다 약해지기만 하므로 런타임에서
+   * 읽지 않는다. steer_driver_factor는 panda에 대응 항이 없어 1이 아니면 우리 계산만
+   * 어긋난다. 바꾸려면 panda 펌웨어와 함께 바꾸고 여기를 고친다. */
   int steer_max = 384;
   int steer_delta_up = 3;
   int steer_delta_down = 7;
@@ -31,7 +36,6 @@ struct SteeringParams {
   float steer_ratio = 16.8f;
   float tire_stiffness_factor = 1.0f;
   float steer_actuator_delay = 0.34f;
-  float max_steering_angle_deg = 90.0f;
   bool avoid_lkas_fault_enabled = true;
   float avoid_lkas_fault_max_angle_deg = 85.0f;
   int avoid_lkas_fault_max_frames = 89;

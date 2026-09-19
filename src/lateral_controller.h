@@ -98,13 +98,6 @@ private:
                                   float speed_kph,
                                   float plan_age_s) const;
 
-  // openpilot K7 조향각 제한값을 현재 속도에 맞게 계산한다.
-  float steering_angle_limit_deg(float speed_kph) const;
-
-  // 조향각 제한으로 LKAS active를 막아야 하는지 확인한다.
-  bool steering_angle_blocked(const VehicleCanState &vehicle_state,
-                              float speed_kph) const;
-
   // LKAS fault 회피를 위한 임시 cut-steer 상태를 갱신한다.
   bool update_cut_steer_state(bool active, const VehicleCanState &vehicle_state);
 
