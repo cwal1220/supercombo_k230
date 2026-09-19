@@ -66,6 +66,7 @@ constexpr JsonFloatField<SteeringParams> kSteeringFloats[] = {
     {"steer_ratio_rear", -0.5f, 0.5f, &SteeringParams::steer_ratio_rear},
     {"path_offset_m", -1.0f, 1.0f, &SteeringParams::path_offset_m},
     {"min_steer_speed_mps", 0.0f, 5.0f, &SteeringParams::min_steer_speed_mps},
+    {"torque_low_speed_gain", 0.1f, 1.0f, &SteeringParams::torque_low_speed_gain},
 };
 
 constexpr JsonBoolField<DrivingParams> kDrivingBools[] = {

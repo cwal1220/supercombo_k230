@@ -15,6 +15,10 @@ constexpr int kJerkLookaheadFrames = 19;
 constexpr float kJerkGain = 0.3f;
 constexpr float kJerkFilterAlpha =
     1.0f / (1.0f + 1.0f / (2.0f * 3.14159265f * 1.2f * 0.01f));
+/* 저속 배율을 적용하는 상한. 2026-09-18 실측에서 35 km/h 아래가 토크 포화 5~18%인
+ * 문제 대역이고 그 위는 0.1%라 원본 곡선을 그대로 둔다. 경계 통과는 분당 1회 남짓이고
+ * 그때 토크 단차는 중앙값 5카운트라 변화율 제한이 흡수한다(램프 불필요). */
+constexpr float kLowSpeedGainMaxMps = 35.0f / 3.6f;
 constexpr float kStdCargoKg = 136.0f;
 constexpr float kCivicMass = 1326.0f + kStdCargoKg;
 constexpr float kCivicWheelbase = 2.70f;
@@ -110,7 +114,10 @@ int TorqueController::update(bool active,
   // 줄여서 사행을 막는다. (구 포크의 500/500/200 평탄 곡선을 대체)
   const float low_speed_scale = interp(speed_mps, {0.0f, 10.0f, 20.0f, 30.0f},
                                        {15.0f, 13.0f, 10.0f, 5.0f});
-  const float low_speed_factor = low_speed_scale * low_speed_scale;
+  // 배율은 저속에서만 걸고 그 위는 원본 추종을 그대로 둔다.
+  const float low_speed_gain =
+      speed_mps < kLowSpeedGainMaxMps ? params.torque_low_speed_gain : 1.0f;
+  const float low_speed_factor = low_speed_scale * low_speed_scale * low_speed_gain;
   const float setpoint = expected_lat_accel + low_speed_factor * expected_curvature;
   const float measurement = actual_lat_accel + low_speed_factor * actual_curvature;
   const float error = setpoint - measurement;

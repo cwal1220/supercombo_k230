@@ -48,6 +48,11 @@ struct SteeringParams {
   float steer_ratio_rear = 0.0f;
   float path_offset_m = 0.0f;
   float min_steer_speed_mps = 1.0f;
+  /* openpilot LOW_SPEED_Y 곡선에 곱하는 배율. 저속에서는 곡률 오차가 약 200배로
+   * 증폭되어(2026-09-18 실측: 20 km/h 아래 오차의 95%가 이 항) 평범한 플랜·센서
+   * 노이즈가 포화 토크가 된다. 1.0은 openpilot v0.9.x 원본. 0.6은 최신 upstream이
+   * 저속 계수를 속도별 kp로 바꾼 뒤의 저속 이득과 오차 3% 안에서 같다. */
+  float torque_low_speed_gain = 0.6f;
 
   float torque_max_lat_accel() const;
   float torque_kp() const;

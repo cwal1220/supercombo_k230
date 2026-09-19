@@ -597,6 +597,45 @@ void verify_reengage_has_no_stale_buffer_spike() {
           "re-engage must not compare against stale pre-disengage requests");
 }
 
+/* 저속 이득: openpilot LOW_SPEED_Y 곡선에 곱하는 배율이 곡률 오차 항만 줄인다.
+ * 실제 횡가속 항(곡률 x v^2)은 그대로라 배율 0.5가 출력 0.5배는 아니다. */
+void verify_low_speed_gain() {
+  SteeringParams base;
+  base.enabled = true;
+  base.torque_use_angle = true;
+  base.angle_offset_deg = 0.0f;
+  base.torque_friction_raw = 0;   // P항만 남겨 배율 효과를 본다
+  base.torque_ki_raw = 0;
+  const auto run = [&](float gain, float v) {
+    SteeringParams p = base;
+    p.torque_low_speed_gain = gain;
+    TorqueController torque;
+    for (int i = 0; i < 120; ++i)
+      torque.update(true, v, 0.0f, 3.0f, false, false, p);
+    return torque.normalized_output();
+  };
+  // 14 km/h: 배율이 온전히 걸린다. 적분기는 5 m/s 아래에서 자동으로 언다.
+  const float full = run(1.0f, 4.0f);
+  const float half = run(0.5f, 4.0f);
+  require(std::fabs(full) > 0.05f && std::fabs(full) < 0.95f,
+          "the low-speed gain reference case must be unsaturated");
+  const float ratio = std::fabs(half / full);
+  require(ratio > 0.45f && ratio < 0.65f,
+          "halving the low-speed gain must roughly halve the curvature-error torque");
+  require(std::fabs(run(1.0f, 4.0f) - full) < 1e-6f, "gain 1.0 must be the openpilot curve");
+  /* 35 km/h 위에서는 배율이 걸리지 않아야 한다. 고속 추종을 건드리지 않는 것이
+   * 속도 상한을 둔 이유다. */
+  const float fast_full = run(1.0f, 18.0f);
+  require(std::fabs(fast_full) > 1e-3f, "the high-speed reference case must produce torque");
+  require(std::fabs(run(0.3f, 18.0f) - fast_full) < 1e-6f,
+          "the low-speed gain must not touch torque above its speed limit");
+  // 경계 양쪽: 33.8 km/h는 걸리고 36 km/h는 걸리지 않는다.
+  require(std::fabs(run(0.3f, 9.5f)) < std::fabs(run(1.0f, 9.5f)),
+          "the gain still applies just below the speed limit");
+  require(std::fabs(run(0.3f, 10.0f) - run(1.0f, 10.0f)) < 1e-6f,
+          "the gain is off just above the speed limit");
+}
+
 // 라이브 뱅크: 편경사에 해당하는 만큼 FF가 이동해야 한다.
 void verify_live_bank_compensation() {
   TorqueController with_bank, without_bank;
@@ -1020,6 +1059,7 @@ int main(int argc, char **argv) {
     verify_delay_compensated_error();
     verify_reengage_has_no_stale_buffer_spike();
     verify_lat_accel_offset_shifts_feedforward();
+    verify_low_speed_gain();
     verify_live_bank_compensation();
     verify_engage_allowed_with_unavailable_path();
     verify_path_flicker_debounce();
