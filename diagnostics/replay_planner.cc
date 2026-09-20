@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
   std::fprintf(out, "t,v_kph,measured,des_rec,des_replay,target_curv,target_y,"
                     "lane_l,lane_r,prob_l,prob_r,d_prob,laneless,lane_w,mpc_valid,heading0,heading_target\n");
 
-  float v_kph = 0.0f, measured = 0.0f, des_rec = 0.0f;
+  float v_kph = 0.0f, measured = 0.0f, des_rec = 0.0f, prev_des = 0.0f;
   bool have_cs = false;
   for (int a = first_event; a < argc; ++a) {
     std::ifstream f(argv[a], std::ios::binary);
@@ -75,9 +75,15 @@ int main(int argc, char **argv) {
                     src + pose_off + plan_extra + lead_extra, sizeof(ms) - pose_off);
         const float v = v_kph / 3.6f;
         LateralTarget t = planner.update(ms, vehicle, v, measured, true, 0.0f);
-        // 컨트롤러와 같은 구현. plan 나이는 20 Hz 한 주기로 둔다.
-        const float des = lag_adjusted_desired_curvature(t, v, 0.05f,
-                                                         steering.steer_actuator_delay);
+        /* 곡률 보정은 컨트롤러와 같은 100 Hz 틱으로 돌린다. 틱당 변화율 제한이
+         * 있어 모델 주기로 한 번만 부르면 5배 과하게 걸린다. plan 나이는 틱마다
+         * 늘어난다. */
+        float des = prev_des;
+        for (int tick = 0; tick < 5; ++tick) {
+          des = lag_adjusted_desired_curvature(t, v, 0.01f * tick,
+                                               steering.steer_actuator_delay, prev_des);
+          if (t.valid) prev_des = des;
+        }
         std::fprintf(out, "%.3f,%.1f,%.6f,%.6f,%.6f,%.6f,%.3f,"
                           "%.3f,%.3f,%.2f,%.2f,%.2f,%d,%.2f,%d,%.4f,%.4f\n",
                      rh.timestamp_ns * 1e-9, v_kph, measured, des_rec, des,

@@ -44,7 +44,7 @@ LateralTarget replay_target() {
  * 가져온다 — 숫자를 복제하면 구현이 바뀔 때 이 검증이 조용히 썩는다.
  * 픽스처 target은 capture_timestamp_ns=0이라 plan 나이 보정은 0이다. */
 float reference_lag_adjusted_curvature(const LateralTarget &target, float speed_mps,
-                                       float actuator_delay) {
+                                       float actuator_delay, float prev_curvature) {
   const float delay = std::max(0.01f, actuator_delay);
   float psi = target.psis[kLateralControlN - 1];
   if (delay <= 0.0f) {
@@ -64,8 +64,8 @@ float reference_lag_adjusted_curvature(const LateralTarget &target, float speed_
   float desired = current + 2.0f * (psi / (speed * delay) - current);
   const float rate_limit = kMaxLateralJerk / (speed * speed);
   desired = std::clamp(desired,
-                       current - rate_limit * kCurvatureDeviationWindowS,
-                       current + rate_limit * kCurvatureDeviationWindowS);
+                       prev_curvature - rate_limit * kCurvatureRateWindowS,
+                       prev_curvature + rate_limit * kCurvatureRateWindowS);
   const float accel_speed = std::max(speed, 1.0f);
   desired = std::clamp(desired,
                        -kMaxLateralAccel / (accel_speed * accel_speed),
@@ -516,9 +516,17 @@ void verify_fixed_max_curvature() {
     target.curvatures[i] = 0.5f;
     target.psis[i] = 0.23f;
   }
-  const auto result = controller.update(replay_path(), target, vehicle, 1.0, 0);
-  require(result.active && std::fabs(result.desired_curvature - 0.3f) < 1e-6f,
-          "K7 maximum curvature must remain fixed at 0.3 1/m");
+  /* 틱당 변화율 제한이 걸리므로 한 번에 상한까지 뛰지 않는다. 1 m/s에서
+   * 창은 5/(1*1)*0.01 = 0.05 1/m 다. */
+  const auto first = controller.update(replay_path(), target, vehicle, 1.0, 0);
+  require(first.active && std::fabs(first.desired_curvature - 0.05f) < 1e-6f,
+          "the first tick must move by one lateral-jerk step, not jump to the limit");
+  LateralControlResult result = first;
+  for (int tick = 1; tick < 40; ++tick)
+    result = controller.update(replay_path(), target, vehicle,
+                               1.0 + 0.01 * tick, tick);
+  require(std::fabs(result.desired_curvature - 0.2f) < 1e-6f,
+          "maximum curvature must remain fixed at the openpilot 0.2 1/m");
 }
 
 /* v0.11식 지연 보정: 요청 스텝 직후 delay 동안은 P가 과거 요청(0)과 현재
@@ -575,43 +583,52 @@ void verify_reengage_has_no_stale_buffer_spike() {
           "re-engage must not compare against stale pre-disengage requests");
 }
 
-/* 저속 이득: openpilot LOW_SPEED_Y 곡선에 곱하는 배율이 곡률 오차 항만 줄인다.
- * 실제 횡가속 항(곡률 x v^2)은 그대로라 배율 0.5가 출력 0.5배는 아니다. */
-void verify_low_speed_gain() {
+/* 속도별 비례 이득(openpilot KP_INTERP). 오차는 횡가속도만으로 내고 저속 보강은
+ * 이 곡선이 맡는다. 곡률 오차 항(LOW_SPEED_Y)은 더 이상 없다. */
+void verify_kp_speed_schedule() {
   SteeringParams base;
   base.enabled = true;
   base.torque_use_angle = true;
   base.angle_offset_deg = 0.0f;
-  base.torque_friction_raw = 0;   // P항만 남겨 배율 효과를 본다
+  base.torque_friction_raw = 0;   // P항만 남긴다
   base.torque_ki_raw = 0;
-  const auto run = [&](float gain, float v) {
+  /* 조향각 3도를 실제 곡률로 두고 요청 곡률 0을 준다. 오차 = -actual_lat_accel이라
+   * 출력은 kp(v) x kf x v^2 x |actual_curvature|에 비례한다. */
+  const auto run = [&](float v, int kp_raw) {
     SteeringParams p = base;
-    p.torque_low_speed_gain = gain;
+    p.torque_kp_raw = kp_raw;
     TorqueController torque;
-    for (int i = 0; i < 120; ++i)
-      torque.update(true, v, 0.0f, 3.0f, false, false, p);
+    for (int i = 0; i < 120; ++i) torque.update(true, v, 0.0f, 3.0f, false, false, p);
     return torque.normalized_output();
   };
-  // 14 km/h: 배율이 온전히 걸린다. 적분기는 5 m/s 아래에서 자동으로 언다.
-  const float full = run(1.0f, 4.0f);
-  const float half = run(0.5f, 4.0f);
-  require(std::fabs(full) > 0.05f && std::fabs(full) < 0.95f,
-          "the low-speed gain reference case must be unsaturated");
-  const float ratio = std::fabs(half / full);
-  require(ratio > 0.45f && ratio < 0.65f,
-          "halving the low-speed gain must roughly halve the curvature-error torque");
-  require(std::fabs(run(1.0f, 4.0f) - full) < 1e-6f, "gain 1.0 must be the openpilot curve");
-  /* 35 km/h 위에서는 배율이 걸리지 않아야 한다. 고속 추종을 건드리지 않는 것이
-   * 속도 상한을 둔 이유다. */
-  const float fast_full = run(1.0f, 18.0f);
-  require(std::fabs(fast_full) > 1e-3f, "the high-speed reference case must produce torque");
-  require(std::fabs(run(0.3f, 18.0f) - fast_full) < 1e-6f,
-          "the low-speed gain must not touch torque above its speed limit");
-  // 경계 양쪽: 33.8 km/h는 걸리고 36 km/h는 걸리지 않는다.
-  require(std::fabs(run(0.3f, 9.5f)) < std::fabs(run(1.0f, 9.5f)),
-          "the gain still applies just below the speed limit");
-  require(std::fabs(run(0.3f, 10.0f) - run(1.0f, 10.0f)) < 1e-6f,
-          "the gain is off just above the speed limit");
+  // 이득 곡선의 노드에서 출력비가 KP_INTERP 비율 x v^2 비율과 맞아야 한다.
+  const auto gain_at = [&](float v) {
+    const float out = run(v, 8);
+    TorqueController probe;
+    SteeringParams p = base;
+    for (int i = 0; i < 120; ++i) probe.update(true, v, 0.0f, 3.0f, false, false, p);
+    return std::fabs(out / (probe.error() == 0.0f ? 1.0f : probe.error()));
+  };
+  // 5 m/s 노드는 11.5, 10 m/s 노드는 3.5 -> 이득비 3.2857
+  const float g5 = gain_at(5.0f), g10 = gain_at(10.0f);
+  require(g5 > 0.0f && g10 > 0.0f, "the schedule must produce gain at both nodes");
+  const float ratio = g5 / g10;
+  require(ratio > 3.2f && ratio < 3.4f,
+          "the 5 m/s node must be 11.5/3.5 times the 10 m/s node");
+  // 30 m/s 위는 torque_kp_raw가 그대로 끝점이다.
+  const float top8 = std::fabs(run(35.0f, 8));
+  const float top16 = std::fabs(run(35.0f, 16));
+  require(top8 > 1e-4f && top8 < 0.95f, "the top-of-curve case must be unsaturated");
+  require(std::fabs(top16 / top8 - 2.0f) < 0.05f,
+          "above 30 m/s the gain must scale with torque_kp_raw");
+  /* LOW_SPEED_Y가 남아 있으면 곡률 항이 저속에서 오차를 수십 배로 키운다.
+   * 오차가 순수 횡가속도인지 확인한다. */
+  TorqueController t;
+  SteeringParams p = base;
+  for (int i = 0; i < 120; ++i) t.update(true, 4.0f, 0.002f, 3.0f, false, false, p);
+  const float curvature_error = 0.002f - t.actual_curvature();
+  require(std::fabs(t.error() - curvature_error * 16.0f) < 1e-4f,
+          "the error must be lateral acceleration only, with no low-speed curvature term");
 }
 
 // 라이브 뱅크: 편경사에 해당하는 만큼 FF가 이동해야 한다.
@@ -1036,7 +1053,7 @@ int main(int argc, char **argv) {
     verify_delay_compensated_error();
     verify_reengage_has_no_stale_buffer_spike();
     verify_lat_accel_offset_shifts_feedforward();
-    verify_low_speed_gain();
+    verify_kp_speed_schedule();
     verify_live_bank_compensation();
     verify_engage_allowed_with_unavailable_path();
     verify_path_flicker_debounce();
@@ -1081,6 +1098,7 @@ int main(int argc, char **argv) {
     size_t mdps2 = 0;
     int max_torque = 0;
     float max_curvature_error = 0.0f;
+    float ref_prev_curvature = 0.0f;
 
     const auto begin = std::chrono::steady_clock::now();
     const int ticks = static_cast<int>(std::ceil(replay.duration_s() * 100.0)) + 2;
@@ -1100,7 +1118,8 @@ int main(int argc, char **argv) {
       if (std::isfinite(result.control_speed_kph)) {
         const float expected_curvature = reference_lag_adjusted_curvature(
             target, std::max(0.0f, result.control_speed_kph / 3.6f),
-            config.steering_params.steer_actuator_delay);
+            config.steering_params.steer_actuator_delay, ref_prev_curvature);
+        if (target.valid) ref_prev_curvature = expected_curvature;
         max_curvature_error = std::max(
             max_curvature_error, std::fabs(result.desired_curvature - expected_curvature));
       }

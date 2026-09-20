@@ -15,10 +15,10 @@ constexpr int kJerkLookaheadFrames = 19;
 constexpr float kJerkGain = 0.3f;
 constexpr float kJerkFilterAlpha =
     1.0f / (1.0f + 1.0f / (2.0f * 3.14159265f * 1.2f * 0.01f));
-/* 저속 배율을 적용하는 상한. 2026-09-18 실측에서 35 km/h 아래가 토크 포화 5~18%인
- * 문제 대역이고 그 위는 0.1%라 원본 곡선을 그대로 둔다. 경계 통과는 분당 1회 남짓이고
- * 그때 토크 단차는 중앙값 5카운트라 변화율 제한이 흡수한다(램프 불필요). */
-constexpr float kLowSpeedGainMaxMps = 35.0f / 3.6f;
+/* openpilot INTERP_SPEEDS. 저속 이득은 이 곡선이 담당하고 LOW_SPEED_Y 곡률항은
+ * 쓰지 않는다(상류 PR #36364). 마지막 점만 파라미터(torque_kp)다. */
+constexpr float kKpSpeedsMps[] = {1.0f, 1.5f, 2.0f, 3.0f, 5.0f, 7.5f, 10.0f, 15.0f, 30.0f};
+constexpr float kKpValues[] = {250.0f, 120.0f, 65.0f, 30.0f, 11.5f, 5.5f, 3.5f, 2.0f};
 constexpr float kStdCargoKg = 136.0f;
 constexpr float kCivicMass = 1326.0f + kStdCargoKg;
 constexpr float kCivicWheelbase = 2.70f;
@@ -26,6 +26,22 @@ constexpr float kCivicCenterToFront = kCivicWheelbase * 0.4f;
 constexpr float kCivicCenterToRear = kCivicWheelbase - kCivicCenterToFront;
 constexpr float kCivicTireStiffnessFront = 192150.0f;
 constexpr float kCivicTireStiffnessRear = 202500.0f;
+
+// openpilot KP_INTERP. 마지막 점만 파라미터라 interp를 펼쳐 쓴다.
+float scheduled_kp(float speed_mps, float kp_top) {
+  constexpr int n = static_cast<int>(sizeof(kKpSpeedsMps) / sizeof(kKpSpeedsMps[0]));
+  if (speed_mps <= kKpSpeedsMps[0]) return kKpValues[0];
+  if (speed_mps >= kKpSpeedsMps[n - 1]) return kp_top;
+  for (int i = 1; i < n; ++i) {
+    if (speed_mps <= kKpSpeedsMps[i]) {
+      const float hi_y = i == n - 1 ? kp_top : kKpValues[i];
+      const float p = (speed_mps - kKpSpeedsMps[i - 1]) /
+                      (kKpSpeedsMps[i] - kKpSpeedsMps[i - 1]);
+      return kKpValues[i - 1] + p * (hi_y - kKpValues[i - 1]);
+    }
+  }
+  return kp_top;
+}
 
 float apply_deadzone(float error, float deadzone) {
   if (error > deadzone) return error - deadzone;
@@ -81,8 +97,6 @@ int TorqueController::update(bool active,
   request_head_ = (request_head_ + 1) % kRequestBufferLen;
   lat_accel_request_[request_head_] =
       std::isfinite(desired_lat_accel) ? desired_lat_accel : 0.0f;
-  curvature_request_[request_head_] =
-      std::isfinite(desired_curvature) ? desired_curvature : 0.0f;
   const int delay_frames = clamp_int(
       static_cast<int>(params.steer_actuator_delay / kDtCtrl) + 1,
       1, kRequestBufferLen);
@@ -90,7 +104,6 @@ int TorqueController::update(bool active,
     return (request_head_ - back + 2 * kRequestBufferLen) % kRequestBufferLen;
   };
   const float expected_lat_accel = lat_accel_request_[at(delay_frames - 1)];
-  const float expected_curvature = curvature_request_[at(delay_frames - 1)];
 
   const int lookahead_back = clamp_int(delay_frames - 1 - kJerkLookaheadFrames,
                                        1, kRequestBufferLen - 2);
@@ -110,16 +123,10 @@ int TorqueController::update(bool active,
 
   const float lat_accel_deadzone = curvature_deadzone * speed_sq;
 
-  // openpilot LOW_SPEED_X/Y: 저속에서는 곡률 오차를 세게 반영하고 고속에서는
-  // 줄여서 사행을 막는다. (구 포크의 500/500/200 평탄 곡선을 대체)
-  const float low_speed_scale = interp(speed_mps, {0.0f, 10.0f, 20.0f, 30.0f},
-                                       {15.0f, 13.0f, 10.0f, 5.0f});
-  // 배율은 저속에서만 걸고 그 위는 원본 추종을 그대로 둔다.
-  const float low_speed_gain =
-      speed_mps < kLowSpeedGainMaxMps ? params.torque_low_speed_gain : 1.0f;
-  const float low_speed_factor = low_speed_scale * low_speed_scale * low_speed_gain;
-  const float setpoint = expected_lat_accel + low_speed_factor * expected_curvature;
-  const float measurement = actual_lat_accel + low_speed_factor * actual_curvature;
+  /* 오차는 횡가속도만으로 낸다. 저속 보강은 LOW_SPEED_Y 곡률항이 아니라
+   * 속도별 비례 이득이 맡는다(openpilot PR #36364). */
+  const float setpoint = expected_lat_accel;
+  const float measurement = actual_lat_accel;
   const float error = setpoint - measurement;
 
   float feedforward = desired_lat_accel;
@@ -134,7 +141,8 @@ int TorqueController::update(bool active,
   feedforward += friction / params.torque_kf();
 
   const bool freeze_integrator = steering_rate_limited || steering_pressed || speed_mps < 5.0f;
-  const float pid_output = pid_update(error, feedforward, freeze_integrator, params);
+  const float pid_output =
+      pid_update(error, feedforward, freeze_integrator, params, speed_mps);
 
   const int sign = params.torque_output_sign >= 0 ? 1 : -1;
   normalized_output_ = clamp_float(static_cast<float>(sign) * pid_output, -1.0f, 1.0f);
@@ -215,8 +223,10 @@ float TorqueController::vehicle_model_curvature(float steering_angle_rad,
 float TorqueController::pid_update(float error,
                                             float feedforward,
                                             bool freeze_integrator,
-                                            const SteeringParams &params) {
-  p_ = error * params.torque_kp();
+                                            const SteeringParams &params,
+                                            float speed_mps) {
+  /* 이득 곡선은 횡가속도 공간이므로 kf를 곱해 토크 공간으로 옮긴다. */
+  p_ = error * scheduled_kp(speed_mps, params.torque_kp()) * params.torque_kf();
   f_ = feedforward * params.torque_kf();
   const float next_i = i_ + error * params.torque_ki() * kDtCtrl;
   const float control_with_i = p_ + next_i + f_;

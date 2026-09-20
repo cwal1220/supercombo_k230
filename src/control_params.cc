@@ -8,8 +8,9 @@ float SteeringParams::torque_max_lat_accel() const {
   return std::max(0.1f, static_cast<float>(torque_max_lat_accel_raw) * 0.1f);
 }
 
+// 횡가속도 공간의 비례 이득. 속도별 곡선의 고속 끝점이라 max_lat_accel로 나누지 않는다.
 float SteeringParams::torque_kp() const {
-  return static_cast<float>(torque_kp_raw) * 0.1f / torque_max_lat_accel();
+  return static_cast<float>(torque_kp_raw) * 0.1f;
 }
 
 float SteeringParams::torque_kf() const {
@@ -59,7 +60,6 @@ constexpr JsonFloatField<SteeringParams> kSteeringFloats[] = {
     {"steer_ratio_rear", -0.5f, 0.5f, &SteeringParams::steer_ratio_rear},
     {"path_offset_m", -1.0f, 1.0f, &SteeringParams::path_offset_m},
     {"min_steer_speed_mps", 0.0f, 5.0f, &SteeringParams::min_steer_speed_mps},
-    {"torque_low_speed_gain", 0.1f, 1.0f, &SteeringParams::torque_low_speed_gain},
 };
 
 constexpr JsonBoolField<DrivingParams> kDrivingBools[] = {

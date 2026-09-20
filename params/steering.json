@@ -2,7 +2,7 @@
   "enabled": true,
   "steering_pressed_threshold": 150,
   "torque_max_lat_accel_raw": 40,
-  "torque_kp_raw": 20,
+  "torque_kp_raw": 8,
   "torque_kf_raw": 9,
   "torque_ki_raw": 3,
   "torque_friction_raw": 100,
@@ -22,6 +22,5 @@
   "steer_ratio_rear": 0.0,
   "path_offset_m": 0.0,
   "min_steer_speed_mps": 1.0,
-  "torque_low_speed_gain": 0.6,
   "live_bank_compensation": true
 }

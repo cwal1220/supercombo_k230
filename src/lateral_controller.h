@@ -13,8 +13,12 @@
 
 /* lag 보상 곡률의 고정 한계. 런타임 튜닝 항목이 아니다. 진단용 참조 구현이
  * 같은 값을 쓰도록 헤더에 둔다(값이 갈리면 리플레이 검증이 조용히 썩는다). */
-constexpr float kCurvatureDeviationWindowS = 0.05f;
-constexpr float kMaxCurvature = 0.3f;
+/* 직전 출력 대비 틱당 변화율 창. openpilot clip_curvature는 DT_CTRL을 쓴다.
+ * v0.9.4는 플랜 노드 기준 DT_MDL(0.05) 편차 창이라 틱간 제한이 없었다. */
+constexpr float kCurvatureRateWindowS = 0.01f;
+// openpilot MAX_CURVATURE. 12 km/h 아래에서만 횡가속 한계보다 먼저 물고,
+// 실주행 1~12 km/h 곡률은 p99 0.017 / 최대 0.064라 닿지 않는다.
+constexpr float kMaxCurvature = 0.2f;
 // openpilot drive_helpers.MIN_SPEED
 constexpr float kMinCurvatureSpeedMps = 1.0f;
 // EU 안전 한계(openpilot MAX_LATERAL_JERK/ACCEL). accel 3.3은 K7 실측 기준.
@@ -27,7 +31,8 @@ constexpr float kMaxPlanAgeCompS = 0.25f;
 /* lateral MPC 출력을 actuator delay + plan 나이와 횡가속도 한계에 맞춰 보정한다.
  * 컨트롤러와 replay_planner가 같은 구현을 호출한다. */
 float lag_adjusted_desired_curvature(const LateralTarget &target, float speed_mps,
-                                     float plan_age_s, float steer_actuator_delay_s);
+                                     float plan_age_s, float steer_actuator_delay_s,
+                                     float prev_curvature);
 
 struct LateralControllerConfig {
   bool zero_release_when_inactive = true;
@@ -128,6 +133,9 @@ private:
   LateralControllerConfig config_{};
   TorqueController torque_controller_;
   bool engaged_ = false;
+  /* clip_curvature의 직전 출력. active와 무관하게 이어가야 재engage 때 0에서
+   * 램프업하지 않는다(openpilot controlsd도 매 틱 갱신한다). */
+  float prev_desired_curvature_ = 0.0f;
   /* path 유효성 디바운스: 차단은 즉시, 복귀는 연속 유효 0.5s 후.
    * 정지 부근에서 plan 도달거리가 경계를 넘나들며 active가 깜빡이고
    * 클러스터가 천이마다 부저를 울리는 것을 막는다. */

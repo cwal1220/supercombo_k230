@@ -47,11 +47,12 @@ private:
                                 float speed_mps,
                                 const SteeringParams &params);
 
-  // PID 한 스텝을 계산한다.
+  // PID 한 스텝을 계산한다. 비례 이득은 속도별 곡선을 따른다.
   float pid_update(float error,
                    float feedforward,
                    bool freeze_integrator,
-                   const SteeringParams &params);
+                   const SteeringParams &params,
+                   float speed_mps);
 
   float p_ = 0.0f;
   float i_ = 0.0f;
@@ -73,7 +74,6 @@ private:
   // 지연 보정 링버퍼(100Hz 1초): 오차 = delay 전 요청 - 지금 측정.
   static constexpr int kRequestBufferLen = 100;
   float lat_accel_request_[kRequestBufferLen] = {};
-  float curvature_request_[kRequestBufferLen] = {};
   int request_head_ = 0;
   // 저크 선행 마찰용 1.2Hz 저역통과 상태
   float jerk_filtered_ = 0.0f;

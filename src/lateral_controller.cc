@@ -110,7 +110,11 @@ LateralControlResult LateralController::update(const LateralPath &path,
     }
   }
   result.desired_curvature = lag_adjusted_desired_curvature(
-      target, speed_mps, plan_age_s, config_.steering_params.steer_actuator_delay);
+      target, speed_mps, plan_age_s, config_.steering_params.steer_actuator_delay,
+      prev_desired_curvature_);
+  /* plan이 무효인 프레임은 0을 돌려주므로 직전 값을 보존한다. 짧은 공백 뒤에
+   * 0에서 다시 램프업하면 복귀가 느려진다. */
+  if (target.valid) prev_desired_curvature_ = result.desired_curvature;
   result.active_block = active_block_reason(gated_path, target, vehicle_state, now_s,
                                             result.seeds_ready, result.vehicle_fresh,
                                             panda_ready, panda_controls_allowed,
@@ -411,7 +415,8 @@ BlockReason LateralController::active_block_reason(
 }
 
 float lag_adjusted_desired_curvature(const LateralTarget &target, float speed_mps,
-                                     float plan_age_s, float steer_actuator_delay_s) {
+                                     float plan_age_s, float steer_actuator_delay_s,
+                                     float prev_curvature) {
   if (!target.valid) return 0.0f;
   /* plan은 카메라 캡처 시점 기준이므로 소비 시점까지의 실측 나이를 actuator
    * delay에 더해 보간한다. 부수 효과로 desired curvature가 20Hz 계단 대신
@@ -427,12 +432,15 @@ float lag_adjusted_desired_curvature(const LateralTarget &target, float speed_mp
   float desired_curvature = current_curvature +
       2.0f * (curvature_from_psi - current_curvature);
 
+  /* ISO 횡저크 한계를 직전 출력 기준 틱당 변화율로 건다. 플랜 노드 기준 창이던
+   * v0.9.4와 달리 틱간 계단을 실제로 막아, 변화율 제한된 와이어가 예산을
+   * 노이즈에 쓰지 않는다. */
   const float max_curvature_rate = kMaxLateralJerk /
       (speed * speed);
   desired_curvature = clamp_float(
       desired_curvature,
-      current_curvature - max_curvature_rate * kCurvatureDeviationWindowS,
-      current_curvature + max_curvature_rate * kCurvatureDeviationWindowS);
+      prev_curvature - max_curvature_rate * kCurvatureRateWindowS,
+      prev_curvature + max_curvature_rate * kCurvatureRateWindowS);
 
   const float limit_speed = std::max(speed, 1.0f);
   desired_curvature = clamp_float(
