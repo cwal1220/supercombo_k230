@@ -377,8 +377,10 @@ void verify_braking_does_not_disengage() {
 }
 
 /* K7 MDPS는 steer 요청이 켜진 채 85도 위에 1초 머물면 fault를 낸다(2026-09-18 실측).
- * 85도 위: 토크는 0으로 내리고 steer 요청은 유지, 89프레임마다 2프레임 컷. 컷과 복귀가
- * 토크 0에서 일어나야 어시스트가 빠졌다 돌아오는 충격이 없다. */
+ * 85도 위: 토크를 램프로 0까지 내리고 steer 요청은 유지, 89프레임마다 2프레임 컷.
+ * 램프는 fault 실측 하한(98프레임)보다 먼저 끝나야 하고, 컷과 복귀가 토크 0에서
+ * 일어나야 어시스트가 빠졌다 돌아오는 충격이 없다. 즉시 0으로 떨어뜨리지 않는 것은
+ * 짧게 스치는 커브에서 어시스트를 유지하기 위해서다. */
 void verify_large_angle_fault_avoidance() {
   LateralControllerConfig config;
   config.force_engaged = true;
@@ -400,12 +402,19 @@ void verify_large_angle_fault_avoidance() {
 
   vehicle.steering_angle_deg = 100.0f;
   const int crossed = frame;
+  const int ramp = config.steering_params.avoid_lkas_fault_max_frames - 20;
   while (frame < crossed + 89) {
     result = step();
+    const int since = frame - crossed;
     require(result.active && !result.cut_steer_temp,
             "large-angle control must remain requested before RK fault limit");
-    require(result.desired_torque == 0, "no torque is requested above the fault angle");
-    if (frame > crossed + 60)
+    if (since == 1)
+      require(result.desired_torque != 0,
+              "the first frame above the fault angle keeps assist");
+    if (since >= ramp)
+      require(result.desired_torque == 0,
+              "the angle ramp reaches zero well before the measured fault time");
+    if (frame > crossed + 80)
       require(result.apply_torque == 0, "torque must have ramped to zero before the first cut");
   }
   for (int i = 0; i < 2; ++i) {

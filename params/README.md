@@ -62,8 +62,8 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 
 | 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
 |---|---:|---|---|
-| `lane_change_min_speed_kph` | 30.0 | km/h / 0~80 | 이 속도 미만에서 운전자 토크 보호를 강화하는 기준이다. |
-| `driver_torque_threshold` | 170 | MDPS raw torque / 0~500 | 이 값보다 큰 운전자 조향 토크가 저속에서 감지되면 요청 토크를 점진적으로 줄인다. Nm 단위가 아니다. |
+| `lane_change_min_speed_kph` | 30.0 | km/h / 0~80 | 이 속도 미만에서는 차선 변경 desire를 내지 않는다. |
+| `driver_torque_threshold` | 170 | MDPS raw torque / 0~500 | 이 값보다 큰 운전자 조향 토크가 감지되면 속도와 무관하게 요청 토크를 1초에 걸쳐 줄이고, 놓으면 0.2초에 되돌린다. 줄이지 않으면 panda 운전자 클램프가 같은 요청을 한 번에 자른다. Nm 단위가 아니다. |
 
 ### 경로 모드
 
@@ -153,8 +153,8 @@ CAN과 상태는 60초 청크 `events/NNN.bin`, 당시 파라미터는 `params/`
 | 파라미터 | 현재값 | 단위 / 허용 범위 | 설명 |
 |---|---:|---|---|
 | `avoid_lkas_fault_enabled` | true | bool | 큰 조향각이 지속될 때 steer request를 잠시 끊는 RK openpilot 방식의 fault 회피 로직을 사용한다. K7 YG HEV 실측(2026-09-18): steer 요청이 켜진 채 85도 위에 약 1.0초 머물면 MDPS가 ToiFlt/FailState를 세우고 각도가 85도 아래로 돌아올 때까지 어시스트를 끊는다. 끄면 안 된다. |
-| `avoid_lkas_fault_max_angle_deg` | 85.0 | degree / 1~180 | fault 회피 카운터를 증가시키는 절대 조향각 기준이다. 이 각도 이상에서는 토크 요청을 0으로 내리고 steer request만 유지한다. 컷과 fault 회복이 토크 0에서 일어나야 어시스트가 빠졌다 돌아오는 충격이 없다. |
-| `avoid_lkas_fault_max_frames` | 89 | frame / 0~300 | 85도 이상 조향각이 지속될 때 허용하는 프레임 수다. 이후 2프레임 동안 request를 끊고 다시 허용한다. |
+| `avoid_lkas_fault_max_angle_deg` | 85.0 | degree / 1~180 | fault 회피 카운터를 증가시키는 절대 조향각 기준이다. 이 각도 이상에서는 토크 요청을 램프로 0까지 내리고 steer request만 유지한다. 컷과 fault 회복이 토크 0에서 일어나야 어시스트가 빠졌다 돌아오는 충격이 없다. |
+| `avoid_lkas_fault_max_frames` | 89 | frame / 0~300 | 85도 이상 조향각이 지속될 때 허용하는 프레임 수다. 이후 2프레임 동안 request를 끊고 다시 허용한다. 토크 램프 길이도 여기서 20을 뺀 값(69프레임 = 0.69초)이라, fault가 실측(0.98~1.12초)보다 일찍 나는 상황이 발견되면 이 값을 낮춰 램프를 함께 당긴다. |
 
 ## calibration.json
 

@@ -110,8 +110,7 @@ private:
   bool update_steering_pressed(int driver_torque);
 
   // 운전자 조향 토크 감지 타이머를 openpilot K7 방식으로 갱신한다.
-  void update_driver_steering_guard(const VehicleCanState &vehicle_state,
-                                    float speed_mps);
+  void update_driver_steering_guard(const VehicleCanState &vehicle_state);
 
   // 운전자 조향 중 요청 토크 fade 비율을 반환한다.
   float driver_torque_scale() const;
@@ -149,6 +148,8 @@ private:
   bool steer_rate_limited_ = false;
   double last_disengage_s_ = -1000.0;
   int angle_limit_counter_ = 0;
+  // 85도 위 연속 체류 프레임. 토크 램프용이라 cut_steer 리셋과 분리한다.
+  int fault_angle_frames_ = 0;
   int cut_steer_frames_ = 0;
   bool cut_steer_ = false;
   int steering_pressed_counter_ = 0;

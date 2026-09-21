@@ -268,6 +268,9 @@ if(SUPERCOMBO_BUILD_DIAGNOSTICS)
   add_host_tool(replay_planner diagnostics/replay_planner.cc)
   target_link_libraries(replay_planner PRIVATE planning)
 
+  add_host_tool(replay_closed_loop diagnostics/replay_closed_loop.cc)
+  target_link_libraries(replay_closed_loop PRIVATE planning)
+
   add_host_tool(bench_input_warp_overhead diagnostics/bench_input_warp_overhead.cc)
   target_link_libraries(bench_input_warp_overhead PRIVATE perception)
 

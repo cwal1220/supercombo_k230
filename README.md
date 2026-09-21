@@ -87,6 +87,7 @@ cmake --install build-native --prefix /root/supercombo_k230
 - [Runtime options](docs/runtime-options.md) — environment variables, parameter editor, defaults
 - [Verification](docs/verification.md) — `scripts/run_host_checks.sh`, calibration equivalence
 - [Diagnostics](docs/diagnostics.md) — host self-checks, benchmarks, NV12 replay
+- [Closed-loop replay](docs/closed_loop_replay.md) — tuning against a recording without driving
 - [Recovery](docs/recovery.md) — board recovery procedures
 
 ### Design notes

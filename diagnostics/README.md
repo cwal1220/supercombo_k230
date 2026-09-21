@@ -34,6 +34,18 @@ Host tools (`build-host`, no board libraries):
 
 - `replay_planner`: re-runs `LateralPlanner` over recorded `ModelState` /
   `ControlState` records and writes what the planner asked for as CSV.
+- `replay_closed_loop`: re-runs the whole lateral loop over the same records with
+  the vehicle response simulated, so a control change moves the car instead of
+  being scored against a frozen recording. Lane geometry is rotated into the
+  simulated car's frame by the pose it has drifted (`dy`, `dpsi`), and ticks with
+  driver torque or no `active` resync to the recording, so each free-running
+  segment starts from the real pose. `SIM_*` environment variables set the plant
+  (`WN`, `ZETA`, `DELAY`, `GAIN`, `GAIN_PTS`) and the controller (`SAD`,
+  `KP_RAW`, `KI_RAW`, `KF_RAW`); `SIM_OPEN_LOOP=1` freezes the pose so the run
+  measures how well the plant reproduces the recorded drive. It prints that
+  reproduction score (overall and per speed band) on stdout; pass `-` as the
+  output path to skip the CSV. See
+  [docs/closed_loop_replay.md](../docs/closed_loop_replay.md).
 - `extract_lateral_dataset`: one CSV row per `ControlState` record with the CAN
   state decoded by the runtime's own `vehicle_can`.
 - `bench_nv12_to_yuv6`: CPU `NV12 512x256 -> YUV6 float` conversion timing.
