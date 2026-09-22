@@ -103,11 +103,16 @@ public:
 
     double left_prob = left_prob_;
     double right_prob = right_prob_;
+    /* 폭 밴드를 상류 [4, 5]에서 0.5 m 올렸다. 국내 분기구간은 유도선이 차로
+     * 한가운데를 지나 흰 차선 기준 폭이 4.2~5.0 m가 되는데, 상류 값에서는
+     * 확률 0.95가 0.3 밑으로 깎여 laneless로 빠진다(2026-09-22 잠실대교 진입:
+     * 전환 14.7회/분, 우측선 거리 요동 3.7배). 실주행 폭은 p99 4.69 m라
+     * 5.5 m 위는 여전히 막는다. */
     double width_mod = 1.0;
     for (double t : {0.0, 1.5, 3.0}) {
       const double lane_width = interp(t * (v_ego + 7.0), lane_x_.data(), width.data(), width.size());
-      const double candidate = lane_width <= 4.0 ? 1.0
-          : lane_width >= 5.0 ? 0.0 : 5.0 - lane_width;
+      const double candidate = lane_width <= 4.5 ? 1.0
+          : lane_width >= 5.5 ? 0.0 : 5.5 - lane_width;
       width_mod = std::min(width_mod, candidate);
     }
     left_prob *= width_mod;
