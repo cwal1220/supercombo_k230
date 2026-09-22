@@ -46,6 +46,7 @@ constexpr JsonIntField<SteeringParams> kSteeringInts[] = {
     {"torque_friction_raw", 0, 300, &SteeringParams::torque_friction_raw},
     {"torque_output_sign", -1, 1, &SteeringParams::torque_output_sign},
     {"avoid_lkas_fault_max_frames", 0, 300, &SteeringParams::avoid_lkas_fault_max_frames},
+    {"avoid_lkas_fault_cut_frames", 1, 100, &SteeringParams::avoid_lkas_fault_cut_frames},
 };
 constexpr JsonFloatField<SteeringParams> kSteeringFloats[] = {
     {"steer_ratio", 8.0f, 25.0f, &SteeringParams::steer_ratio},

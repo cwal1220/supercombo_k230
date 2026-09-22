@@ -171,6 +171,13 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "request를 더 오래 유지한 뒤 잠시 끊습니다.",
             "request를 더 일찍 끊어 fault를 회피합니다.",
         ),
+        "avoid_lkas_fault_cut_frames": param_meta(
+            "Fault 컷 길이", "LKAS fault 보호", "frame", 1, 1, 100,
+            "steer request를 끊어두는 100 Hz 프레임 수입니다. 2프레임은 이 차의 "
+            "MDPS fault 타이머를 되돌리지 못하는 것으로 측정되었습니다.",
+            "request를 더 오래 끊습니다.",
+            "request를 더 짧게 끊습니다.",
+        ),
         "live_bank_compensation": {
             "label": "실시간 편경사 보정",
             "section": "차량 중심 보정",

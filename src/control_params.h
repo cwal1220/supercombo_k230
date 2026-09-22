@@ -41,6 +41,10 @@ struct SteeringParams {
   bool avoid_lkas_fault_enabled = true;
   float avoid_lkas_fault_max_angle_deg = 85.0f;
   int avoid_lkas_fault_max_frames = 89;
+  /* steer request를 끊는 프레임 수. K7에서 2프레임 컷은 MDPS fault 타이머를
+   * 되돌리지 못한다(2026-09-21 실측: 폴트 중 2프레임 컷 34회 모두 1.5초 유지).
+   * 길이를 바꿔 되돌아가는 지점을 찾기 위한 실측 파라미터다. */
+  int avoid_lkas_fault_cut_frames = 2;
   float angle_offset_deg = -0.7f;
   /* openpilot latAccelOffset(m/s^2). 상수 횡가속 편향을 FF에서 뺀다.
    * +y=오른쪽 관례라 양수 = 우측 쏠림 보정. fit 도구 출력을 그대로 넣는다. */

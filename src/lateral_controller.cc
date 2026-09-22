@@ -302,7 +302,7 @@ bool LateralController::update_cut_steer_state(
 
     if (angle_limit_counter_ > params.avoid_lkas_fault_max_frames) {
       cut_steer_ = true;
-    } else if (cut_steer_frames_ > 1) {
+    } else if (cut_steer_frames_ >= std::max(1, params.avoid_lkas_fault_cut_frames)) {
       cut_steer_frames_ = 0;
       cut_steer_ = false;
     }
@@ -310,7 +310,7 @@ bool LateralController::update_cut_steer_state(
     angle_limit_counter_ = 0;
     if (vehicle_state.mdps_error_count > params.avoid_lkas_fault_max_frames) {
       cut_steer_ = true;
-    } else if (cut_steer_frames_ > 1) {
+    } else if (cut_steer_frames_ >= std::max(1, params.avoid_lkas_fault_cut_frames)) {
       cut_steer_frames_ = 0;
       cut_steer_ = false;
     }

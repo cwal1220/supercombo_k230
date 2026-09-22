@@ -417,7 +417,7 @@ void verify_large_angle_fault_avoidance() {
     if (frame > crossed + 80)
       require(result.apply_torque == 0, "torque must have ramped to zero before the first cut");
   }
-  for (int i = 0; i < 2; ++i) {
+  for (int i = 0; i < config.steering_params.avoid_lkas_fault_cut_frames; ++i) {
     result = step();
     require(result.active && result.cut_steer_temp && !result.frames.empty(),
             "large-angle fault avoidance must cut request without disengaging");
@@ -429,7 +429,7 @@ void verify_large_angle_fault_avoidance() {
   }
   result = step();
   require(result.active && !result.cut_steer_temp && !result.frames.empty(),
-          "large-angle steering request must resume after two frames");
+          "large-angle steering request must resume after the configured cut");
   const HyundaiLkas11Values lkas = decode_lkas11(result.frames.front().data);
   require(lkas.steer_req && !lkas.toi_fault && result.apply_torque == 0,
           "resumed LKAS11 request keeps zero torque above the fault angle");
