@@ -211,7 +211,7 @@ int main(int argc, char **argv) {
               "필터 배율 %.3f 절편 %+.3f 마찰 %.3f (사전 %.3f/%.3f) decay %.1f\n",
               q.total_bucket_points, q.cal_perc, q.valid, q.lat_accel_factor_raw,
               q.lat_accel_offset_raw, q.friction_raw, q.lat_accel_factor, q.lat_accel_offset,
-              q.friction, 1.0 / sp.torque_kf(), sp.torque_friction(), q.decay);
+              q.friction, sp.torque_lat_accel_factor, sp.torque_friction, q.decay);
   for (int b = 0; b < TorqueEstimator::kBuckets; ++b)
     std::printf("%s%d", b ? " " : "  버킷 ", learners.torque_estimator().bucket_size(b));
   std::printf("\n");

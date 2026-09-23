@@ -688,8 +688,8 @@ void verify_learners_glue() {
             "the first tick publishes and persists both (upstream frame 0)");
     const LiveLateralParams live = l.live();
     require(live.use_vehicle && live.steer_ratio == sp.steer_ratio && live.use_torque &&
-                live.lat_accel_factor == static_cast<float>(static_cast<float>(1.0 / sp.torque_kf())) &&
-                live.friction == sp.torque_friction() && live.lat_accel_offset == 0.0f,
+                live.lat_accel_factor == sp.torque_lat_accel_factor &&
+                live.friction == sp.torque_friction && live.lat_accel_offset == 0.0f,
             "first messages carry the priors");
     // 봉투가 무효인 torqued 메시지는 토크 값을 바꾸지 않는다
     VehicleCanState stale = vehicle;

@@ -761,8 +761,8 @@ VehicleParamsInit restore_or_prior(const std::string &json, const VehicleModelCo
 
 TorqueTuning torque_tuning(const SteeringParams &params) {
   TorqueTuning t;  // CP 값은 Float32
-  t.lat_accel_factor = static_cast<float>(1.0 / params.torque_kf());
-  t.friction = params.torque_friction();
+  t.lat_accel_factor = params.torque_lat_accel_factor;
+  t.friction = params.torque_friction;
   return t;
 }
 

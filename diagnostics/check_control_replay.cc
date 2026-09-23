@@ -601,20 +601,20 @@ void verify_kp_speed_schedule() {
   base.enabled = true;
   base.torque_use_angle = true;
   base.angle_offset_deg = 0.0f;
-  base.torque_friction_raw = 0;   // P항만 남긴다
-  base.torque_ki_raw = 0;
+  base.torque_friction = 0.0f;   // P항만 남긴다
+  base.torque_ki = 0.0f;
   /* 조향각 3도를 실제 곡률로 두고 요청 곡률 0을 준다. 오차 = -actual_lat_accel이라
    * 출력은 kp(v) x kf x v^2 x |actual_curvature|에 비례한다. */
-  const auto run = [&](float v, int kp_raw) {
+  const auto run = [&](float v, float kp) {
     SteeringParams p = base;
-    p.torque_kp_raw = kp_raw;
+    p.torque_kp = kp;
     TorqueController torque;
     for (int i = 0; i < 120; ++i) torque.update(true, v, 0.0f, 3.0f, false, false, p);
     return torque.normalized_output();
   };
   // 이득 곡선의 노드에서 출력비가 KP_INTERP 비율 x v^2 비율과 맞아야 한다.
   const auto gain_at = [&](float v) {
-    const float out = run(v, 8);
+    const float out = run(v, 0.8f);
     TorqueController probe;
     SteeringParams p = base;
     for (int i = 0; i < 120; ++i) probe.update(true, v, 0.0f, 3.0f, false, false, p);
@@ -626,12 +626,12 @@ void verify_kp_speed_schedule() {
   const float ratio = g5 / g10;
   require(ratio > 3.2f && ratio < 3.4f,
           "the 5 m/s node must be 11.5/3.5 times the 10 m/s node");
-  // 30 m/s 위는 torque_kp_raw가 그대로 끝점이다.
-  const float top8 = std::fabs(run(35.0f, 8));
-  const float top16 = std::fabs(run(35.0f, 16));
+  // 30 m/s 위는 torque_kp가 그대로 끝점이다.
+  const float top8 = std::fabs(run(35.0f, 0.8f));
+  const float top16 = std::fabs(run(35.0f, 1.6f));
   require(top8 > 1e-4f && top8 < 0.95f, "the top-of-curve case must be unsaturated");
   require(std::fabs(top16 / top8 - 2.0f) < 0.05f,
-          "above 30 m/s the gain must scale with torque_kp_raw");
+          "above 30 m/s the gain must scale with torque_kp");
   /* LOW_SPEED_Y가 남아 있으면 곡률 항이 저속에서 오차를 수십 배로 키운다.
    * 오차가 순수 횡가속도인지 확인한다. */
   TorqueController t;
@@ -1145,9 +1145,9 @@ void verify_live_torque_params_match_upstream_structure() {
   SteeringParams params;
   params.enabled = true;
   params.torque_use_angle = true;
-  params.torque_friction_raw = 0;
+  params.torque_friction = 0.0f;
   params.live_bank_compensation = false;
-  const float prior = 1.0f / params.torque_kf();
+  const float prior = params.torque_lat_accel_factor;
   auto run = [&](bool use, float factor, float offset, float friction, std::vector<float> *out) {
     TorqueController torque;
     LiveLateralParams live;
@@ -1249,6 +1249,27 @@ void verify_stale_speed_keeps_curvature() {
           "recovery resumes from the pre-stall curvature");
 }
 
+// 보드는 JSON을 읽고 재생·테스트는 기본값을 쓴다. 둘이 갈리면 재생 대조가 보드를 대변하지 못한다.
+void verify_steering_json_matches_defaults() {
+  SteeringParams json, defaults;
+  std::string error;
+  require(load_steering_params_json("params/steering.json", &json, &error), "load steering.json");
+  require(json.torque_lat_accel_factor == defaults.torque_lat_accel_factor &&
+              json.torque_kp == defaults.torque_kp && json.torque_ki == defaults.torque_ki &&
+              json.torque_friction == defaults.torque_friction,
+          "steering.json torque gains equal the compiled defaults");
+  const std::string path = "/tmp/check_control_replay_raw_keys.json";
+  std::FILE *f = std::fopen(path.c_str(), "w");
+  require(f != nullptr, "write raw-key fixture");
+  std::fputs("{\"torque_kf_raw\": 20}\n", f);
+  std::fclose(f);
+  SteeringParams rejected;
+  const bool loaded = load_steering_params_json(path, &rejected, &error);
+  std::remove(path.c_str());
+  require(!loaded && error.find("torque_kf_raw") != std::string::npos,
+          "pre-2026-09-24 raw gain keys are rejected, not silently defaulted");
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -1286,6 +1307,7 @@ int main(int argc, char **argv) {
     verify_paramsd_invalid_blocks_only_when_used();
     verify_curvature_limit_follows_roll();
     verify_stale_speed_keeps_curvature();
+    verify_steering_json_matches_defaults();
     if (argc == 1) return;
     /* 픽스처는 60초 연속 주행 구간이어야 한다(active > 5900틱, 토크 > 0). 정차
      * 구간은 이 전제에 걸려 실패한다. tools/control/export_can_fixture.py가 녹화

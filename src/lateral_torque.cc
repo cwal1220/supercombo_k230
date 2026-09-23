@@ -198,21 +198,16 @@ float TorqueController::estimate_actual_curvature(float speed_mps,
 
 TorqueController::Gains TorqueController::gains(const SteeringParams &params,
                                                 const LiveLateralParams &live) {
-  Gains g;
-  g.kf = params.torque_kf();
-  g.ki = params.torque_ki();
-  g.friction = params.torque_friction();
-  g.lat_accel_offset = params.torque_lat_accel_offset;
   /* 상류는 PID를 횡가속 공간에서 돌리고 끝에서 latAccelFactor로 나눈다. 여기 PID는
-   * 토크 공간이라 kp·kf를 1/latAccelFactor로 바꾸고 ki도 같은 비로 옮기면 같다.
-   * 마찰은 토크 공간 계수라 그대로(상류 friction × latAccelFactor ÷ latAccelFactor). */
-  if (live.use_torque && std::isfinite(live.lat_accel_factor) && live.lat_accel_factor > 0.0f) {
-    const float kf = 1.0f / live.lat_accel_factor;
-    g.ki = params.torque_ki() * (kf / g.kf);
-    g.kf = kf;
-    g.friction = live.friction;
-    g.lat_accel_offset = live.lat_accel_offset;
-  }
+   * 토크 공간이라 FF·P·I에 모두 1/latAccelFactor를 곱한다. 마찰은 상류도 토크 공간이다. */
+  const bool learned = live.use_torque && std::isfinite(live.lat_accel_factor) &&
+                       live.lat_accel_factor > 0.0f;
+  const float factor = learned ? live.lat_accel_factor : params.torque_lat_accel_factor;
+  Gains g;
+  g.kf = 1.0f / factor;
+  g.ki = params.torque_ki / factor;
+  g.friction = learned ? live.friction : params.torque_friction;
+  g.lat_accel_offset = learned ? live.lat_accel_offset : params.torque_lat_accel_offset;
   return g;
 }
 
@@ -269,7 +264,7 @@ float TorqueController::pid_update(float error,
                                             const Gains &gains,
                                             float speed_mps) {
   /* 이득 곡선은 횡가속도 공간이므로 kf를 곱해 토크 공간으로 옮긴다. */
-  p_ = error * scheduled_kp(speed_mps, params.torque_kp()) * gains.kf;
+  p_ = error * scheduled_kp(speed_mps, params.torque_kp) * gains.kf;
   f_ = feedforward * gains.kf;
   const float next_i = i_ + error * gains.ki * kDtCtrl;
   const float control_with_i = p_ + next_i + f_;

@@ -6,7 +6,7 @@ openpilot v0.11의 torqued(라이브 토크 회귀)와 lagd(라이브 지연 추
 대신 측정값을 얻는다.
 
   fit  controlsd 텍스트 로그(1 Hz hz= 라인)에서 토크-횡가속 관계를 회귀한다.
-       -> torque_max_lat_accel_raw, torque_friction_raw, torque_lat_accel_offset
+       -> torque_lat_accel_factor, torque_friction, torque_lat_accel_offset
 
   lag  v3 녹화의 ControlState 스트림에서 요청 곡률과 실측 곡률을
        상호상관해 steer_actuator_delay를 추정한다. 텍스트 로그는 1 Hz라
@@ -186,9 +186,9 @@ def cmd_fit(args):
     print(f"frictionCoefficient   {friction:.4f} m/s^2")
     print()
     print("파라미터 환산 (steering.json):")
-    print(f"  torque_max_lat_accel_raw   {slope * args.kf_raw:.0f}   (kf_raw {args.kf_raw})")
+    print(f"  torque_lat_accel_factor    {slope:.2f}")
     print(f"  torque_lat_accel_offset    {offset:+.3f}")
-    print(f"  torque_friction_raw        {friction * 1000:.0f}")
+    print(f"  torque_friction            {friction:.3f}")
     return 0
 
 
@@ -316,8 +316,6 @@ def main():
                    help="steering.json torque_output_sign")
     f.add_argument("--steer-max", type=float, default=STEER_MAX,
                    help="steering.json steer_max")
-    f.add_argument("--kf-raw", type=int, default=20,
-                   help="steering.json torque_kf_raw (배율 = max_lat_raw / kf_raw)")
     f.set_defaults(func=cmd_fit)
     l = sub.add_parser("lag", help="actuator delay 추정 (v3 녹화 events)")
     l.add_argument("events", nargs="+", help="events 디렉토리 또는 .bin 파일")

@@ -6,7 +6,7 @@
  * 운전자가 개입했거나 비활성인 틱은 실측 상태로 재동기화한다. 시뮬은 hands-off
  * 구간만 자유 주행하고 각 구간은 실제 자세에서 출발한다(seg 열이 구간 번호).
  * 환경변수: SIM_OPEN_LOOP=1(자세 보정 고정, 플랜트 검증), SIM_WN/ZETA/DELAY/GAIN,
- *           SIM_SAD, SIM_KP_RAW, SIM_KI_RAW, SIM_KF_RAW, SIM_DRIVER_QUIET */
+ *           SIM_SAD, SIM_KP, SIM_KI, SIM_LAF, SIM_DRIVER_QUIET */
 #include "control_params.h"
 #include "hyundai_can.h"
 #include "ipc_messages.h"
@@ -160,9 +160,9 @@ int main(int argc, char **argv) {
   SteeringParams steering;
   DrivingParams driving;
   steering.steer_actuator_delay = envf("SIM_SAD", steering.steer_actuator_delay);
-  steering.torque_kp_raw = envi("SIM_KP_RAW", steering.torque_kp_raw);
-  steering.torque_ki_raw = envi("SIM_KI_RAW", steering.torque_ki_raw);
-  steering.torque_kf_raw = envi("SIM_KF_RAW", steering.torque_kf_raw);
+  steering.torque_kp = envf("SIM_KP", steering.torque_kp);
+  steering.torque_ki = envf("SIM_KI", steering.torque_ki);
+  steering.torque_lat_accel_factor = envf("SIM_LAF", steering.torque_lat_accel_factor);
   /* 편경사 추정은 ESP12 실측이 필요한데 ControlState에 없다. 꺼서 0으로 고정하고
    * 그만큼을 플랜트 이득이 아니라 미모델 외란으로 남긴다. */
   steering.live_bank_compensation = false;
@@ -277,7 +277,7 @@ int main(int argc, char **argv) {
 
     // 토크 -> 요청 횡가속도. 부호는 torque_output_sign(-1)의 역이다.
     const float a_cmd = -static_cast<float>(r.apply_torque) /
-        (steering.torque_kf() * static_cast<float>(steering.steer_max));
+        ((1.0f / steering.torque_lat_accel_factor) * static_cast<float>(steering.steer_max));
     const float a_act = plant.step(a_cmd, v_mps);
     k_sim = a_act / (v_clamped * v_clamped);
 

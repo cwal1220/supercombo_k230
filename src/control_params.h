@@ -25,15 +25,13 @@ struct SteeringParams {
   int steer_driver_factor = 1;
   int steering_pressed_threshold = 150;
 
-  /* 배율(latAccelFactor) = max_lat_accel / (kf_raw·0.1). 56/20 → 2.8은 torqued 실측(2.65~2.95). */
-  int torque_max_lat_accel_raw = 56;
-  /* openpilot latcontrol_torque.KP x10(횡가속도 공간). 속도별 이득 곡선
-   * KP_INTERP의 30 m/s 끝점이고 나머지 점은 상류 고정값이다. */
-  int torque_kp_raw = 8;
-  int torque_kf_raw = 20;
-  // 횡가속도 공간 KI = ki_raw / kf_raw. 3/20 = 상류 KI 0.15.
-  int torque_ki_raw = 3;
-  int torque_friction_raw = 100;
+  /* openpilot 토크 튜닝 그대로(횡가속도 공간). 토크 = (FF + P + I) / 배율 + 마찰.
+   * 배율 2.8은 torqued 실측(2.65~2.95). */
+  float torque_lat_accel_factor = 2.8f;
+  // KP_INTERP의 30 m/s 끝점. 나머지 점은 상류 고정값이다.
+  float torque_kp = 0.8f;
+  float torque_ki = 0.15f;
+  float torque_friction = 0.1f;  // 토크 공간
   bool torque_use_angle = true;
   int torque_output_sign = -1;
 
@@ -65,11 +63,6 @@ struct SteeringParams {
   float path_offset_m = 0.0f;
   float min_steer_speed_mps = 1.0f;
 
-  float torque_max_lat_accel() const;
-  float torque_kp() const;
-  float torque_kf() const;
-  float torque_ki() const;
-  float torque_friction() const;
   float center_to_front_m() const;
 };
 

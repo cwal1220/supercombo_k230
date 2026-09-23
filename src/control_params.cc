@@ -2,29 +2,6 @@
 
 #include "utils_json.h"
 
-#include <algorithm>
-
-float SteeringParams::torque_max_lat_accel() const {
-  return std::max(0.1f, static_cast<float>(torque_max_lat_accel_raw) * 0.1f);
-}
-
-// 횡가속도 공간의 비례 이득. 속도별 곡선의 고속 끝점이라 max_lat_accel로 나누지 않는다.
-float SteeringParams::torque_kp() const {
-  return static_cast<float>(torque_kp_raw) * 0.1f;
-}
-
-float SteeringParams::torque_kf() const {
-  return std::max(1e-6f, static_cast<float>(torque_kf_raw) * 0.1f / torque_max_lat_accel());
-}
-
-float SteeringParams::torque_ki() const {
-  return static_cast<float>(torque_ki_raw) * 0.1f / torque_max_lat_accel();
-}
-
-float SteeringParams::torque_friction() const {
-  return static_cast<float>(torque_friction_raw) * 0.001f;
-}
-
 float SteeringParams::center_to_front_m() const {
   return wheelbase_m * center_to_front_ratio;
 }
@@ -41,16 +18,15 @@ constexpr JsonBoolField<SteeringParams> kSteeringBools[] = {
 };
 constexpr JsonIntField<SteeringParams> kSteeringInts[] = {
     {"steering_pressed_threshold", 0, 500, &SteeringParams::steering_pressed_threshold},
-    {"torque_max_lat_accel_raw", 1, 80, &SteeringParams::torque_max_lat_accel_raw},
-    {"torque_kp_raw", 0, 100, &SteeringParams::torque_kp_raw},
-    {"torque_kf_raw", 0, 100, &SteeringParams::torque_kf_raw},
-    {"torque_ki_raw", 0, 100, &SteeringParams::torque_ki_raw},
-    {"torque_friction_raw", 0, 300, &SteeringParams::torque_friction_raw},
     {"torque_output_sign", -1, 1, &SteeringParams::torque_output_sign},
     {"avoid_lkas_fault_max_frames", 0, 300, &SteeringParams::avoid_lkas_fault_max_frames},
     {"avoid_lkas_fault_cut_frames", 1, 100, &SteeringParams::avoid_lkas_fault_cut_frames},
 };
 constexpr JsonFloatField<SteeringParams> kSteeringFloats[] = {
+    {"torque_lat_accel_factor", 0.5f, 5.0f, &SteeringParams::torque_lat_accel_factor},
+    {"torque_kp", 0.0f, 10.0f, &SteeringParams::torque_kp},
+    {"torque_ki", 0.0f, 2.0f, &SteeringParams::torque_ki},
+    {"torque_friction", 0.0f, 0.3f, &SteeringParams::torque_friction},
     {"steer_ratio", 8.0f, 25.0f, &SteeringParams::steer_ratio},
     {"tire_stiffness_factor", 0.2f, 2.0f, &SteeringParams::tire_stiffness_factor},
     {"steer_actuator_delay", 0.01f, 1.0f, &SteeringParams::steer_actuator_delay},
@@ -86,6 +62,13 @@ bool load_steering_params_json(const std::string &path,
                                std::string *error) {
   if (!params) return false;
   return load_json_param_file(path, [params](const std::string &text) {
+    // 2026-09-24 이전 raw 표기. 조용히 기본값으로 떨어지지 않게 거부한다.
+    for (const char *key : {"torque_max_lat_accel_raw", "torque_kp_raw", "torque_kf_raw",
+                            "torque_ki_raw", "torque_friction_raw"}) {
+      if (text.find(std::string("\"") + key + "\"") != std::string::npos)
+        throw std::runtime_error(std::string(key) + " was replaced by torque_lat_accel_factor/"
+                                 "torque_kp/torque_ki/torque_friction");
+    }
     parse_json_fields(text, kSteeringBools, params);
     parse_json_fields(text, kSteeringInts, params);
     parse_json_fields(text, kSteeringFloats, params);

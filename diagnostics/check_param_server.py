@@ -252,12 +252,11 @@ class LearnerStateTest(unittest.TestCase):
         monitor.sample()
         self.assertEqual([row[0] for row in monitor.trend()], [0.5])
 
-    def test_fixed_values_follow_runtime_scaling(self):
-        fixed = fixed_lateral_values({"torque_max_lat_accel_raw": 40, "torque_kf_raw": 9,
-                                      "torque_friction_raw": 100, "steer_ratio": 14.9})
-        self.assertAlmostEqual(fixed["lat_accel_factor"], 4.0 / 0.9, places=6)
-        self.assertAlmostEqual(fixed["friction"], 0.1, places=9)
-        self.assertIsNone(fixed_lateral_values({"torque_kf_raw": 0})["lat_accel_factor"])
+    def test_fixed_values_are_the_manual_values(self):
+        fixed = fixed_lateral_values({"torque_lat_accel_factor": 2.8, "torque_friction": 0.1,
+                                      "steer_ratio": 14.9})
+        self.assertEqual((fixed["lat_accel_factor"], fixed["friction"], fixed["steer_ratio"]),
+                         (2.8, 0.1, 14.9))
 
     def test_page_has_learner_tab(self):
         self.assertIn('data-group="learners"', HTML)

@@ -93,36 +93,32 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "더 강하게 핸들을 잡아야 운전자 개입으로 판단합니다.",
             "작은 핸들 입력도 더 빨리 운전자 개입으로 판단합니다.",
         ),
-        "torque_max_lat_accel_raw": param_meta(
-            "토크 기준 횡가속도", "토크 컨트롤러", "0.1 m/s²", 1, 1, 80,
-            "kp/kf/ki가 전부 이 값에서 파생되는 횡방향 주 이득입니다. "
-            "fit_lateral_params.py fit으로 실측한 값을 넣습니다.",
-            "전체 이득이 약해져 추종이 느려지고 언더스티어가 늘어납니다.",
-            "전체 이득이 강해져 추종이 빨라지고 포화 여유가 줄어듭니다.",
+        "torque_lat_accel_factor": param_meta(
+            "배율 latAccelFactor", "토크 컨트롤러", "m/s²", 0.01, 0.5, 5.0,
+            "정규화 토크 1.0이 내는 횡가속도입니다(openpilot latAccelFactor). "
+            "선행·비례·적분 토크가 모두 이 값으로 나뉩니다. torqued 학습값이나 "
+            "fit_lateral_params.py fit 결과를 넣습니다.",
+            "같은 목표에 토크가 작아져 추종이 약해지고 언더스티어가 늘어납니다.",
+            "같은 목표에 토크가 커져 추종이 강해지고 포화 여유가 줄어듭니다.",
         ),
-        "torque_kp_raw": param_meta(
-            "비례 이득 Kp", "토크 컨트롤러", "raw", 1, 0, 100,
-            "횡가속도 오차에 반응하는 비례 이득입니다. 저속에서는 openpilot의 "
-            "속도별 곡선이 이 값을 대신하고, 30 m/s 위에서만 이 값이 그대로 "
-            "쓰입니다(8 = openpilot 기본 0.8).",
+        "torque_kp": param_meta(
+            "비례 이득 Kp", "토크 컨트롤러", "gain", 0.05, 0, 10,
+            "횡가속도 오차에 반응하는 비례 이득입니다(openpilot KP). 저속에서는 "
+            "openpilot의 속도별 곡선이 이 값을 대신하고, 30 m/s 위에서만 이 값이 "
+            "그대로 쓰입니다(상류 기본 0.8).",
             "경로 오차를 더 빠르고 강하게 보정하지만 흔들림이 늘 수 있습니다.",
             "반응이 부드러워지지만 경로 오차 회복이 느려질 수 있습니다.",
         ),
-        "torque_kf_raw": param_meta(
-            "선행 보상 Kf", "토크 컨트롤러", "raw", 1, 0, 100,
-            "목표 횡가속도에 미리 더하는 feed-forward 이득입니다.",
-            "커브에서 기본 조향 토크가 커집니다.",
-            "커브에서 선행 조향 토크가 작아집니다.",
-        ),
-        "torque_ki_raw": param_meta(
-            "적분 이득 Ki", "토크 컨트롤러", "raw", 1, 0, 100,
-            "지속되는 횡가속도 오차를 누적해 없애는 적분 이득입니다.",
+        "torque_ki": param_meta(
+            "적분 이득 Ki", "토크 컨트롤러", "gain", 0.01, 0, 2,
+            "지속되는 횡가속도 오차를 누적해 없애는 적분 이득입니다"
+            "(openpilot KI, 상류 기본 0.15).",
             "지속 오차를 빨리 없애지만 오버슈트가 늘 수 있습니다.",
             "누적 보정이 느려져 일정한 편향이 오래 남을 수 있습니다.",
         ),
-        "torque_friction_raw": param_meta(
-            "조향 마찰 보상", "토크 컨트롤러", "0.001 m/s²", 5, 0, 300,
-            "조향계 마찰을 넘기 위해 방향 전환 시 더하는 보상입니다.",
+        "torque_friction": param_meta(
+            "조향 마찰 보상", "토크 컨트롤러", "정규화 토크", 0.005, 0, 0.3,
+            "조향계 마찰을 넘기 위해 오차 방향으로 더하는 토크입니다(openpilot friction).",
             "작은 커브에도 핸들이 더 즉각 움직이지만 좌우 튐이 생길 수 있습니다.",
             "미세 조향이 부드러워지지만 dead zone이 커질 수 있습니다.",
         ),
@@ -707,17 +703,15 @@ def learner_trend_row(state: Dict[str, Any]) -> list[float]:
 
 
 def fixed_lateral_values(steering: Dict[str, Any]) -> Dict[str, Any]:
-    """학습값과 나란히 보여줄 수동값. control_params.cc의 환산을 따른다."""
-    max_lat_accel = max(0.1, float(steering.get("torque_max_lat_accel_raw", 0)) * 0.1)
-    kf = float(steering.get("torque_kf_raw", 0)) * 0.1
+    """학습값과 나란히 보여줄 수동값."""
     return {
         "steer_ratio": steering.get("steer_ratio"),
         "tire_stiffness_factor": steering.get("tire_stiffness_factor"),
         "angle_offset_deg": steering.get("angle_offset_deg"),
         "torque_lat_accel_offset": steering.get("torque_lat_accel_offset"),
         "live_bank_compensation": steering.get("live_bank_compensation"),
-        "lat_accel_factor": max_lat_accel / kf if kf > 0 else None,
-        "friction": float(steering.get("torque_friction_raw", 0)) * 0.001,
+        "lat_accel_factor": steering.get("torque_lat_accel_factor"),
+        "friction": steering.get("torque_friction"),
     }
 
 
@@ -1389,11 +1383,9 @@ HTML = """<!doctype html>
         notes.push(["paramsd 학습값 사용 중 · 학습 강성 배율이 이 값에 곱해집니다.", "prior"]);
       if (torqueOn && key === "torque_lat_accel_offset")
         notes.push(["torqued 학습값 사용 중 · 이 값은 무시되고 학습 절편을 씁니다. 실시간 학습 탭에서 끄면 다시 쓰입니다.", "ignored"]);
-      if (torqueOn && (key === "torque_max_lat_accel_raw" || key === "torque_friction_raw"))
+      if (torqueOn && (key === "torque_lat_accel_factor" || key === "torque_friction"))
         notes.push(["torqued 학습값 사용 중 · 사전값과 허용 폭(배율 ±30%, 마찰 ±50%)으로만 쓰입니다.", "prior"]);
-      if (torqueOn && key === "torque_kf_raw")
-        notes.push(["torqued 학습값 사용 중 · 배율 사전값 계산과 적분 이득 비율(Ki/Kf)에만 쓰입니다.", "prior"]);
-      if (key === "torque_max_lat_accel_raw" || key === "torque_kf_raw" || key === "torque_friction_raw")
+      if (key === "torque_lat_accel_factor" || key === "torque_friction")
         notes.push(["바꾸면 controlsd 다음 시작 때 torqued 학습이 처음부터 다시 시작됩니다.", "reset"]);
       return notes;
     }
@@ -1413,10 +1405,10 @@ HTML = """<!doctype html>
         switchKey: "use_live_torque_params",
         ready: s => s.flags.torque_valid,
         items: [
-          {key: "torque_max_lat_accel_raw", label: "배율", show: s => num(s.lat_accel_factor, 2),
-           target: (s, steering) => s.lat_accel_factor * steering.torque_kf_raw, resets: true},
-          {key: "torque_friction_raw", label: "마찰", show: s => num(s.friction, 3),
-           target: s => s.friction / 0.001, resets: true},
+          {key: "torque_lat_accel_factor", label: "배율", show: s => num(s.lat_accel_factor, 2),
+           target: s => s.lat_accel_factor, resets: true},
+          {key: "torque_friction", label: "마찰", show: s => num(s.friction, 3),
+           target: s => s.friction, resets: true},
           {key: "torque_lat_accel_offset", label: "절편", show: s => sgn(s.lat_accel_offset, 3),
            target: s => s.lat_accel_offset, ignoredWhenOn: true},
         ],

@@ -49,7 +49,7 @@ Host tools (`build-host`, no board libraries):
   driver torque or no `active` resync to the recording, so each free-running
   segment starts from the real pose. `SIM_*` environment variables set the plant
   (`WN`, `ZETA`, `DELAY`, `GAIN`, `GAIN_PTS`) and the controller (`SAD`,
-  `KP_RAW`, `KI_RAW`, `KF_RAW`); `SIM_OPEN_LOOP=1` freezes the pose so the run
+  `KP`, `KI`, `LAF`); `SIM_OPEN_LOOP=1` freezes the pose so the run
   measures how well the plant reproduces the recorded drive. It prints that
   reproduction score (overall and per speed band) on stdout; pass `-` as the
   output path to skip the CSV. See
