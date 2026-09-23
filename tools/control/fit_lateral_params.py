@@ -186,7 +186,7 @@ def cmd_fit(args):
     print(f"frictionCoefficient   {friction:.4f} m/s^2")
     print()
     print("파라미터 환산 (steering.json):")
-    print(f"  torque_max_lat_accel_raw   {slope * 10:.0f}")
+    print(f"  torque_max_lat_accel_raw   {slope * args.kf_raw:.0f}   (kf_raw {args.kf_raw})")
     print(f"  torque_lat_accel_offset    {offset:+.3f}")
     print(f"  torque_friction_raw        {friction * 1000:.0f}")
     return 0
@@ -316,6 +316,8 @@ def main():
                    help="steering.json torque_output_sign")
     f.add_argument("--steer-max", type=float, default=STEER_MAX,
                    help="steering.json steer_max")
+    f.add_argument("--kf-raw", type=int, default=20,
+                   help="steering.json torque_kf_raw (배율 = max_lat_raw / kf_raw)")
     f.set_defaults(func=cmd_fit)
     l = sub.add_parser("lag", help="actuator delay 추정 (v3 녹화 events)")
     l.add_argument("events", nargs="+", help="events 디렉토리 또는 .bin 파일")

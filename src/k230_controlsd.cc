@@ -3,6 +3,7 @@
 #include "adaptive_cruise.h"
 #include "control_holds.h"
 #include "lateral_controller.h"
+#include "lateral_learners.h"
 #include "lateral_path.h"
 #include "lateral_planner.h"
 #include "utils_process.h"
@@ -15,13 +16,18 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <iterator>
+#include <map>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <mutex>
 
@@ -369,6 +375,125 @@ AdaptiveCruiseInput make_adaptive_input(double now_s, bool enabled,
   return input;
 }
 
+std::string read_file(const std::string &path) {
+  std::ifstream file(path, std::ios::binary);
+  return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+}
+
+/* 학습 상태 파일 쓰기. 제어 루프는 내용만 넘기고, 이 스레드가 임시 파일에 쓴 뒤 rename한다.
+ * 같은 경로는 최신 내용만 남기고, 멈출 때 남은 쓰기를 마친다. */
+class LearnerStore {
+public:
+  LearnerStore() : thread_([this] { run(); }) {}
+  ~LearnerStore() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      stop_ = true;
+    }
+    condition_.notify_one();
+    thread_.join();
+  }
+  void write(const std::string &path, const std::string &content) { submit(path, true, content); }
+  void remove(const std::string &path) { submit(path, false, std::string()); }
+
+private:
+  struct Job {
+    bool write = false;
+    std::string content;
+  };
+  void submit(const std::string &path, bool write, const std::string &content) {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      pending_[path] = Job{write, content};
+    }
+    condition_.notify_one();
+  }
+  void run() {
+    while (true) {
+      std::map<std::string, Job> jobs;
+      bool stop = false;
+      {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait(lock, [this] { return stop_ || !pending_.empty(); });
+        jobs.swap(pending_);
+        stop = stop_;
+      }
+      for (const auto &[path, job] : jobs) {
+        if (!job.write) {
+          std::remove(path.c_str());
+          continue;
+        }
+        const std::string temp = path + ".tmp";
+        std::ofstream file(temp, std::ios::binary | std::ios::trunc);
+        file.write(job.content.data(), static_cast<std::streamsize>(job.content.size()));
+        file.close();
+        if (!file || std::rename(temp.c_str(), path.c_str()) != 0) {
+          std::fprintf(stderr, "k230_controlsd: learner write %s failed: %s\n", path.c_str(),
+                       std::strerror(errno));
+          std::remove(temp.c_str());
+        }
+      }
+      if (stop) return;
+    }
+  }
+
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  std::map<std::string, Job> pending_;
+  bool stop_ = false;
+  std::thread thread_;
+};
+
+K230LearnerState make_learner_state(const LateralLearners &learners,
+                                    const SteeringParams &params, float road_bank_lat_accel) {
+  const VehicleParams &v = learners.vehicle_params();
+  const TorqueParams &t = learners.torque_params();
+  const LiveLateralParams live = learners.live();
+  K230LearnerState state;
+  state.timestamp_ns = k230_now_ns();
+  state.flags = (v.inputs_ok ? kK230LearnerVehicleInputsOk : 0U) |
+                (v.valid ? kK230LearnerVehicleValid : 0U) |
+                (v.sensor_valid ? kK230LearnerSensorValid : 0U) |
+                (v.steer_ratio_valid ? kK230LearnerSteerRatioValid : 0U) |
+                (v.stiffness_factor_valid ? kK230LearnerStiffnessValid : 0U) |
+                (v.angle_offset_average_valid ? kK230LearnerOffsetAverageValid : 0U) |
+                (v.angle_offset_valid ? kK230LearnerOffsetValid : 0U) |
+                (t.inputs_ok ? kK230LearnerTorqueInputsOk : 0U) |
+                (t.valid ? kK230LearnerTorqueValid : 0U) |
+                (live.use_vehicle && params.use_live_vehicle_params ? kK230LearnerUseVehicle : 0U) |
+                (live.use_torque && params.use_live_torque_params ? kK230LearnerUseTorque : 0U) |
+                (learners.vehicle_restored() ? kK230LearnerVehicleRestored : 0U) |
+                (learners.torque_restore_status() == TorqueRestore::Restored
+                     ? kK230LearnerTorqueRestored : 0U);
+  state.steer_ratio = static_cast<float>(v.steer_ratio);
+  state.stiffness_factor = static_cast<float>(v.stiffness_factor);
+  state.roll_rad = static_cast<float>(v.roll_rad);
+  state.angle_offset_average_deg = static_cast<float>(v.angle_offset_average_deg);
+  state.angle_offset_deg = static_cast<float>(v.angle_offset_deg);
+  state.steer_ratio_std = static_cast<float>(v.steer_ratio_std);
+  state.stiffness_factor_std = static_cast<float>(v.stiffness_factor_std);
+  state.angle_offset_average_std = static_cast<float>(v.angle_offset_average_std);
+  state.angle_offset_fast_std = static_cast<float>(v.angle_offset_fast_std);
+  state.yaw_bias_rad_s = static_cast<float>(learners.yaw_bias_rad_s());
+  state.lat_accel_factor_raw = static_cast<float>(t.lat_accel_factor_raw);
+  state.lat_accel_offset_raw = static_cast<float>(t.lat_accel_offset_raw);
+  state.friction_raw = static_cast<float>(t.friction_raw);
+  state.lat_accel_factor = static_cast<float>(t.lat_accel_factor);
+  state.lat_accel_offset = static_cast<float>(t.lat_accel_offset);
+  state.friction = static_cast<float>(t.friction);
+  state.decay = static_cast<float>(t.decay);
+  state.max_resets = static_cast<float>(t.max_resets);
+  state.total_bucket_points = t.total_bucket_points;
+  state.cal_perc = t.cal_perc;
+  state.road_bank_lat_accel = road_bank_lat_accel;
+  state.prior_steer_ratio = static_cast<float>(learners.prior_steer_ratio());
+  state.prior_lat_accel_factor = static_cast<float>(learners.torque_estimator().tuning().lat_accel_factor);
+  state.prior_friction = static_cast<float>(learners.torque_estimator().tuning().friction);
+  for (int i = 0; i < TorqueEstimator::kBuckets; ++i)
+    state.bucket_points[i] = static_cast<int16_t>(learners.torque_estimator().bucket_size(i));
+  return state;
+}
+
 // overlayd/recordd가 읽는 100 Hz 스냅샷. 필드 순서는 ipc_messages.h가 고정한다.
 K230ControlState make_control_state(const LateralControllerConfig &config,
                                     const LateralControlResult &result,
@@ -622,13 +747,16 @@ int main() {
     K230LatestChannel panda_state_sub;
     K230CanQueue sendcan_pub;
     K230LatestChannel control_state_pub;
+    K230LatestChannel learner_state_pub;
     if (!open_when_ready(&can_sub, kK230CanTopic, true) ||
         !open_when_ready(&model_sub, kK230ModelStateTopic, sizeof(K230ModelState), false) ||
         !open_when_ready(&panda_state_sub, kK230PandaStateTopic,
                          sizeof(K230PandaState), true) ||
         !open_when_ready(&sendcan_pub, kK230SendCanTopic, true) ||
         !open_when_ready(&control_state_pub, kK230ControlStateTopic,
-                         sizeof(K230ControlState), true)) {
+                         sizeof(K230ControlState), true) ||
+        !open_when_ready(&learner_state_pub, kK230LearnerStateTopic,
+                         sizeof(K230LearnerState), true)) {
       return 0;
     }
     sendcan_pub.reset();
@@ -657,6 +785,28 @@ int main() {
                  adaptive_cruise_config.following_time_s,
                  adaptive_cruise_config.deceleration_rate_kph_per_s);
     LateralController controller(config);
+    /* paramsd·torqued. 사전값은 시작 때 파라미터로 고정한다. 복원이 거부된 저장은 상류처럼
+     * 지운다(torqued는 깨진 캐시만, 튜닝이 바뀐 캐시는 둔다). */
+    LearnerStore learner_store;
+    const std::string vehicle_learn_path = k230_param_path("live_parameters.json");
+    const std::string torque_learn_path = k230_param_path("live_torque_parameters.bin");
+    const std::string vehicle_learn_json = read_file(vehicle_learn_path);
+    const std::string torque_learn_cache = read_file(torque_learn_path);
+    LateralLearners learners(config.steering_params, vehicle_learn_json, torque_learn_cache,
+                             static_cast<uint64_t>(k230_now_ns()));
+    if (learners.vehicle_restore_rejected()) learner_store.remove(vehicle_learn_path);
+    if (learners.torque_restore_status() == TorqueRestore::Corrupt)
+      learner_store.remove(torque_learn_path);
+    std::fprintf(stderr,
+                 "k230_controlsd: learners paramsd=%s torqued=%s use_vehicle=%u use_torque=%u\n",
+                 learners.vehicle_restored() ? "restored"
+                 : vehicle_learn_json.empty() ? "fresh" : "rejected",
+                 learners.torque_restore_status() == TorqueRestore::Restored      ? "restored"
+                 : learners.torque_restore_status() == TorqueRestore::KeyMismatch ? "key_mismatch"
+                 : learners.torque_restore_status() == TorqueRestore::Corrupt     ? "corrupt"
+                                                                                  : "fresh",
+                 config.steering_params.use_live_vehicle_params ? 1U : 0U,
+                 config.steering_params.use_live_torque_params ? 1U : 0U);
     AdaptiveCruiseController adaptive_cruise_controller(
         adaptive_cruise_config);
     DepartureAlertDetector departure_alert_detector;
@@ -795,6 +945,36 @@ int main() {
         } else {
           stats.generated_frames += static_cast<unsigned>(last_result.frames.size());
         }
+      }
+
+      /* 학습기는 이번 틱에 실제로 보낸 토크로 갱신하고, 컨트롤러는 다음 틱에 쓴다.
+       * 송신 뒤에 둬서 적합·직렬화 틱이 CAN 송신을 늦추지 않게 한다. */
+      learners.update(vehicle, now_s,
+                      static_cast<double>(config.driving_params.vehicle_state_timeout_ms) / 1000.0,
+                      last_result.active, last_result.apply_torque, last_result.steering_pressed);
+      controller.set_live_params(learners.live(), learners.vehicle_valid(),
+                                 model.calibration.status == 1U);
+      if (learners.vehicle_persist_due()) {
+        learner_store.write(vehicle_learn_path, learners.vehicle_persist_json());
+        const VehicleParams &v = learners.vehicle_params();
+        const TorqueParams &t = learners.torque_params();
+        std::fprintf(stderr,
+                     "k230_controlsd: learners sr=%.2f stiffness=%.2f offset=%.2f/%.2f "
+                     "roll=%.2f valid=%d | torque points=%d cal=%d%% factor=%.2f/%.2f "
+                     "offset=%.3f friction=%.3f/%.3f valid=%d\n",
+                     v.steer_ratio, v.stiffness_factor, v.angle_offset_average_deg,
+                     v.angle_offset_deg, v.roll_rad * 57.29577951308232, v.valid ? 1 : 0,
+                     t.total_bucket_points, t.cal_perc, t.lat_accel_factor_raw,
+                     t.lat_accel_factor, t.lat_accel_offset, t.friction_raw, t.friction,
+                     t.valid ? 1 : 0);
+      }
+      if (learners.torque_persist_due())
+        learner_store.write(torque_learn_path, learners.torque_cache());
+      if (learners.vehicle_published()) {
+        const K230LearnerState learner_state =
+            make_learner_state(learners, config.steering_params, controller.road_bank_lat_accel());
+        if (!learner_state_pub.publish(&learner_state, sizeof(learner_state)))
+          ++stats.publish_errors;
       }
 
       const auto work_end = Clock::now();

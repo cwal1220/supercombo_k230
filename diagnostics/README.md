@@ -32,6 +32,14 @@ covers in [docs/verification.md](../docs/verification.md#host-self-tests);
 
 Host tools (`build-host`, no board libraries):
 
+- `replay_lateral_learners`: runs the controlsd paramsd/torqued learners
+  (`LateralLearners`) over a recording and prints the learned steer ratio,
+  stiffness, angle offset, roll and torque factor. `--inputs`/`--torque-inputs`
+  dump the per-tick inputs and `--outputs`/`--torque-outputs` the published
+  messages for comparison against a reference implementation; `--torque-cache`
+  chains drives the way the runtime cache does. `--steering route/params/steering.json`
+  uses the recording's own tuning (priors, delay) instead of the code defaults, and
+  `--upstream-schedule` observes steering at 20 Hz like upstream instead of every tick.
 - `replay_planner`: re-runs `LateralPlanner` over recorded `ModelState` /
   `ControlState` records and writes what the planner asked for as CSV.
 - `replay_closed_loop`: re-runs the whole lateral loop over the same records with

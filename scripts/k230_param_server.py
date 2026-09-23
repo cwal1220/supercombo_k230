@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import json
+import math
+import mmap
 import os
 import signal
 import stat
+import struct
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict
 
@@ -184,6 +189,22 @@ PARAM_METADATA: Dict[str, Dict[str, Dict[str, Any]]] = {
             "description": "ESP12 실측 횡가속으로 추정한 도로 편경사를 FF에서 보정합니다.",
             "increase": "켜면 커브별 편경사까지 실시간 보정합니다.",
             "decrease": "끄면 상수 offset만 사용합니다.",
+        },
+        "use_live_vehicle_params": {
+            "label": "paramsd 학습값 사용",
+            "section": "실시간 학습",
+            "description": "주행 중 학습한 조향비·타이어 강성·조향각 영점·도로 롤을 "
+            "차량 모델과 feed-forward에 씁니다(openpilot paramsd). 끄면 계산·기록만 합니다.",
+            "increase": "켜면 학습값을 쓰고 롤 보정이 실시간 편경사 보정을 대신합니다.",
+            "decrease": "끄면 조향 탭의 수동 차량 값을 씁니다.",
+        },
+        "use_live_torque_params": {
+            "label": "torqued 학습값 사용",
+            "section": "실시간 학습",
+            "description": "주행 중 학습한 토크→횡가속 배율·편향·마찰을 토크 컨트롤러에 "
+            "씁니다(openpilot torqued). 사전값 대비 배율 ±30%, 마찰 ±50% 안에서 움직입니다.",
+            "increase": "켜면 학습값을 씁니다.",
+            "decrease": "끄면 조향 탭의 수동 토크 값을 씁니다.",
         },
         "torque_lat_accel_offset": param_meta(
             "횡가속 편향 보정", "차량 중심 보정", "m/s²", 0.01, -1.0, 1.0,
@@ -585,6 +606,173 @@ class ParamStore:
                 temporary.unlink()
 
 
+# ---------------------------------------------------------------- 학습 상태(paramsd·torqued)
+
+LEARNER_STATE_PATH = os.environ.get("K230_LEARNER_STATE_PATH", "/dev/shm/k230_learner_state")
+IPC_MAGIC = 0x4B323349
+IPC_HEADER = struct.Struct("<IIIIQQII")  # K230IpcHeader; seq가 홀수면 쓰는 중
+# K230LearnerState(src/ipc_messages.h) 필드 순서. check_param_server.py가 C++ offsetof와 대조한다.
+LEARNER_FIELDS = (
+    ("timestamp_ns", "Q"), ("flags", "I"),
+    ("steer_ratio", "f"), ("stiffness_factor", "f"), ("roll_rad", "f"),
+    ("angle_offset_average_deg", "f"), ("angle_offset_deg", "f"),
+    ("steer_ratio_std", "f"), ("stiffness_factor_std", "f"),
+    ("angle_offset_average_std", "f"), ("angle_offset_fast_std", "f"), ("yaw_bias_rad_s", "f"),
+    ("lat_accel_factor_raw", "f"), ("lat_accel_offset_raw", "f"), ("friction_raw", "f"),
+    ("lat_accel_factor", "f"), ("lat_accel_offset", "f"), ("friction", "f"),
+    ("decay", "f"), ("max_resets", "f"), ("total_bucket_points", "i"), ("cal_perc", "i"),
+    ("road_bank_lat_accel", "f"),
+    ("prior_steer_ratio", "f"), ("prior_lat_accel_factor", "f"), ("prior_friction", "f"),
+    ("bucket_points", "8h"), ("reserved", "I"),
+)
+LEARNER_STATE = struct.Struct("<" + "".join(fmt for _, fmt in LEARNER_FIELDS))
+LEARNER_FLAGS = (  # ipc_messages.h kK230Learner* 비트 순서
+    "vehicle_inputs_ok", "vehicle_valid", "sensor_valid", "steer_ratio_valid",
+    "stiffness_valid", "offset_average_valid", "offset_valid", "torque_inputs_ok",
+    "torque_valid", "use_vehicle", "use_torque", "vehicle_restored", "torque_restored",
+)
+LEARNER_HISTORY_S = 600
+GRAVITY = 9.81
+
+
+def decode_learner_state(payload: bytes) -> Dict[str, Any]:
+    values = list(LEARNER_STATE.unpack(payload[:LEARNER_STATE.size]))
+    state: Dict[str, Any] = {}
+    for name, fmt in LEARNER_FIELDS:
+        count = int(fmt[:-1]) if len(fmt) > 1 else 1
+        state[name] = values[:count] if count > 1 else values[0]
+        del values[:count]
+    state["flags"] = {name: bool(state["flags"] >> bit & 1) for bit, name in enumerate(LEARNER_FLAGS)}
+    del state["reserved"]
+    return state
+
+
+def boottime_ns() -> int:
+    clock = getattr(time, "CLOCK_BOOTTIME", time.CLOCK_MONOTONIC)  # k230_now_ns와 같은 시계
+    return time.clock_gettime_ns(clock)
+
+
+class LearnerStateReader:
+    """controlsd의 /k230_learner_state를 읽기 전용으로 연다. 파일이 다시 만들어지면 새로 연다."""
+
+    def __init__(self, path: str = LEARNER_STATE_PATH):
+        self.path = path
+        self._map: mmap.mmap | None = None
+        self._inode = None
+
+    def _reopen_if_needed(self) -> None:
+        inode = os.stat(self.path).st_ino
+        if self._map is not None and inode == self._inode:
+            return
+        if self._map is not None:
+            self._map.close()
+            self._map = None
+        fd = os.open(self.path, os.O_RDONLY)
+        try:
+            self._map = mmap.mmap(fd, 0, access=mmap.ACCESS_READ)
+        finally:
+            os.close(fd)
+        self._inode = inode
+
+    def read(self) -> tuple[int, int, Dict[str, Any]] | None:
+        """(seq, 발행 시각 ns, 상태). 아직 없거나 쓰는 중이면 None."""
+        try:
+            self._reopen_if_needed()
+            assert self._map is not None
+            for _ in range(4):
+                magic, _, _, _, seq, stamp, size, _ = IPC_HEADER.unpack_from(self._map, 0)
+                if magic != IPC_MAGIC or seq == 0 or seq & 1 or size < LEARNER_STATE.size:
+                    return None
+                payload = self._map[IPC_HEADER.size:IPC_HEADER.size + LEARNER_STATE.size]
+                if IPC_HEADER.unpack_from(self._map, 0)[4] == seq:
+                    return seq, stamp, decode_learner_state(payload)
+            return None
+        except (OSError, ValueError, struct.error):
+            self._map = None
+            return None
+
+
+def learner_trend_row(state: Dict[str, Any]) -> list[float]:
+    """추이 그래프 한 점: 시각, 조향비, 영점 평균·합계, 롤, 편경사 롤 환산, 배율 원시·필터."""
+    return [
+        round(state["timestamp_ns"] * 1e-9, 2),
+        round(state["steer_ratio"], 4),
+        round(state["angle_offset_average_deg"], 4),
+        round(state["angle_offset_deg"], 4),
+        round(math.degrees(state["roll_rad"]), 4),
+        round(math.degrees(-state["road_bank_lat_accel"] / GRAVITY), 4),
+        round(state["lat_accel_factor_raw"], 4),
+        round(state["lat_accel_factor"], 4),
+    ]
+
+
+def fixed_lateral_values(steering: Dict[str, Any]) -> Dict[str, Any]:
+    """학습값과 나란히 보여줄 수동값. control_params.cc의 환산을 따른다."""
+    max_lat_accel = max(0.1, float(steering.get("torque_max_lat_accel_raw", 0)) * 0.1)
+    kf = float(steering.get("torque_kf_raw", 0)) * 0.1
+    return {
+        "steer_ratio": steering.get("steer_ratio"),
+        "tire_stiffness_factor": steering.get("tire_stiffness_factor"),
+        "angle_offset_deg": steering.get("angle_offset_deg"),
+        "torque_lat_accel_offset": steering.get("torque_lat_accel_offset"),
+        "live_bank_compensation": steering.get("live_bank_compensation"),
+        "lat_accel_factor": max_lat_accel / kf if kf > 0 else None,
+        "friction": float(steering.get("torque_friction_raw", 0)) * 0.001,
+    }
+
+
+class LearnerMonitor:
+    """1초마다 최신 상태를 읽어 10분 추이를 남긴다. 탭을 늦게 열어도 추이가 보인다."""
+
+    def __init__(self, reader: LearnerStateReader | None = None):
+        self.reader = reader or LearnerStateReader()
+        self.lock = threading.Lock()
+        self.history: collections.deque = collections.deque(maxlen=LEARNER_HISTORY_S)
+        self._last_seq: int | None = None
+        self._stop = threading.Event()
+
+    def sample(self) -> tuple[int, int, Dict[str, Any]] | None:
+        with self.lock:
+            latest = self.reader.read()
+            if latest is not None and latest[0] != self._last_seq:
+                self._last_seq = latest[0]
+                row = learner_trend_row(latest[2])
+                if self.history and row[0] < self.history[-1][0]:
+                    self.history.clear()  # 시각이 거꾸로 갔다(다른 부팅의 상태 파일)
+                self.history.append(row)
+            return latest
+
+    def trend(self) -> list[list[float]]:
+        with self.lock:
+            return list(self.history)
+
+    def start(self) -> None:
+        def run() -> None:
+            while not self._stop.wait(1.0):
+                self.sample()
+
+        threading.Thread(target=run, name="learner-monitor", daemon=True).start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def snapshot(self, steering: Dict[str, Any]) -> Dict[str, Any]:
+        latest = self.sample()
+        result: Dict[str, Any] = {
+            "available": latest is not None,
+            "path": self.reader.path,
+            "fixed": fixed_lateral_values(steering),
+            "use_live_vehicle_params": steering.get("use_live_vehicle_params"),
+            "use_live_torque_params": steering.get("use_live_torque_params"),
+        }
+        if latest is not None:
+            _, stamp, state = latest
+            result["age_s"] = max(0.0, (boottime_ns() - stamp) * 1e-9)
+            result["state"] = state
+            result["trend_row"] = learner_trend_row(state)
+        return result
+
+
 HTML = """<!doctype html>
 <html lang="ko">
 <head>
@@ -633,7 +821,7 @@ HTML = """<!doctype html>
     .icon-button:hover { background: #31373c; }
     .group-tabs {
       position: sticky; top: 64px; z-index: 4;
-      display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+      display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
       padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
       background: #171a1d; border-bottom: 1px solid var(--line);
     }
@@ -760,6 +948,51 @@ HTML = """<!doctype html>
     summary { cursor: pointer; }
     .file-path { margin-top: 8px; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
     button:disabled, input:disabled { cursor: default; opacity: 0.5; }
+    .live-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+    .live-head { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-bottom: 10px; }
+    .live-title { margin: 0 6px 0 0; font-size: 16px; font-weight: 750; }
+    .live-badges { display: flex; flex-wrap: wrap; gap: 7px; }
+    .toggle-control.mini { width: auto; height: 36px; gap: 10px; margin-left: auto; padding: 0 10px; font-size: 13px; }
+    .live-head .card-status { flex-basis: 100%; min-height: 0; margin: 0; }
+    .adopt-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+    .adopt-button {
+      flex: 1 1 140px; min-height: 46px; padding: 6px 10px;
+      border: 1px solid #515960; border-radius: 6px; background: #24292d;
+      color: #e5e9ec; cursor: pointer; text-align: left; font-size: 13px; font-weight: 700;
+    }
+    .adopt-button:hover { background: #2d3338; }
+    .adopt-button small { display: block; color: #7f8991; font-size: 11px; font-weight: 500; }
+    .learner-note { margin: 9px 0 0; padding: 6px 9px; border-radius: 5px; font-size: 12px; line-height: 1.45; }
+    .learner-note.ignored { background: #24292d; color: var(--muted); }
+    .learner-note.prior { background: #15233a; color: #9cc8f0; }
+    .learner-note.reset { background: #2a2417; color: var(--warn); }
+    .param-card.ignored .description, .param-card.ignored .effects,
+    .param-card.ignored .number-control, .param-card.ignored .toggle-control { opacity: 0.5; }
+    .badge { padding: 2px 9px; border-radius: 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .badge.good { background: #17261f; color: var(--good); }
+    .badge.warn { background: #2a2417; color: var(--warn); }
+    .badge.bad { background: #2a1919; color: var(--bad); }
+    .badge.accent { background: #15233a; color: var(--accent); }
+    .badge.muted { background: #24292d; color: var(--muted); }
+    .live-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; font-variant-numeric: tabular-nums; }
+    .live-table th { padding: 4px 0; color: #7f8991; font-size: 11px; font-weight: 600; text-align: right; }
+    .live-table td { padding: 7px 0; border-top: 1px solid #2a2f33; color: #c5cbd0; text-align: right; overflow-wrap: anywhere; }
+    .live-table th:first-child, .live-table td:first-child { width: 27%; text-align: left; }
+    .live-table td.value { color: #fff; font-weight: 750; }
+    .live-table td.note { color: #7f8991; font-size: 12px; }
+    .live-table td.warn { color: var(--warn); }
+    .live-table td.bad { color: var(--bad); }
+    .live-foot { margin-top: 9px; color: #7f8991; font-size: 12px; line-height: 1.5; }
+    .buckets, .bucket-labels { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 6px; }
+    .buckets { height: 56px; margin-top: 12px; align-items: end; }
+    .bucket { display: flex; align-items: flex-end; height: 100%; border-radius: 4px; background: #15181a; }
+    .bucket span { width: 100%; border-radius: 4px; background: var(--warn); }
+    .bucket.full span { background: var(--good); }
+    .bucket-labels { margin-top: 4px; color: #7f8991; font-size: 10px; text-align: center; font-variant-numeric: tabular-nums; }
+    .trend-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+    .trend-now { color: #fff; font-weight: 750; font-variant-numeric: tabular-nums; text-align: right; }
+    .trend svg { display: block; width: 100%; height: 90px; border-radius: 5px; background: #15181a; }
+    .trend-range { display: flex; justify-content: space-between; margin-top: 3px; color: #7f8991; font-size: 10px; }
     @media (max-width: 760px) {
       .app-header { gap: 9px; }
       .connection { margin-left: auto; }
@@ -792,6 +1025,7 @@ HTML = """<!doctype html>
     <button class="group-tab" data-group="adaptive_cruise" type="button">비전 크루즈</button>
     <button class="group-tab" data-group="recording" type="button">주행 기록</button>
     <button class="group-tab" data-group="display" type="button">디스플레이</button>
+    <button class="group-tab" data-group="learners" type="button">실시간 학습</button>
   </nav>
   <main>
     <div id="count" class="count"></div>
@@ -837,7 +1071,10 @@ HTML = """<!doctype html>
       adaptive_cruise: "변경값은 즉시 적용됩니다. 이 기능은 순정 크루즈 버튼만 조절하며 브레이크를 직접 제어하지 않습니다.",
       recording: "기록은 모델 입력과 같은 1280x720 프레임을 사용합니다. 영상·CAN·상태·파라미터가 한 경로에 함께 저장됩니다.",
       display: "전원을 꺼도 영상 파이프라인은 계속 동작합니다. 밝기 값은 다음에 켤 때 그대로 복원됩니다.",
+      learners: "paramsd·torqued는 항상 계산하고 기록합니다. 제어에는 스위치를 켠 쪽만 씁니다. 1초마다 갱신하고 추이는 최근 10분입니다.",
     };
+    // 학습 스위치는 학습값을 보면서 켜도록 실시간 학습 탭에만 둔다
+    const hiddenKeys = {steering: ["use_live_vehicle_params", "use_live_torque_params"]};
 
     function setConnection(pids, saved = false, recording = false) {
       const online = pids.length > 0;
@@ -917,7 +1154,7 @@ HTML = """<!doctype html>
     }
 
     async function applyValue(key, value, card, input = null) {
-      const group = activeGroup;
+      const group = card.dataset.group || activeGroup;
       card.classList.remove("saved", "error");
       card.classList.add("busy");
       card.querySelectorAll("button, input").forEach(control => control.disabled = true);
@@ -1096,9 +1333,10 @@ HTML = """<!doctype html>
       return control;
     }
 
-    function createCard(key, value, meta) {
+    function createCard(key, value, meta, group = activeGroup) {
       const card = document.createElement("article");
       card.className = "param-card";
+      card.dataset.group = group;
       const head = document.createElement("div");
       head.className = "param-head";
       const identity = document.createElement("div");
@@ -1118,7 +1356,13 @@ HTML = """<!doctype html>
       description.textContent = meta.description;
       const cardStatus = document.createElement("div");
       cardStatus.className = "card-status";
-      card.append(head, description, createEffects(meta, typeof value === "boolean"));
+      card.append(head);
+      if (group === "steering") {
+        const notes = learnerNotes(key, snapshot.params.steering);
+        for (const [text, tone] of notes) card.appendChild(el("div", `learner-note ${tone}`, text));
+        if (notes.some(([, tone]) => tone === "ignored")) card.classList.add("ignored");
+      }
+      card.append(description, createEffects(meta, typeof value === "boolean"));
       let editor;
       if (typeof value === "boolean") {
         editor = createToggleControl(key, value, meta, card);
@@ -1131,8 +1375,382 @@ HTML = """<!doctype html>
       return card;
     }
 
+    /* 학습 스위치가 켜졌을 때 수동값의 역할. 무시되는 값은 흐리게, 사전값으로만 쓰이는 값은 표시한다.
+     * torqued 사전값 셋은 스위치와 무관하게 캐시 키라 바꾸면 학습이 처음부터 다시 시작된다. */
+    function learnerNotes(key, steering) {
+      const vehicleOn = steering.use_live_vehicle_params === true;
+      const torqueOn = steering.use_live_torque_params === true;
+      const notes = [];
+      if (vehicleOn && (key === "angle_offset_deg" || key === "live_bank_compensation"))
+        notes.push(["paramsd 학습값 사용 중 · 이 값은 무시됩니다. 실시간 학습 탭에서 끄면 다시 쓰입니다.", "ignored"]);
+      if (vehicleOn && key === "steer_ratio")
+        notes.push(["paramsd 학습값 사용 중 · 학습 조향비의 출발점과 유효 범위(0.5~2배)로만 쓰입니다. 저장된 학습값이 있으면 그게 우선입니다.", "prior"]);
+      if (vehicleOn && key === "tire_stiffness_factor")
+        notes.push(["paramsd 학습값 사용 중 · 학습 강성 배율이 이 값에 곱해집니다.", "prior"]);
+      if (torqueOn && key === "torque_lat_accel_offset")
+        notes.push(["torqued 학습값 사용 중 · 이 값은 무시되고 학습 절편을 씁니다. 실시간 학습 탭에서 끄면 다시 쓰입니다.", "ignored"]);
+      if (torqueOn && (key === "torque_max_lat_accel_raw" || key === "torque_friction_raw"))
+        notes.push(["torqued 학습값 사용 중 · 사전값과 허용 폭(배율 ±30%, 마찰 ±50%)으로만 쓰입니다.", "prior"]);
+      if (torqueOn && key === "torque_kf_raw")
+        notes.push(["torqued 학습값 사용 중 · 배율 사전값 계산과 적분 이득 비율(Ki/Kf)에만 쓰입니다.", "prior"]);
+      if (key === "torque_max_lat_accel_raw" || key === "torque_kf_raw" || key === "torque_friction_raw")
+        notes.push(["바꾸면 controlsd 다음 시작 때 torqued 학습이 처음부터 다시 시작됩니다.", "reset"]);
+      return notes;
+    }
+
+    /* 학습값을 수동값으로 옮긴다. target은 파라미터 단위, show는 학습값 표시. */
+    const ADOPT = {
+      vehicle: {
+        switchKey: "use_live_vehicle_params",
+        ready: s => s.flags.vehicle_valid,
+        items: [
+          {key: "steer_ratio", label: "조향비", show: s => num(s.steer_ratio, 2), target: s => s.steer_ratio},
+          {key: "angle_offset_deg", label: "영점 평균", show: s => `${sgn(s.angle_offset_average_deg, 2)}°`,
+           target: s => s.angle_offset_average_deg, ignoredWhenOn: true},
+        ],
+      },
+      torque: {
+        switchKey: "use_live_torque_params",
+        ready: s => s.flags.torque_valid,
+        items: [
+          {key: "torque_max_lat_accel_raw", label: "배율", show: s => num(s.lat_accel_factor, 2),
+           target: (s, steering) => s.lat_accel_factor * steering.torque_kf_raw, resets: true},
+          {key: "torque_friction_raw", label: "마찰", show: s => num(s.friction, 3),
+           target: s => s.friction / 0.001, resets: true},
+          {key: "torque_lat_accel_offset", label: "절편", show: s => sgn(s.lat_accel_offset, 3),
+           target: s => s.lat_accel_offset, ignoredWhenOn: true},
+        ],
+      },
+    };
+
+    function adoptTarget(item, s) {
+      const steering = snapshot.params.steering;
+      const meta = snapshot.metadata.steering[item.key] || genericMeta(item.key, steering[item.key]);
+      return {meta, current: steering[item.key], target: clampAndRound(item.target(s, steering), meta)};
+    }
+
+    async function adoptValue(shell, spec, item) {
+      const s = shell.state;
+      if (!s) return;
+      const {meta, current, target} = adoptTarget(item, s);
+      const on = snapshot.params.steering[spec.switchKey] === true;
+      const lines = [`${meta.label} (${item.key})`, `${current} → ${target}`, ""];
+      if (!on) lines.push("스위치가 꺼져 있어 지금 바로 제어에 반영됩니다.");
+      else if (item.ignoredWhenOn) lines.push("스위치가 켜져 있어 지금은 무시되고, 스위치를 끄면 이 값을 씁니다.");
+      else lines.push("스위치가 켜져 있어 사전값으로만 쓰입니다(controlsd 다음 시작부터).");
+      if (item.resets) lines.push("controlsd 다음 시작 때 torqued 학습이 이 값을 새 사전값으로 처음부터 다시 시작합니다.");
+      if (!window.confirm(lines.join("\\n"))) return;
+      try {
+        await applyValue(item.key, target, shell.card);
+      } catch (_) {}
+      updateAdopt(shell, spec, s);  // applyValue가 카드의 버튼을 모두 다시 켠다
+    }
+
+    function updateAdopt(shell, spec, s) {
+      shell.state = s;
+      const ready = spec.ready(s);
+      for (const item of spec.items) {
+        const button = shell.adopt.get(item.key);
+        const {current, target} = adoptTarget(item, s);
+        const same = Number(current) === Number(target);
+        button.replaceChildren(document.createTextNode(`${item.label} ${item.show(s)} → 수동값`),
+          el("small", "", !ready ? "학습이 유효해지면 쓸 수 있습니다" : same ? `수동값과 같음 (${current})` : `${item.key} ${current} → ${target}`));
+        button.disabled = !ready || same;
+      }
+    }
+
+    // ------------------------------------------------------------ 실시간 학습
+    const BUCKET_MIN = [100, 300, 500, 500, 500, 500, 300, 100];
+    const TREND_CHARTS = [
+      {title: "조향비", series: [[1, "main"]], ref: f => [f.steer_ratio], span: 0.2, digits: 2},
+      {title: "조향각 영점 (°) · 평균 / 합계", series: [[2, "main"], [3, "thin"]], ref: f => [f.angle_offset_deg], span: 0.2, digits: 2},
+      {title: "도로 롤 (°) · 학습 / 편경사 환산", series: [[4, "main"], [5, "dash"]], ref: () => [], span: 0.5, digits: 2},
+      {title: "토크 배율 · 필터 / 원시", series: [[7, "main"], [6, "raw"]], ref: (f, s) => [s.prior_lat_accel_factor, s.prior_lat_accel_factor * 0.7, s.prior_lat_accel_factor * 1.3], span: 0.2, digits: 2},
+    ];
+    let learnerTimer = null;
+    let learnerTrend = [];
+    let learnerWindow = 600;
+    let learnerPanel = null;
+    let learnerFailed = false;
+
+    function num(value, digits) {
+      return Number.isFinite(value) ? value.toFixed(digits) : "–";
+    }
+    function sgn(value, digits) {
+      if (!Number.isFinite(value)) return "–";
+      return `${value < 0 ? "−" : "+"}${Math.abs(value).toFixed(digits)}`;
+    }
+    function deg(rad) { return rad * 180 / Math.PI; }
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    function liveTable(head, rows) {
+      const table = el("table", "live-table");
+      const headRow = el("tr");
+      for (const text of head) headRow.appendChild(el("th", "", text));
+      table.appendChild(headRow);
+      for (const row of rows) {
+        const tr = el("tr");
+        row.forEach((cell, index) => {
+          const [text, tone] = Array.isArray(cell) ? cell : [cell, ""];
+          const kind = index === 1 ? "value" : index === 3 ? "note" : "";
+          tr.appendChild(el("td", `${kind} ${tone}`.trim(), text));
+        });
+        table.appendChild(tr);
+      }
+      return table;
+    }
+
+    /* 제목·배지·스위치는 한 번 만들고 본문만 매초 바꾼다(누르는 중인 스위치를 갈아엎지 않게). */
+    function liveShell(title, key, spec) {
+      const card = el("article", "live-card");
+      card.dataset.group = "steering";
+      const head = el("div", "live-head");
+      const badges = el("span", "live-badges");
+      head.append(el("h3", "live-title", title), badges);
+      const steering = snapshot.params.steering;
+      if (key in steering) {
+        const meta = snapshot.metadata.steering[key] || genericMeta(key, steering[key]);
+        const toggle = createToggleControl(key, steering[key], meta, card);
+        toggle.classList.add("mini");
+        toggle.title = meta.label;
+        head.append(toggle, el("div", "card-status"));
+      }
+      const body = el("div");
+      const adopt = new Map();
+      const row = el("div", "adopt-row");
+      for (const item of spec.items) {
+        const button = el("button", "adopt-button");
+        button.type = "button";
+        button.addEventListener("click", () => adoptValue(shell, spec, item));
+        adopt.set(item.key, button);
+        row.appendChild(button);
+      }
+      card.append(head, body, el("div", "live-foot", "수동값에 반영 · 확인 후 저장"), row);
+      const shell = {card, badges, body, adopt, state: null};
+      return shell;
+    }
+
+    function fillShell(shell, badges, children) {
+      shell.badges.replaceChildren(...badges.map(([text, tone]) => el("span", `badge ${tone}`, text)));
+      shell.body.replaceChildren(...children);
+    }
+
+    function vehicleCard(shell, s, f) {
+      const flags = s.flags;
+      const badges = ([
+        flags.vehicle_valid ? ["유효", "good"] : ["무효", "bad"],
+        ...(flags.vehicle_inputs_ok ? [] : [["입력 끊김", "warn"]]),
+        ...(flags.sensor_valid ? [] : [["센서 불일치", "warn"]]),
+        flags.use_vehicle ? ["제어에 사용 중", "accent"] : ["섀도", "muted"],
+      ]);
+      const children = [];
+      const roll = deg(s.roll_rad);
+      const bankRoll = deg(-s.road_bank_lat_accel / 9.81);
+      children.push(liveTable(["항목", "학습값", "수동값", "±std · 범위"], [
+        ["조향비", [num(s.steer_ratio, 2), flags.steer_ratio_valid ? "" : "bad"], num(f.steer_ratio, 2),
+         `±${num(s.steer_ratio_std, 2)} · ${num(s.prior_steer_ratio * 0.5, 1)}~${num(s.prior_steer_ratio * 2, 1)}`],
+        ["타이어 강성", [num(s.stiffness_factor, 3), flags.stiffness_valid ? "" : "bad"], `×${num(f.tire_stiffness_factor, 2)}`,
+         `±${num(s.stiffness_factor_std, 3)} · 0.2~5`],
+        ["영점 평균", [`${sgn(s.angle_offset_average_deg, 2)}°`, flags.offset_average_valid ? "" : "bad"], `${sgn(f.angle_offset_deg, 2)}°`,
+         `±${num(deg(s.angle_offset_average_std), 2)}° · ±10°`],
+        ["영점 합계(사용)", [`${sgn(s.angle_offset_deg, 2)}°`, flags.offset_valid ? "" : "bad"], "–",
+         `빠른 성분 ±${num(deg(s.angle_offset_fast_std), 2)}°`],
+        ["도로 롤", `${sgn(roll, 2)}°`, f.live_bank_compensation ? `편경사 ${sgn(bankRoll, 2)}°` : "보정 끔", "±10°"],
+      ]));
+      children.push(el("div", "live-foot",
+        `자이로 바이어스 ${sgn(deg(s.yaw_bias_rad_s), 3)}°/s · 1분마다 저장 · ${flags.vehicle_restored ? "이번 시동에 복원" : "새로 시작"}`));
+      fillShell(shell, badges, children);
+    }
+
+    function torqueCard(shell, s, f) {
+      const flags = s.flags;
+      const buckets = s.bucket_points;
+      const calculable = buckets.every(n => n > 0) && s.lat_accel_factor_raw !== 0;
+      const prior = s.prior_lat_accel_factor;
+      const pf = s.prior_friction;
+      const factorOut = calculable && (s.lat_accel_factor_raw < prior * 0.7 || s.lat_accel_factor_raw > prior * 1.3);
+      const frictionOut = calculable && (s.friction_raw < pf * 0.5 || s.friction_raw > pf * 1.5);
+      const badges = [
+        flags.torque_valid ? ["유효", "good"] : [`학습 중 ${s.cal_perc}%`, "warn"],
+        ...(flags.torque_inputs_ok ? [] : [["입력 끊김", "warn"]]),
+        flags.use_torque ? ["제어에 사용 중", "accent"] : ["섀도", "muted"],
+      ];
+      const children = [];
+      children.push(liveTable(["항목", "필터(사용값)", "원시", "사전값 · 허용"], [
+        ["배율", num(s.lat_accel_factor, 2), [calculable ? num(s.lat_accel_factor_raw, 2) : "–", factorOut ? "warn" : ""],
+         `${num(prior, 2)} · ${num(prior * 0.7, 2)}~${num(prior * 1.3, 2)}`],
+        ["절편 (m/s²)", sgn(s.lat_accel_offset, 3), calculable ? sgn(s.lat_accel_offset_raw, 3) : "–",
+         `수동 ${sgn(f.torque_lat_accel_offset, 3)}`],
+        ["마찰", num(s.friction, 3), [calculable ? num(s.friction_raw, 3) : "–", frictionOut ? "warn" : ""],
+         `${num(pf, 3)} · ${num(pf * 0.5, 3)}~${num(pf * 1.5, 3)}`],
+      ]));
+      const bars = el("div", "buckets");
+      const labels = el("div", "bucket-labels");
+      buckets.forEach((count, i) => {
+        const full = count >= BUCKET_MIN[i];
+        const bar = el("div", `bucket${full ? " full" : ""}`);
+        const fill = el("span");
+        fill.style.height = `${Math.max(2, Math.min(1, count / BUCKET_MIN[i]) * 100)}%`;
+        bar.appendChild(fill);
+        bars.appendChild(bar);
+        labels.appendChild(el("span", "", full ? String(count) : `${count}/${BUCKET_MIN[i]}`));
+      });
+      children.push(el("div", "live-foot", "버킷: 보낸 토크 −0.5 → +0.5 (우측 양수) · 채움 / 최소"), bars, labels);
+      children.push(el("div", "live-foot",
+        `점 ${s.total_bucket_points.toLocaleString("ko-KR")} · decay ${num(s.decay, 1)} · 초기화 ${Math.max(0, Math.round(s.max_resets) - 1)}회 · 12초마다 저장 · ${flags.torque_restored ? "이번 시동에 복원" : "새로 시작"}`));
+      fillShell(shell, badges, children);
+    }
+
+    function trendCard(chart, fixed, state) {
+      const card = el("article", "live-card trend");
+      const rows = learnerTrend;
+      const tEnd = rows.length ? rows[rows.length - 1][0] : 0;
+      const shown = rows.filter(r => r[0] >= tEnd - learnerWindow);
+      const refs = chart.ref(fixed, state).filter(Number.isFinite);
+      const values = [...refs];
+      for (const [index, style] of chart.series)
+        for (const r of shown) if (Number.isFinite(r[index]) && !(style === "raw" && r[index] === 0)) values.push(r[index]);
+      const head = el("div", "trend-head");
+      head.appendChild(el("span", "", chart.title));
+      const last = shown.length ? shown[shown.length - 1] : null;
+      head.appendChild(el("span", "trend-now",
+        last ? chart.series.map(([index, style]) =>
+          style === "raw" && last[index] === 0 ? "–" : num(last[index], chart.digits)).join(" / ") : "–"));
+      card.appendChild(head);
+      let lo = Math.min(...values), hi = Math.max(...values);
+      if (!values.length) { lo = 0; hi = 1; }
+      if (hi - lo < chart.span) { const mid = (hi + lo) / 2; lo = mid - chart.span / 2; hi = mid + chart.span / 2; }
+      const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+      const W = 300, H = 90;
+      const x = t => ((t - (tEnd - learnerWindow)) / learnerWindow) * W;
+      const y = v => H - ((v - lo) / (hi - lo)) * H;
+      const ns = "http://www.w3.org/2000/svg";
+      const svg = document.createElementNS(ns, "svg");
+      svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+      svg.setAttribute("preserveAspectRatio", "none");
+      svg.setAttribute("aria-label", chart.title);
+      refs.forEach((value, i) => {
+        const line = document.createElementNS(ns, "line");
+        line.setAttribute("x1", "0"); line.setAttribute("x2", String(W));
+        line.setAttribute("y1", String(y(value))); line.setAttribute("y2", String(y(value)));
+        line.setAttribute("stroke", i === 0 ? "#8a949b" : "#5b646b");
+        line.setAttribute("stroke-dasharray", i === 0 ? "5 4" : "2 4");
+        line.setAttribute("vector-effect", "non-scaling-stroke");
+        svg.appendChild(line);
+      });
+      const stroke = {main: "#58a6e7", thin: "#a5adb4", dash: "#a5adb4", raw: "#efb85b"};
+      for (const [index, style] of chart.series) {
+        const points = shown.filter(r => Number.isFinite(r[index]) && !(style === "raw" && r[index] === 0))
+          .map(r => `${x(r[0]).toFixed(1)},${y(r[index]).toFixed(1)}`);
+        if (points.length < 2) continue;
+        const line = document.createElementNS(ns, "polyline");
+        line.setAttribute("points", points.join(" "));
+        line.setAttribute("fill", "none");
+        line.setAttribute("stroke", stroke[style]);
+        line.setAttribute("stroke-width", style === "main" ? "2" : "1.2");
+        if (style === "dash") line.setAttribute("stroke-dasharray", "4 3");
+        line.setAttribute("vector-effect", "non-scaling-stroke");
+        svg.appendChild(line);
+      }
+      card.appendChild(svg);
+      const range = el("div", "trend-range");
+      range.append(el("span", "", `${num(lo, chart.digits)} ~ ${num(hi, chart.digits)}`),
+                   el("span", "", refs.length ? `점선 ${num(refs[0], chart.digits)}` : "최근 10분"));
+      card.appendChild(range);
+      return card;
+    }
+
+    function learnerSection(title, children, grid = true) {
+      const section = el("section", "section");
+      section.appendChild(el("h2", "section-title", title));
+      const list = el("div", grid ? "param-list" : "");
+      list.append(...children);
+      section.appendChild(list);
+      return section;
+    }
+
+    function updateLearners(data) {
+      if (!learnerPanel) return;
+      const panel = learnerPanel;
+      if (!data.available) {
+        panel.notice.replaceChildren(el("div", "empty", "학습 상태가 없습니다. controlsd가 실행 중인지 확인하세요."));
+        return;
+      }
+      const s = data.state, f = data.fixed;
+      panel.notice.replaceChildren(...(data.age_s > 2
+        ? [el("div", "group-note visible", `학습 상태가 ${Math.round(data.age_s)}초째 갱신되지 않습니다. controlsd를 확인하세요.`)]
+        : []));
+      vehicleCard(panel.vehicle, s, f);
+      torqueCard(panel.torque, s, f);
+      updateAdopt(panel.vehicle, ADOPT.vehicle, s);
+      updateAdopt(panel.torque, ADOPT.torque, s);
+      panel.trends.replaceChildren(...TREND_CHARTS.map(chart => trendCard(chart, f, s)));
+    }
+
+    async function pollLearners() {
+      try {
+        const response = await fetch("/api/learners", {cache: "no-store"});
+        if (!response.ok) throw new Error(await response.text());
+        const data = await response.json();
+        const row = data.trend_row;
+        if (row && learnerTrend.length && row[0] < learnerTrend[learnerTrend.length - 1][0]) learnerTrend = [];
+        if (row && (!learnerTrend.length || row[0] > learnerTrend[learnerTrend.length - 1][0])) {
+          learnerTrend.push(row);
+          const cutoff = row[0] - learnerWindow;
+          while (learnerTrend.length && learnerTrend[0][0] < cutoff) learnerTrend.shift();
+        }
+        path.textContent = data.path;
+        if (learnerFailed) setMessage("");
+        learnerFailed = false;
+        updateLearners(data);
+      } catch (error) {
+        learnerFailed = true;
+        setMessage(`학습 상태 읽기 실패: ${error.message}`, true);
+      }
+    }
+
+    async function renderLearners() {
+      sections.replaceChildren();
+      count.textContent = "paramsd · torqued";
+      groupNote.textContent = groupNotes.learners;
+      groupNote.classList.add("visible");
+      const vehicle = liveShell("paramsd · 차량 값", "use_live_vehicle_params", ADOPT.vehicle);
+      const torque = liveShell("torqued · 토크 값", "use_live_torque_params", ADOPT.torque);
+      const trendSection = learnerSection("최근 10분 추이", []);
+      learnerPanel = {notice: el("div"), vehicle, torque, trends: trendSection.querySelector(".param-list")};
+      sections.append(learnerPanel.notice, learnerSection("학습값 · 오른쪽 스위치로 제어에 사용", [vehicle.card, torque.card]),
+                      trendSection);
+      if (learnerTimer) return;
+      learnerTimer = window.setInterval(pollLearners, 1000);
+      try {
+        const response = await fetch("/api/learners/trend", {cache: "no-store"});
+        if (response.ok) {
+          const trend = await response.json();
+          learnerTrend = trend.rows;
+          learnerWindow = trend.window_s;
+        }
+      } catch (_) {}
+      pollLearners();
+    }
+
+    function stopLearners() {
+      if (learnerTimer) window.clearInterval(learnerTimer);
+      learnerTimer = null;
+      learnerPanel = null;
+    }
+
     function render() {
       if (!snapshot) return;
+      if (activeGroup === "learners") {
+        renderLearners();
+        return;
+      }
+      stopLearners();
       sections.replaceChildren();
       path.textContent = snapshot.paths[activeGroup];
       const note = groupNotes[activeGroup] || "";
@@ -1140,7 +1758,8 @@ HTML = """<!doctype html>
       groupNote.classList.toggle("visible", Boolean(note));
       const params = snapshot.params[activeGroup];
       const metadata = snapshot.metadata[activeGroup] || {};
-      const visible = Object.entries(params);
+      const hidden = hiddenKeys[activeGroup] || [];
+      const visible = Object.entries(params).filter(([key]) => !hidden.includes(key));
       count.textContent = `${visible.length}개 항목`;
       const grouped = new Map();
       for (const [key, value] of visible) {
@@ -1198,12 +1817,22 @@ HTML = """<!doctype html>
 """
 
 
-def create_app(store: ParamStore | None = None) -> "FastAPI":
+def create_app(store: ParamStore | None = None,
+               learner_monitor: LearnerMonitor | None = None) -> "FastAPI":
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import HTMLResponse
 
     param_store = store or ParamStore(display_controller=DisplayBacklight())
+    monitor = learner_monitor or LearnerMonitor()
     application = FastAPI(title="K7 parameter server", docs_url="/docs")
+
+    @application.on_event("startup")
+    def start_monitor() -> None:
+        monitor.start()
+
+    @application.on_event("shutdown")
+    def stop_monitor() -> None:
+        monitor.stop()
 
     @application.get("/", response_class=HTMLResponse)
     def index() -> str:
@@ -1215,6 +1844,14 @@ def create_app(store: ParamStore | None = None) -> "FastAPI":
             return param_store.snapshot()
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    @application.get("/api/learners")
+    def get_learners() -> Dict[str, Any]:
+        return monitor.snapshot(param_store.read_group("steering"))
+
+    @application.get("/api/learners/trend")
+    def get_learner_trend() -> Dict[str, Any]:
+        return {"rows": monitor.trend(), "window_s": LEARNER_HISTORY_S}
 
     @application.patch("/api/params/{group}")
     def patch_params(group: str, patch: ParamPatch) -> Dict[str, Any]:

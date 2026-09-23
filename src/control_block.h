@@ -36,6 +36,7 @@ enum class BlockKind : uint8_t {
   X(BrakeError,         "brake_error",          "BRAKE ERROR",     BlockKind::Hard)         \
   X(GearNotDrive,       "gear_not_drive",       "GEAR NOT D",      BlockKind::Hard)         \
   X(MdpsFault,          "mdps_fault",           "MDPS FAULT",      BlockKind::Hard)         \
+  X(ParamsdInvalid,     "paramsd_invalid",      "PARAMS INVALID",  BlockKind::Hard)         \
   X(PandaNotReady,      "panda_not_ready",      "PANDA NOT READY", BlockKind::Transient)    \
   X(PandaControlsOff,   "panda_controls_off",   "PANDA CTRL OFF",  BlockKind::Transient)    \
   X(EspStale,           "esp_stale",            "ESP STALE",       BlockKind::Reject)       \

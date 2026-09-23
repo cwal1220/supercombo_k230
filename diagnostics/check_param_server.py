@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import re
+import struct
 import sys
 import tempfile
 import unittest
@@ -9,7 +10,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.display_control import duty_cycle_ns
-from scripts.k230_param_server import PARAM_METADATA, ParamStore
+from scripts.k230_param_server import (
+    HTML,
+    IPC_HEADER,
+    IPC_MAGIC,
+    LEARNER_FIELDS,
+    LEARNER_STATE,
+    LearnerMonitor,
+    LearnerStateReader,
+    PARAM_METADATA,
+    ParamStore,
+    fixed_lateral_values,
+)
 
 
 class FakeDisplayController:
@@ -171,6 +183,89 @@ class ParamStoreTest(unittest.TestCase):
             for key, (low, high) in runtime.items():
                 self.assertEqual((float(ui[key]["min"]), float(ui[key]["max"])), (low, high),
                                  f"{group}.{key}")
+
+
+def learner_payload(**values):
+    fields = []
+    for name, fmt in LEARNER_FIELDS:
+        default = [0] * int(fmt[:-1]) if len(fmt) > 1 else 0
+        value = values.get(name, default)
+        fields.extend(value if isinstance(value, list) else [value])
+    return LEARNER_STATE.pack(*fields)
+
+
+class LearnerStateTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.path = Path(self.temporary.name) / "k230_learner_state"
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def publish(self, seq, **values):
+        payload = learner_payload(**values)
+        header = IPC_HEADER.pack(IPC_MAGIC, 1, LEARNER_STATE.size, 0, seq, 123, len(payload), 0)
+        self.path.write_bytes(header + payload)
+
+    def test_layout_matches_cpp_offsets(self):
+        """ipc_messages.h의 offsetof 고정값과 Python 필드 배치가 같아야 한다."""
+        source = (Path(__file__).resolve().parents[1] / "src" / "ipc_messages.h").read_text(encoding="utf-8")
+        size = int(re.search(r"sizeof\(K230LearnerState\) == (\d+)", source).group(1))
+        self.assertEqual(LEARNER_STATE.size, size)
+        offsets, offset = {}, 0
+        for name, fmt in LEARNER_FIELDS:
+            offsets[name] = offset
+            offset += struct.calcsize("<" + fmt)
+        asserted = re.findall(r"K230_LEARNER_STATE_AT\((\w+), (\d+)\);", source)
+        self.assertGreaterEqual(len(asserted), 8)
+        for name, expected in asserted:
+            self.assertEqual(offsets[name], int(expected), name)
+
+    def test_reader_decodes_and_skips_torn_writes(self):
+        self.publish(4, timestamp_ns=5_000_000_000, flags=0b1000000011, steer_ratio=14.88,
+                     bucket_points=[12, 204, 464, 1440, 1500, 1036, 292, 49])
+        reader = LearnerStateReader(str(self.path))
+        seq, _, state = reader.read()
+        self.assertEqual(seq, 4)
+        self.assertAlmostEqual(state["steer_ratio"], 14.88, places=5)
+        self.assertEqual(state["bucket_points"][4], 1500)
+        self.assertTrue(state["flags"]["vehicle_inputs_ok"] and state["flags"]["vehicle_valid"])
+        self.assertTrue(state["flags"]["use_vehicle"] and not state["flags"]["use_torque"])
+        self.publish(5, steer_ratio=1.0)  # 쓰는 중
+        self.assertIsNone(reader.read())
+        self.path.unlink()
+        self.assertIsNone(reader.read())
+
+    def test_monitor_keeps_one_trend_row_per_publish(self):
+        monitor = LearnerMonitor(LearnerStateReader(str(self.path)))
+        self.assertFalse(monitor.snapshot({})["available"])
+        self.publish(2, timestamp_ns=1_000_000_000, lat_accel_factor=4.44)
+        monitor.sample()
+        monitor.sample()
+        self.publish(4, timestamp_ns=2_000_000_000, lat_accel_factor=4.40)
+        snapshot = monitor.snapshot(json.loads(
+            (Path(__file__).resolve().parents[1] / "params" / "steering.json").read_text(encoding="utf-8")))
+        self.assertTrue(snapshot["available"])
+        self.assertEqual([row[0] for row in monitor.trend()], [1.0, 2.0])
+        self.assertAlmostEqual(snapshot["trend_row"][7], 4.40, places=5)
+        self.publish(6, timestamp_ns=500_000_000)  # 시각이 거꾸로: 다른 부팅
+        monitor.sample()
+        self.assertEqual([row[0] for row in monitor.trend()], [0.5])
+
+    def test_fixed_values_follow_runtime_scaling(self):
+        fixed = fixed_lateral_values({"torque_max_lat_accel_raw": 40, "torque_kf_raw": 9,
+                                      "torque_friction_raw": 100, "steer_ratio": 14.9})
+        self.assertAlmostEqual(fixed["lat_accel_factor"], 4.0 / 0.9, places=6)
+        self.assertAlmostEqual(fixed["friction"], 0.1, places=9)
+        self.assertIsNone(fixed_lateral_values({"torque_kf_raw": 0})["lat_accel_factor"])
+
+    def test_page_has_learner_tab(self):
+        self.assertIn('data-group="learners"', HTML)
+        self.assertIn("/api/learners/trend", HTML)
+        # HTML은 일반 문자열이라 JS의 \n을 두 번 이스케이프해야 한다(아니면 스크립트 전체가 죽는다)
+        self.assertIn('lines.join("\\n")', HTML)
+        # 학습 스위치는 실시간 학습 탭에만 있다(조향 탭에서 숨김)
+        self.assertIn('hiddenKeys = {steering: ["use_live_vehicle_params", "use_live_torque_params"]}', HTML)
 
 
 if __name__ == "__main__":

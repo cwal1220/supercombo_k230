@@ -202,7 +202,8 @@ The same benchmark build produces self-checking binaries that need no board:
 
 | Target | Covers |
 | --- | --- |
-| `check_control_replay` | K7 engage gates, torque limits, CAN frame build |
+| `check_control_replay` | K7 engage gates, torque limits, CAN frame build; learned-parameter consumers (switch off is bit-identical, live vehicle model = opendbc `calc_curvature`, live torque = lat-accel-space PID ÷ latAccelFactor, `paramsd_invalid` gate, roll-shifted curvature limit) |
+| `check_lateral_learners` | paramsd EKF (Jacobian, Joseph PD, convergence, gates, output limits, persistence, gyro bias) and torqued (TLS vs a closed-form reference, buckets, gates, filter/decay, 4 Hz/12 s schedule, cache) and the controlsd glue |
 | `check_departure_alert` | departure alert state machine |
 | `check_adaptive_cruise` | vision cruise button pacing and limits |
 | `check_model_output_parser` | supercombo raw-output layout and temporal-input convention |

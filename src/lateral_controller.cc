@@ -57,6 +57,20 @@ void LateralController::update_params(
   config_.can_config.mdps_speed_spoof_kph = driving_params.mdps_speed_spoof_kph;
 }
 
+void LateralController::set_live_params(const LiveLateralParams &live, bool vehicle_valid,
+                                        bool calibrated) {
+  live_ = live;
+  live_vehicle_valid_ = vehicle_valid;
+  live_calibrated_ = calibrated;
+}
+
+LiveLateralParams LateralController::live_params() const {
+  LiveLateralParams live = live_;
+  live.use_vehicle = live_.use_vehicle && config_.steering_params.use_live_vehicle_params;
+  live.use_torque = live_.use_torque && config_.steering_params.use_live_torque_params;
+  return live;
+}
+
 // 차량 버튼/상태와 lane path를 바탕으로 LKAS 제어 결과와 CAN frame을 만든다.
 LateralControlResult LateralController::update(const LateralPath &path,
                                                    const LateralTarget &target,
@@ -99,6 +113,7 @@ LateralControlResult LateralController::update(const LateralPath &path,
       vehicle_state, now_s,
       static_cast<double>(config_.driving_params.vehicle_state_timeout_ms) / 1000.0);
   const float speed_mps = result.control_speed_kph / 3.6f;
+  const LiveLateralParams live = live_params();
   /* plan 나이: 근거 프레임 캡처 시각부터 지금까지. lag 보상과 staleness
    * gate가 함께 쓴다. 타임스탬프가 없으면(테스트, 초기값) 0으로 둔다. */
   float plan_age_s = 0.0f;
@@ -111,7 +126,7 @@ LateralControlResult LateralController::update(const LateralPath &path,
   }
   result.desired_curvature = lag_adjusted_desired_curvature(
       target, speed_mps, plan_age_s, config_.steering_params.steer_actuator_delay,
-      prev_desired_curvature_);
+      prev_desired_curvature_, live.use_vehicle ? live.roll_rad : 0.0f);
   /* plan이 무효인 프레임은 0을 돌려주므로 직전 값을 보존한다. 짧은 공백 뒤에
    * 0에서 다시 램프업하면 복귀가 느려진다. */
   if (target.valid) prev_desired_curvature_ = result.desired_curvature;
@@ -174,6 +189,7 @@ LateralControlResult LateralController::update(const LateralPath &path,
   result.cut_steer_temp = update_cut_steer_state(result.active, vehicle_state);
 
   const bool steering_pressed = update_steering_pressed(vehicle_state.driver_torque);
+  result.steering_pressed = steering_pressed;
   const SteeringParams &control_params = config_.steering_params;
   const bool yaw_rate_valid = signal_time_fresh(
                                   vehicle_state.esp12_time_s, now_s,
@@ -222,7 +238,7 @@ LateralControlResult LateralController::update(const LateralPath &path,
     const int raw_torque = torque_controller_.update(
         true, speed_mps, result.desired_curvature, vehicle_state.steering_angle_deg,
         steering_pressed, steer_rate_limited_ || above_fault_angle, control_params,
-        vehicle_state.yaw_rate_rad_s, yaw_rate_valid, road_bank_lat_accel_);
+        vehicle_state.yaw_rate_rad_s, yaw_rate_valid, road_bank_lat_accel_, live);
     result.desired_torque = static_cast<int>(std::lround(
         static_cast<float>(raw_torque) * driver_torque_scale() * angle_scale));
     result.actual_curvature = torque_controller_.actual_curvature();
@@ -241,7 +257,7 @@ LateralControlResult LateralController::update(const LateralPath &path,
                               vehicle_state.steering_angle_deg,
                               false, steer_rate_limited_, control_params,
                               vehicle_state.yaw_rate_rad_s, yaw_rate_valid,
-                              road_bank_lat_accel_);
+                              road_bank_lat_accel_, live);
     result.actual_curvature = torque_controller_.actual_curvature();
     result.actual_curvature_vm = torque_controller_.actual_curvature_vm();
     result.actual_curvature_yaw = torque_controller_.actual_curvature_yaw();
@@ -398,6 +414,8 @@ BlockReason LateralController::active_block_reason(
   if (vehicle_state.brake_error) return BlockReason::BrakeError;
   if (vehicle_state.gear != kGearDrive) return BlockReason::GearNotDrive;
   if (vehicle_state.steering_fault) return BlockReason::MdpsFault;
+  if (live_params().use_vehicle && !live_vehicle_valid_ && live_calibrated_)
+    return BlockReason::ParamsdInvalid;
   /* Panda 핸드셰이크는 차량 결함 뒤에 온다. 앞에 두면 시동 직후 health가
    * 도착하기 전의 engage 요청이 panda_not_ready(일시적)로 분류되어 유예되고,
    * 안전벨트/기어 같은 하드 결함이 가려진 채 engage 톤이 울린 뒤 해제된다. */
@@ -431,8 +449,10 @@ BlockReason LateralController::active_block_reason(
 
 float lag_adjusted_desired_curvature(const LateralTarget &target, float speed_mps,
                                      float plan_age_s, float steer_actuator_delay_s,
-                                     float prev_curvature) {
+                                     float prev_curvature, float roll_rad) {
   if (!target.valid) return 0.0f;
+  // 바퀴 속도가 끊기면 NaN이다. 그대로 두면 clamp_float가 -kMaxCurvature를 낸다.
+  if (!std::isfinite(speed_mps)) return prev_curvature;
   /* plan은 카메라 캡처 시점 기준이므로 소비 시점까지의 실측 나이를 actuator
    * delay에 더해 보간한다. 부수 효과로 desired curvature가 20Hz 계단 대신
    * 매 tick plan 위를 따라 전진한다. */
@@ -458,10 +478,11 @@ float lag_adjusted_desired_curvature(const LateralTarget &target, float speed_mp
       prev_curvature + max_curvature_rate * kCurvatureRateWindowS);
 
   const float limit_speed = std::max(speed, 1.0f);
+  const float roll_lat_accel = roll_rad * 9.81f;
   desired_curvature = clamp_float(
       desired_curvature,
-      -kMaxLateralAccel / (limit_speed * limit_speed),
-      kMaxLateralAccel / (limit_speed * limit_speed));
+      (-kMaxLateralAccel + roll_lat_accel) / (limit_speed * limit_speed),
+      (kMaxLateralAccel + roll_lat_accel) / (limit_speed * limit_speed));
   desired_curvature = clamp_float(desired_curvature,
                                   -kMaxCurvature, kMaxCurvature);
   return desired_curvature;

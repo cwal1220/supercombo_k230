@@ -129,12 +129,15 @@ int main() {
     K230LatestChannel model_sub;
     K230LatestChannel control_sub;
     K230LatestChannel panda_sub;
+    K230LatestChannel learner_sub;
     bool model_open = false;
     bool control_open = false;
     bool panda_open = false;
+    bool learner_open = false;
     uint64_t model_seq = 0;
     uint64_t control_seq = 0;
     uint64_t panda_seq = 0;
+    uint64_t learner_seq = 0;
     uint64_t frame_seq = 0;
     uint64_t config_revision = UINT64_MAX;
     uint64_t next_config_poll_ns = 0;
@@ -214,6 +217,8 @@ int main() {
                               sizeof(K230ControlState));
         open_optional_channel(panda_sub, &panda_open, kK230PandaStateTopic,
                               sizeof(K230PandaState));
+        open_optional_channel(learner_sub, &learner_open, kK230LearnerStateTopic,
+                              sizeof(K230LearnerState));
         K230ModelState model_state;
         if (model_open && model_sub.read_new(&model_seq, &model_state,
                                              sizeof(model_state), 0)) {
@@ -231,6 +236,12 @@ int main() {
                                              sizeof(panda_state), 0)) {
           writer.write_state(K230RecordType::PandaState, panda_state.timestamp_ns,
                              &panda_state, sizeof(panda_state));
+        }
+        K230LearnerState learner_state;
+        if (learner_open && learner_sub.read_new(&learner_seq, &learner_state,
+                                                 sizeof(learner_state), 0)) {
+          writer.write_state(K230RecordType::LearnerState, learner_state.timestamp_ns,
+                             &learner_state, sizeof(learner_state));
         }
       }
 

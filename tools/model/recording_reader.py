@@ -25,6 +25,7 @@ RECORD_CAN_TX = 2
 RECORD_MODEL_STATE = 3
 RECORD_CONTROL_STATE = 4
 RECORD_PANDA_STATE = 5
+RECORD_LEARNER_STATE = 6
 
 FRAME_INDEX_RECORD = np.dtype([
     ("frame_id", "<u8"),
@@ -63,6 +64,23 @@ CONTROL_STATE = np.dtype([
     ("engage_reject_event_id", "<u4"),
     ("engage_reject_block", "S32"),
     ("ego_speed_kph", "<f4"),
+])
+
+# K230LearnerState (paramsd/torqued output, 20 Hz). flags bits: ipc_messages.h kK230Learner*.
+LEARNER_STATE = np.dtype([
+    ("timestamp_ns", "<u8"), ("flags", "<u4"),
+    ("steer_ratio", "<f4"), ("stiffness_factor", "<f4"), ("roll_rad", "<f4"),
+    ("angle_offset_average_deg", "<f4"), ("angle_offset_deg", "<f4"),
+    ("steer_ratio_std", "<f4"), ("stiffness_factor_std", "<f4"),
+    ("angle_offset_average_std", "<f4"), ("angle_offset_fast_std", "<f4"),
+    ("yaw_bias_rad_s", "<f4"),
+    ("lat_accel_factor_raw", "<f4"), ("lat_accel_offset_raw", "<f4"), ("friction_raw", "<f4"),
+    ("lat_accel_factor", "<f4"), ("lat_accel_offset", "<f4"), ("friction", "<f4"),
+    ("decay", "<f4"), ("max_resets", "<f4"),
+    ("total_bucket_points", "<i4"), ("cal_perc", "<i4"),
+    ("road_bank_lat_accel", "<f4"),
+    ("prior_steer_ratio", "<f4"), ("prior_lat_accel_factor", "<f4"), ("prior_friction", "<f4"),
+    ("bucket_points", "<i2", (8,)), ("reserved", "<u4"),
 ])
 
 # The head of K230ModelState (frame_id ..). Only the fields these tools need are
@@ -274,6 +292,12 @@ class EventRecord:
                              f"!= {expected}; K230ControlState changed without a "
                              f"recording-version bump")
         return np.frombuffer(self.payload, CONTROL_STATE, count=1)[0]
+
+    def learner_state(self) -> np.void:
+        if len(self.payload) != LEARNER_STATE.itemsize:
+            raise ValueError(f"{self.path}: learner state payload {len(self.payload)} "
+                             f"!= {LEARNER_STATE.itemsize}")
+        return np.frombuffer(self.payload, LEARNER_STATE, count=1)[0]
 
     def model_layout(self) -> dict[str, int]:
         """K230ModelState offsets for this record's version, checked against

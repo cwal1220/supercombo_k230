@@ -38,6 +38,7 @@ constexpr char kK230CanLogTopic[] = "/k230_can_log";
 constexpr char kK230SendCanLogTopic[] = "/k230_sendcan_log";
 constexpr char kK230PandaStateTopic[] = "/k230_panda_state";
 constexpr char kK230ControlStateTopic[] = "/k230_control_state";
+constexpr char kK230LearnerStateTopic[] = "/k230_learner_state";
 
 constexpr uint32_t kK230HudFlagLaneless = 1U << 0;
 constexpr uint32_t kK230HudFlagBrakeHold = 1U << 1;
@@ -285,6 +286,71 @@ struct K230ControlState {
     char engage_reject_block[32] = {};
     float ego_speed_kph = 0.0f;
 };
+
+/* paramsd·torqued 출력(상류 vehicleParameters·lateralTorqueParameters). controlsd가
+ * paramsd 출력마다(20 Hz) 발행하고 recordd가 LearnerState로 저장한다. */
+constexpr uint32_t kK230LearnerVehicleInputsOk = 1U << 0;
+constexpr uint32_t kK230LearnerVehicleValid = 1U << 1;
+constexpr uint32_t kK230LearnerSensorValid = 1U << 2;
+constexpr uint32_t kK230LearnerSteerRatioValid = 1U << 3;
+constexpr uint32_t kK230LearnerStiffnessValid = 1U << 4;
+constexpr uint32_t kK230LearnerOffsetAverageValid = 1U << 5;
+constexpr uint32_t kK230LearnerOffsetValid = 1U << 6;
+constexpr uint32_t kK230LearnerTorqueInputsOk = 1U << 7;
+constexpr uint32_t kK230LearnerTorqueValid = 1U << 8;
+constexpr uint32_t kK230LearnerUseVehicle = 1U << 9;   // 스위치 적용 후 실제 사용
+constexpr uint32_t kK230LearnerUseTorque = 1U << 10;
+constexpr uint32_t kK230LearnerVehicleRestored = 1U << 11;
+constexpr uint32_t kK230LearnerTorqueRestored = 1U << 12;
+
+struct K230LearnerState {
+    uint64_t timestamp_ns = 0;
+    uint32_t flags = 0;
+    float steer_ratio = 0.0f;
+    float stiffness_factor = 0.0f;
+    float roll_rad = 0.0f;
+    float angle_offset_average_deg = 0.0f;
+    float angle_offset_deg = 0.0f;
+    float steer_ratio_std = 0.0f;
+    float stiffness_factor_std = 0.0f;
+    float angle_offset_average_std = 0.0f;
+    float angle_offset_fast_std = 0.0f;
+    float yaw_bias_rad_s = 0.0f;
+    float lat_accel_factor_raw = 0.0f;
+    float lat_accel_offset_raw = 0.0f;
+    float friction_raw = 0.0f;
+    float lat_accel_factor = 0.0f;
+    float lat_accel_offset = 0.0f;
+    float friction = 0.0f;
+    float decay = 0.0f;
+    float max_resets = 0.0f;
+    int32_t total_bucket_points = 0;
+    int32_t cal_perc = 0;
+    float road_bank_lat_accel = 0.0f;  // 기존 편경사 추정(비교용)
+    // 학습기 사전값. controlsd 시작 때 파라미터에서 고정된다.
+    float prior_steer_ratio = 0.0f;
+    float prior_lat_accel_factor = 0.0f;
+    float prior_friction = 0.0f;
+    int16_t bucket_points[8] = {};
+    uint32_t reserved = 0;
+};
+/* recordd가 그대로 저장하고 tools/model/recording_reader.py LEARNER_STATE와
+ * scripts/k230_param_server.py LEARNER_FIELDS가 위치로 읽는다(check_param_server.py가 대조). */
+#define K230_LEARNER_STATE_AT(field, expected) \
+    static_assert(offsetof(K230LearnerState, field) == (expected), \
+                  "K230LearnerState." #field " moved")
+K230_LEARNER_STATE_AT(flags, 8);
+K230_LEARNER_STATE_AT(steer_ratio, 12);
+K230_LEARNER_STATE_AT(yaw_bias_rad_s, 48);
+K230_LEARNER_STATE_AT(lat_accel_factor_raw, 52);
+K230_LEARNER_STATE_AT(max_resets, 80);
+K230_LEARNER_STATE_AT(total_bucket_points, 84);
+K230_LEARNER_STATE_AT(road_bank_lat_accel, 92);
+K230_LEARNER_STATE_AT(prior_steer_ratio, 96);
+K230_LEARNER_STATE_AT(bucket_points, 108);
+K230_LEARNER_STATE_AT(reserved, 124);
+#undef K230_LEARNER_STATE_AT
+static_assert(sizeof(K230LearnerState) == 128, "K230LearnerState size");
 
 /* controlsd가 발행하고 overlayd/recordd가 읽는 공유 레이아웃이다. 기록 v5는 이
  * 구조체를 그대로 저장하고 tools/model/recording_reader.py가 위치로 디코드하므로 필드

@@ -36,6 +36,8 @@ constexpr JsonBoolField<SteeringParams> kSteeringBools[] = {
     {"torque_use_angle", &SteeringParams::torque_use_angle},
     {"avoid_lkas_fault_enabled", &SteeringParams::avoid_lkas_fault_enabled},
     {"live_bank_compensation", &SteeringParams::live_bank_compensation},
+    {"use_live_vehicle_params", &SteeringParams::use_live_vehicle_params},
+    {"use_live_torque_params", &SteeringParams::use_live_torque_params},
 };
 constexpr JsonIntField<SteeringParams> kSteeringInts[] = {
     {"steering_pressed_threshold", 0, 500, &SteeringParams::steering_pressed_threshold},

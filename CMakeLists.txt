@@ -80,6 +80,7 @@ add_k230_library(control_core
   src/departure_alert.cc
   src/hyundai_can.cc
   src/lateral_controller.cc
+  src/lateral_learners.cc
   src/lateral_path.cc
   src/lateral_torque.cc
   src/vehicle_can.cc
@@ -262,11 +263,17 @@ if(SUPERCOMBO_BUILD_DIAGNOSTICS)
   add_host_tool(check_recording_writer diagnostics/check_recording_writer.cc)
   target_link_libraries(check_recording_writer PRIVATE recording_writer)
 
+  add_host_tool(check_lateral_learners diagnostics/check_lateral_learners.cc)
+  target_link_libraries(check_lateral_learners PRIVATE control_core)
+
   add_host_tool(check_lateral_mpc diagnostics/check_lateral_mpc.cc)
   target_link_libraries(check_lateral_mpc PRIVATE planning)
 
   add_host_tool(replay_planner diagnostics/replay_planner.cc)
   target_link_libraries(replay_planner PRIVATE planning)
+
+  add_host_tool(replay_lateral_learners diagnostics/replay_lateral_learners.cc)
+  target_link_libraries(replay_lateral_learners PRIVATE control_core)
 
   add_host_tool(replay_closed_loop diagnostics/replay_closed_loop.cc)
   target_link_libraries(replay_closed_loop PRIVATE planning)

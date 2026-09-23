@@ -25,11 +25,13 @@ struct SteeringParams {
   int steer_driver_factor = 1;
   int steering_pressed_threshold = 150;
 
-  int torque_max_lat_accel_raw = 40;
+  /* 배율(latAccelFactor) = max_lat_accel / (kf_raw·0.1). 56/20 → 2.8은 torqued 실측(2.65~2.95). */
+  int torque_max_lat_accel_raw = 56;
   /* openpilot latcontrol_torque.KP x10(횡가속도 공간). 속도별 이득 곡선
    * KP_INTERP의 30 m/s 끝점이고 나머지 점은 상류 고정값이다. */
   int torque_kp_raw = 8;
-  int torque_kf_raw = 9;
+  int torque_kf_raw = 20;
+  // 횡가속도 공간 KI = ki_raw / kf_raw. 3/20 = 상류 KI 0.15.
   int torque_ki_raw = 3;
   int torque_friction_raw = 100;
   bool torque_use_angle = true;
@@ -45,13 +47,17 @@ struct SteeringParams {
    * 되돌리지 못한다(2026-09-21 실측: 폴트 중 2프레임 컷 34회 모두 1.5초 유지).
    * 길이를 바꿔 되돌아가는 지점을 찾기 위한 실측 파라미터다. */
   int avoid_lkas_fault_cut_frames = 2;
-  float angle_offset_deg = -0.7f;
+  float angle_offset_deg = -1.6f;  // paramsd 학습 평균(2026-09-21~23 −1.5~−1.6°)
   /* openpilot latAccelOffset(m/s^2). 상수 횡가속 편향을 FF에서 뺀다.
    * +y=오른쪽 관례라 양수 = 우측 쏠림 보정. fit 도구 출력을 그대로 넣는다. */
   float torque_lat_accel_offset = 0.0f;
   /* ESP12 실측으로 추정한 도로 편경사(뱅크)를 FF에서 실시간 보정한다.
    * 켜면 상수 offset이 커버 못 하는 커브별 편경사까지 잡는다. */
   bool live_bank_compensation = true;
+  /* paramsd·torqued 학습값 사용. 끄면 학습기는 계산·기록만 한다. 차량 값을 켜면
+   * 롤 보정이 live_bank_compensation을 대신한다. */
+  bool use_live_vehicle_params = false;
+  bool use_live_torque_params = false;
   float mass_kg = 1816.0f;
   float wheelbase_m = 2.855f;
   float center_to_front_ratio = 0.4f;

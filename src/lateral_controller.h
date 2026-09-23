@@ -29,10 +29,11 @@ constexpr float kMaxLateralAccel = 3.3f;
 constexpr float kMaxPlanAgeCompS = 0.25f;
 
 /* lateral MPC 출력을 actuator delay + plan 나이와 횡가속도 한계에 맞춰 보정한다.
- * 컨트롤러와 replay_planner가 같은 구현을 호출한다. */
+ * 컨트롤러와 replay_planner가 같은 구현을 호출한다. 롤이 있으면 상류 clip_curvature처럼
+ * 횡가속 한계를 roll·g만큼 옮긴다. */
 float lag_adjusted_desired_curvature(const LateralTarget &target, float speed_mps,
                                      float plan_age_s, float steer_actuator_delay_s,
-                                     float prev_curvature);
+                                     float prev_curvature, float roll_rad = 0.0f);
 
 struct LateralControllerConfig {
   bool zero_release_when_inactive = true;
@@ -64,6 +65,7 @@ struct LateralControlResult {
   float feedforward = 0.0f;
   int desired_torque = 0;
   int apply_torque = 0;
+  bool steering_pressed = false;
   bool cut_steer_temp = false;
   BlockReason active_block = BlockReason::None;
   std::vector<CanFrame> frames;
@@ -77,6 +79,11 @@ public:
   // 제어 상태를 유지한 채 런타임 파라미터를 즉시 교체한다.
   void update_params(const SteeringParams &steering_params,
                      const DrivingParams &driving_params);
+
+  /* 학습기의 최신 출력. use_*는 값이 있다는 뜻이고 실제 사용은 스위치가 정한다.
+   * 차량 값을 쓰는 중 vehicle_valid가 거짓이고 캘리브가 끝났으면 차단한다
+   * (상류 paramsdTemporaryError). */
+  void set_live_params(const LiveLateralParams &live, bool vehicle_valid, bool calibrated);
 
   // 차량 버튼/상태와 lane path를 바탕으로 LKAS 제어 결과와 CAN frame을 만든다.
   LateralControlResult update(const LateralPath &path,
@@ -129,8 +136,14 @@ private:
   // LKAS11 counter를 seed frame 기준으로 openpilot 방식에 맞춰 증가시킨다.
   int next_lkas11_counter(const VehicleCanState &vehicle_state);
 
+  // 스위치를 적용한 학습값
+  LiveLateralParams live_params() const;
+
   LateralControllerConfig config_{};
   TorqueController torque_controller_;
+  LiveLateralParams live_{};
+  bool live_vehicle_valid_ = true;
+  bool live_calibrated_ = false;
   bool engaged_ = false;
   /* clip_curvature의 직전 출력. active와 무관하게 이어가야 재engage 때 0에서
    * 램프업하지 않는다(openpilot controlsd도 매 틱 갱신한다). */

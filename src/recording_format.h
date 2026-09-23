@@ -12,7 +12,7 @@
  * K230ModelState에서 뺐다.
  * v5: 소비자가 없던 plan_position_stds/plan_orientations(792 B)를
  * K230ModelState에서 뺐다. 페이로드가 4048 -> 3256 B로 줄어 v4 이하 녹화와
- * 호환되지 않는다. */
+ * 호환되지 않는다. LearnerState(6)는 v5에 더한 타입이라 모르는 리더는 건너뛴다. */
 constexpr uint32_t kK230RecordingVersion = 5;
 
 enum class K230RecordType : uint16_t {
@@ -21,6 +21,7 @@ enum class K230RecordType : uint16_t {
   ModelState = 3,
   ControlState = 4,
   PandaState = 5,
+  LearnerState = 6,
 };
 
 #pragma pack(push, 1)

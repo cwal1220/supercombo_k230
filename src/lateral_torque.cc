@@ -26,6 +26,7 @@ constexpr float kCivicCenterToFront = kCivicWheelbase * 0.4f;
 constexpr float kCivicCenterToRear = kCivicWheelbase - kCivicCenterToFront;
 constexpr float kCivicTireStiffnessFront = 192150.0f;
 constexpr float kCivicTireStiffnessRear = 202500.0f;
+constexpr float kGravity = 9.81f;
 
 // openpilot KP_INTERP. 마지막 점만 파라미터라 interp를 펼쳐 쓴다.
 float scheduled_kp(float speed_mps, float kp_top) {
@@ -84,9 +85,10 @@ int TorqueController::update(bool active,
                                       const SteeringParams &params,
                                       float yaw_rate_rad_s,
                                       bool yaw_rate_valid,
-                                      float road_bank_lat_accel) {
+                                      float road_bank_lat_accel,
+                                      const LiveLateralParams &live) {
   const float actual_curvature = estimate_actual_curvature(
-      speed_mps, steering_angle_deg, params, yaw_rate_rad_s, yaw_rate_valid);
+      speed_mps, steering_angle_deg, params, yaw_rate_rad_s, yaw_rate_valid, live);
 
   const float speed_sq = speed_mps * speed_mps;
   const float desired_lat_accel = desired_curvature * speed_sq;
@@ -129,20 +131,23 @@ int TorqueController::update(bool active,
   const float measurement = actual_lat_accel;
   const float error = setpoint - measurement;
 
+  const Gains g = gains(params, live);
   float feedforward = desired_lat_accel;
   // 상수 편향(offset)은 FF에서 뺀다. bank = -g*sin(도로기울기)이므로
   // 중력의 횡가속 기여(-bank)를 빼려면 bank를 더한다 (2026-08-30 부호 수정)
-  feedforward -= params.torque_lat_accel_offset;
-  if (params.live_bank_compensation) feedforward += road_bank_lat_accel;
+  feedforward -= g.lat_accel_offset;
+  // 학습 롤을 쓰면 상류처럼 roll·g를 빼고, 같은 몫인 편향 추정은 쓰지 않는다
+  if (live.use_vehicle) feedforward -= live.roll_rad * kGravity;
+  else if (params.live_bank_compensation) feedforward += road_bank_lat_accel;
   const float friction = interp(
       apply_deadzone(error + kJerkGain * jerk_filtered_, lat_accel_deadzone),
       {-kFrictionThreshold, kFrictionThreshold},
-      {-params.torque_friction(), params.torque_friction()});
-  feedforward += friction / params.torque_kf();
+      {-g.friction, g.friction});
+  feedforward += friction / g.kf;
 
   const bool freeze_integrator = steering_rate_limited || steering_pressed || speed_mps < 5.0f;
   const float pid_output =
-      pid_update(error, feedforward, freeze_integrator, params, speed_mps);
+      pid_update(error, feedforward, freeze_integrator, params, g, speed_mps);
 
   const int sign = params.torque_output_sign >= 0 ? 1 : -1;
   normalized_output_ = clamp_float(static_cast<float>(sign) * pid_output, -1.0f, 1.0f);
@@ -157,15 +162,27 @@ float TorqueController::estimate_actual_curvature(float speed_mps,
                                                            float steering_angle_deg,
                                                            const SteeringParams &params,
                                                            float yaw_rate_rad_s,
-                                                           bool yaw_rate_valid) {
+                                                           bool yaw_rate_valid,
+                                                           const LiveLateralParams &live) {
   actual_curvature_vm_ = 0.0f;
   actual_curvature_yaw_ = 0.0f;
   if (!std::isfinite(speed_mps) || speed_mps < params.min_steer_speed_mps) return 0.0f;
+  // 상류 VM.update_params(max(x, 0.1), max(sr, 0.1)). 강성 배율은 타이어 계수에 곱해진다.
+  const SteeringParams *vm = &params;
+  float angle_offset_deg = params.angle_offset_deg;
+  if (live.use_vehicle) {
+    live_vehicle_params_ = params;
+    live_vehicle_params_.steer_ratio = std::max(live.steer_ratio, 0.1f);
+    live_vehicle_params_.tire_stiffness_factor =
+        params.tire_stiffness_factor * std::max(live.stiffness_factor, 0.1f);
+    vm = &live_vehicle_params_;
+    angle_offset_deg = live.angle_offset_deg;
+  }
   /* vm 경로의 부호 반전은 openpilot latcontrol_torque와 동일하다. */
-  const float actual_curvature_vm = -vehicle_model_curvature(
-      deg_to_rad(steering_angle_deg - params.angle_offset_deg),
-      speed_mps,
-      params);
+  float curvature = vehicle_model_curvature(
+      deg_to_rad(steering_angle_deg - angle_offset_deg), speed_mps, *vm);
+  if (live.use_vehicle) curvature += roll_compensation(live.roll_rad, speed_mps);
+  const float actual_curvature_vm = -curvature;
   actual_curvature_vm_ = actual_curvature_vm;
   float actual_curvature_yaw = actual_curvature_vm;
   if (yaw_rate_valid && std::isfinite(yaw_rate_rad_s)) {
@@ -179,15 +196,35 @@ float TorqueController::estimate_actual_curvature(float speed_mps,
   return interp(speed_mps, {2.0f, 5.0f}, {actual_curvature_vm, actual_curvature_yaw});
 }
 
+TorqueController::Gains TorqueController::gains(const SteeringParams &params,
+                                                const LiveLateralParams &live) {
+  Gains g;
+  g.kf = params.torque_kf();
+  g.ki = params.torque_ki();
+  g.friction = params.torque_friction();
+  g.lat_accel_offset = params.torque_lat_accel_offset;
+  /* 상류는 PID를 횡가속 공간에서 돌리고 끝에서 latAccelFactor로 나눈다. 여기 PID는
+   * 토크 공간이라 kp·kf를 1/latAccelFactor로 바꾸고 ki도 같은 비로 옮기면 같다.
+   * 마찰은 토크 공간 계수라 그대로(상류 friction × latAccelFactor ÷ latAccelFactor). */
+  if (live.use_torque && std::isfinite(live.lat_accel_factor) && live.lat_accel_factor > 0.0f) {
+    const float kf = 1.0f / live.lat_accel_factor;
+    g.ki = params.torque_ki() * (kf / g.kf);
+    g.kf = kf;
+    g.friction = live.friction;
+    g.lat_accel_offset = live.lat_accel_offset;
+  }
+  return g;
+}
+
 // 차량 모델 slip factor를 파라미터에 맞춰 갱신한다.
 void TorqueController::update_vehicle_model(const SteeringParams &params) {
   const float center_to_front = params.center_to_front_m();
-  if (std::fabs(last_mass_kg_ - params.mass_kg) < 1e-3f &&
-      std::fabs(last_wheelbase_m_ - params.wheelbase_m) < 1e-4f &&
-      std::fabs(last_center_to_front_m_ - center_to_front) < 1e-4f &&
-      std::fabs(last_tire_stiffness_factor_ - params.tire_stiffness_factor) < 1e-4f &&
-      std::fabs(last_steer_ratio_ - params.steer_ratio) < 1e-4f &&
-      std::fabs(last_steer_ratio_rear_ - params.steer_ratio_rear) < 1e-4f) {
+  // 학습 SR·강성은 매 틱 조금씩 바뀌므로 정확히 같을 때만 건너뛴다(상류는 매번 계산)
+  if (last_mass_kg_ == params.mass_kg && last_wheelbase_m_ == params.wheelbase_m &&
+      last_center_to_front_m_ == center_to_front &&
+      last_tire_stiffness_factor_ == params.tire_stiffness_factor &&
+      last_steer_ratio_ == params.steer_ratio &&
+      last_steer_ratio_rear_ == params.steer_ratio_rear) {
     return;
   }
   const float center_to_rear = params.wheelbase_m - center_to_front;
@@ -219,16 +256,22 @@ float TorqueController::vehicle_model_curvature(float steering_angle_rad,
   return curvature_factor * steering_angle_rad / params.steer_ratio;
 }
 
+float TorqueController::roll_compensation(float roll_rad, float speed_mps) const {
+  if (std::fabs(slip_factor_) < 1e-6f) return 0.0f;
+  return kGravity * roll_rad / ((1.0f / slip_factor_) - speed_mps * speed_mps);
+}
+
 // PID 한 스텝을 계산한다.
 float TorqueController::pid_update(float error,
                                             float feedforward,
                                             bool freeze_integrator,
                                             const SteeringParams &params,
+                                            const Gains &gains,
                                             float speed_mps) {
   /* 이득 곡선은 횡가속도 공간이므로 kf를 곱해 토크 공간으로 옮긴다. */
-  p_ = error * scheduled_kp(speed_mps, params.torque_kp()) * params.torque_kf();
-  f_ = feedforward * params.torque_kf();
-  const float next_i = i_ + error * params.torque_ki() * kDtCtrl;
+  p_ = error * scheduled_kp(speed_mps, params.torque_kp()) * gains.kf;
+  f_ = feedforward * gains.kf;
+  const float next_i = i_ + error * gains.ki * kDtCtrl;
   const float control_with_i = p_ + next_i + f_;
   if (((error >= 0.0f && (control_with_i <= 1.0f || next_i < 0.0f)) ||
        (error <= 0.0f && (control_with_i >= -1.0f || next_i > 0.0f))) &&

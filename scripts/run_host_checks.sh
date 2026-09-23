@@ -15,6 +15,7 @@ checks=(
   check_control_replay
   check_departure_alert
   check_k230_can_queue
+  check_lateral_learners
   check_lateral_mpc
   check_model_output_parser
   check_overlay_state

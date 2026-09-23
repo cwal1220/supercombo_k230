@@ -15,7 +15,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
+#include <vector>
 
 namespace {
 
@@ -1043,6 +1045,210 @@ void verify_path_invalid_hold() {
           "an invalid model is not held");
 }
 
+// ---------------------------------------------------------------- paramsd·torqued 소비
+
+LiveLateralParams odd_live_params() {
+  LiveLateralParams live;
+  live.use_vehicle = true;
+  live.steer_ratio = 13.1f;
+  live.stiffness_factor = 0.7f;
+  live.angle_offset_deg = 2.5f;
+  live.roll_rad = 0.04f;
+  live.use_torque = true;
+  live.lat_accel_factor = 3.0f;
+  live.lat_accel_offset = 0.2f;
+  live.friction = 0.05f;
+  return live;
+}
+
+/* 스위치를 끄면 학습값을 넣어도 모든 틱이 비트 단위로 같아야 한다. 무효·캘리브 완료도
+ * 끈 쪽에서는 차단하지 않는다. */
+void verify_live_params_switch_off_is_identical() {
+  LateralControllerConfig config;
+  config.force_engaged = true;
+  config.driving_params.vehicle_state_timeout_ms = 2000;
+  LateralController plain(config), fed(config);
+  double t = 1.0;
+  for (int tick = 0; tick < 600; ++tick, t += 0.01) {
+    VehicleCanState vehicle = ready_vehicle(t);
+    vehicle.steering_angle_deg = 12.0f * std::sin(0.02f * tick);
+    vehicle.yaw_rate_valid = true;
+    vehicle.yaw_rate_rad_s = 0.05f * std::sin(0.02f * tick);
+    vehicle.lat_accel_valid = true;
+    vehicle.lat_accel_mps2 = -0.3f;
+    vehicle.driver_torque = tick % 97 == 0 ? 200 : 10;
+    LateralTarget target = replay_target();
+    for (int i = 0; i < kLateralControlN; ++i) target.curvatures[i] = 0.002f * std::cos(0.01f * tick);
+    fed.set_live_params(odd_live_params(), false, true);
+    const LateralControlResult a = plain.update(replay_path(), target, vehicle, t, tick);
+    const LateralControlResult b = fed.update(replay_path(), target, vehicle, t, tick);
+    require(a.active_block == b.active_block && a.active == b.active,
+            "switched-off learners never block");
+    require(std::memcmp(&a.desired_curvature, &b.desired_curvature, sizeof(float)) == 0 &&
+                std::memcmp(&a.actual_curvature, &b.actual_curvature, sizeof(float)) == 0 &&
+                std::memcmp(&a.normalized_output, &b.normalized_output, sizeof(float)) == 0 &&
+                std::memcmp(&a.feedforward, &b.feedforward, sizeof(float)) == 0 &&
+                a.desired_torque == b.desired_torque && a.apply_torque == b.apply_torque,
+            "switched-off learners leave every tick bit-identical");
+  }
+}
+
+/* 켜면 실제 곡률은 opendbc VehicleModel(update_params(x, sr) → calc_curvature(sa, u, roll))을
+ * 부호 반전한 값이다. double 독립 전사본과 비교한다. */
+double upstream_measured_curvature(const SteeringParams &p, const LiveLateralParams &live,
+                                   double angle_deg, double u) {
+  const double civic_m = 1326.0 + 136.0, civic_l = 2.70, civic_af = civic_l * 0.4;
+  const double civic_ar = civic_l - civic_af;
+  const double m = p.mass_kg, l = p.wheelbase_m, af = p.center_to_front_m(), ar = l - af;
+  const double tsf = p.tire_stiffness_factor, x = std::max<double>(live.stiffness_factor, 0.1);
+  const double cf = 192150.0 * tsf * m / civic_m * (ar / l) / (civic_ar / civic_l) * x;
+  const double cr = 202500.0 * tsf * m / civic_m * (af / l) / (civic_af / civic_l) * x;
+  const double sf = m * (cf * af - cr * ar) / (l * l * cf * cr);
+  const double factor = (1.0 - p.steer_ratio_rear) / (1.0 - sf * u * u) / l;
+  const double sa = (angle_deg - live.angle_offset_deg) * 3.14159265358979323846 / 180.0;
+  const double roll = std::fabs(sf) < 1e-6 ? 0.0 : 9.81 * live.roll_rad / ((1.0 / sf) - u * u);
+  return -(factor * sa / std::max<double>(live.steer_ratio, 0.1) + roll);
+}
+
+void verify_live_vehicle_params_follow_vehicle_model() {
+  SteeringParams params;
+  params.enabled = true;
+  params.torque_use_angle = true;
+  LiveLateralParams live = odd_live_params();
+  live.use_torque = false;
+  for (float u : {3.0f, 12.0f, 27.0f}) {
+    for (float angle : {-30.0f, 0.0f, 4.0f}) {
+      TorqueController torque;
+      const float got = torque.estimate_actual_curvature(u, angle, params, 0.0f, false, live);
+      const double want = upstream_measured_curvature(params, live, angle, u);
+      require(std::fabs(got - want) <= 2e-6 * std::fabs(want) + 1e-9,
+              "live SR, stiffness, offset and roll follow opendbc calc_curvature");
+    }
+  }
+  // 롤은 FF에서 roll·g를 빼고 편경사 추정은 쓰지 않는다(마찰은 포화 구간이라 같다)
+  TorqueController with_roll, without_roll;
+  LiveLateralParams flat = live;
+  flat.roll_rad = 0.0f;
+  params.live_bank_compensation = true;
+  for (int i = 0; i < 150; ++i) {
+    with_roll.update(true, 20.0f, 0.004f, 1.0f, false, false, params, 0.0f, false, -0.5f, live);
+    without_roll.update(true, 20.0f, 0.004f, 1.0f, false, false, params, 0.0f, false, -0.5f, flat);
+  }
+  require(std::fabs((with_roll.feedforward() - without_roll.feedforward()) + live.roll_rad * 9.81f) < 1e-4f,
+          "live roll subtracts roll*g from feedforward and replaces the bank estimate");
+}
+
+/* 상류는 PID를 횡가속 공간에서 돌리고 끝에서 latAccelFactor로 나눈다. 그러면 마찰이 없을 때
+ * 출력 × latAccelFactor가 배율과 무관하다(사전값 경로 포함). 마찰은 토크 공간에 그대로,
+ * 절편은 −offset/latAccelFactor로 더해진다. */
+void verify_live_torque_params_match_upstream_structure() {
+  SteeringParams params;
+  params.enabled = true;
+  params.torque_use_angle = true;
+  params.torque_friction_raw = 0;
+  params.live_bank_compensation = false;
+  const float prior = 1.0f / params.torque_kf();
+  auto run = [&](bool use, float factor, float offset, float friction, std::vector<float> *out) {
+    TorqueController torque;
+    LiveLateralParams live;
+    live.use_torque = use;
+    live.lat_accel_factor = factor;
+    live.lat_accel_offset = offset;
+    live.friction = friction;
+    for (int i = 0; i < 300; ++i) {
+      const float desired = 0.0015f * std::sin(0.03f * i);
+      const float angle = 1.5f * std::sin(0.03f * i - 0.4f);
+      torque.update(true, 20.0f, desired, angle, false, false, params, 0.0f, false, 0.0f, live);
+      out->push_back(torque.normalized_output());
+    }
+  };
+  std::vector<float> base, low, high, offset, friction;
+  run(false, 0.0f, 0.0f, 0.0f, &base);
+  run(true, 3.0f, 0.0f, 0.0f, &low);
+  run(true, 5.5f, 0.0f, 0.0f, &high);
+  run(true, 3.0f, 0.1f, 0.0f, &offset);
+  run(true, 3.0f, 0.0f, 0.05f, &friction);
+  float worst_scale = 0.0f, worst_offset = 0.0f, worst_friction = 0.0f;
+  for (size_t i = 0; i < base.size(); ++i) {
+    require(std::fabs(base[i]) < 0.9f && std::fabs(low[i]) < 0.9f, "outputs stay unsaturated");
+    const float ref = base[i] * prior;
+    worst_scale = std::max({worst_scale, std::fabs(low[i] * 3.0f - ref), std::fabs(high[i] * 5.5f - ref)});
+    const float sign = params.torque_output_sign >= 0 ? 1.0f : -1.0f;
+    worst_offset = std::max(worst_offset, std::fabs((offset[i] - low[i]) * 3.0f + sign * 0.1f));
+    // 마찰은 |오차| < 0.2에서 선형이라 차이가 토크 공간 0.05 이하, 부호는 오차를 따른다
+    worst_friction = std::max(worst_friction, std::fabs(friction[i] - low[i]) - 0.05f);
+  }
+  require(worst_scale < 2e-5f, "output times latAccelFactor is independent of the factor");
+  require(worst_offset < 2e-5f, "the learned offset enters as -offset/latAccelFactor");
+  require(worst_friction < 1e-6f, "friction is a torque-space term bounded by the coefficient");
+}
+
+void verify_paramsd_invalid_blocks_only_when_used() {
+  LateralControllerConfig config;
+  config.force_engaged = true;
+  config.driving_params.vehicle_state_timeout_ms = 2000;
+  config.steering_params.use_live_vehicle_params = true;
+  LateralController controller(config);
+  const VehicleCanState vehicle = ready_vehicle(1.0);
+  controller.set_live_params(odd_live_params(), true, true);
+  require(controller.update(replay_path(), replay_target(), vehicle, 1.0, 0).active,
+          "valid learned params keep control active");
+  controller.set_live_params(odd_live_params(), false, false);
+  require(controller.update(replay_path(), replay_target(), vehicle, 1.01, 1).active,
+          "invalid params before calibration do not block (upstream cal_status check)");
+  controller.set_live_params(odd_live_params(), false, true);
+  require(controller.update(replay_path(), replay_target(), vehicle, 1.02, 2).active_block ==
+              BlockReason::ParamsdInvalid,
+          "invalid learned params block once calibrated");
+  LiveLateralParams unseen = odd_live_params();
+  unseen.use_vehicle = false;
+  controller.set_live_params(unseen, false, true);
+  require(controller.update(replay_path(), replay_target(), vehicle, 1.03, 3).active_block !=
+              BlockReason::ParamsdInvalid,
+          "no block before paramsd has published (upstream sm.seen)");
+}
+
+void verify_curvature_limit_follows_roll() {
+  LateralTarget target = replay_target();
+  for (int i = 0; i < kLateralControlN; ++i) {
+    target.curvatures[i] = 0.05f;
+    target.psis[i] = 0.05f * 20.0f * model_t_idx(i);
+  }
+  const float v = 20.0f, roll = 0.03f;
+  const float up = lag_adjusted_desired_curvature(target, v, 0.0f, 0.34f, 0.05f, roll);
+  require(std::fabs(up - (kMaxLateralAccel + roll * 9.81f) / (v * v)) < 1e-7f,
+          "roll moves the upper lateral accel bound by roll*g");
+  for (int i = 0; i < kLateralControlN; ++i) {
+    target.curvatures[i] = -0.05f;
+    target.psis[i] = -target.psis[i];
+  }
+  const float down = lag_adjusted_desired_curvature(target, v, 0.0f, 0.34f, -0.05f, roll);
+  require(std::fabs(down - (-kMaxLateralAccel + roll * 9.81f) / (v * v)) < 1e-7f,
+          "and the lower bound by the same roll*g");
+}
+
+// 2026-09-24 실차: 663 ms 멈춤 뒤 NaN 속도가 좌측 최대 곡률을 심어 재활성 때 32° 조향했다.
+void verify_stale_speed_keeps_curvature() {
+  LateralControllerConfig config;
+  config.force_engaged = true;
+  LateralController controller(config);
+  const LateralTarget target = replay_target();
+  float before = 0.0f;
+  for (int i = 0; i < 20; ++i) {
+    const double t = 1.0 + 0.01 * i;
+    before = controller.update(replay_path(), target, ready_vehicle(t), t, i).desired_curvature;
+  }
+  const LateralControlResult stale =
+      controller.update(replay_path(), target, ready_vehicle(1.19), 1.9, 20);
+  require(stale.active_block == BlockReason::VehicleStateStale, "wheel speed older than the timeout");
+  require(stale.desired_curvature == before, "stale speed keeps the last desired curvature");
+  const LateralControlResult back =
+      controller.update(replay_path(), target, ready_vehicle(1.91), 1.91, 21);
+  const float step = kMaxLateralJerk / (60.0f / 3.6f * 60.0f / 3.6f) * kCurvatureRateWindowS;
+  require(std::fabs(back.desired_curvature - before) <= step * 1.001f,
+          "recovery resumes from the pre-stall curvature");
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -1074,6 +1280,12 @@ int main(int argc, char **argv) {
     verify_model_path_adapter();
     verify_panda_health_hold();
     verify_path_invalid_hold();
+    verify_live_params_switch_off_is_identical();
+    verify_live_vehicle_params_follow_vehicle_model();
+    verify_live_torque_params_match_upstream_structure();
+    verify_paramsd_invalid_blocks_only_when_used();
+    verify_curvature_limit_follows_roll();
+    verify_stale_speed_keeps_curvature();
     if (argc == 1) return;
     /* 픽스처는 60초 연속 주행 구간이어야 한다(active > 5900틱, 토크 > 0). 정차
      * 구간은 이 전제에 걸려 실패한다. tools/control/export_can_fixture.py가 녹화
