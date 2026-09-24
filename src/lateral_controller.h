@@ -28,9 +28,16 @@ constexpr float kMaxLateralAccel = 3.3f;
  * 별도로 차단한다. */
 constexpr float kMaxPlanAgeCompS = 0.25f;
 
-/* lateral MPC 출력을 actuator delay + plan 나이와 횡가속도 한계에 맞춰 보정한다.
- * 컨트롤러와 replay_planner가 같은 구현을 호출한다. 롤이 있으면 상류 clip_curvature처럼
- * 횡가속 한계를 roll·g만큼 옮긴다. */
+/* lateral MPC plan을 actuator delay + plan 나이만큼 앞에서 읽은 곡률. 상류에선 modeld의
+ * action.desiredCurvature 자리다. */
+float lag_adjusted_curvature(const LateralTarget &target, float speed_mps, float plan_age_s,
+                             float steer_actuator_delay_s);
+
+/* openpilot drive_helpers.clip_curvature: 직전 출력 기준 횡저크, 횡가속(롤만큼 이동), 최대 곡률. */
+float clip_curvature(float speed_mps, float prev_curvature, float new_curvature,
+                     float roll_rad = 0.0f);
+
+// 둘을 잇는다. plan이 무효면 0. 컨트롤러와 replay_planner가 같은 구현을 쓴다.
 float lag_adjusted_desired_curvature(const LateralTarget &target, float speed_mps,
                                      float plan_age_s, float steer_actuator_delay_s,
                                      float prev_curvature, float roll_rad = 0.0f);
@@ -145,8 +152,8 @@ private:
   bool live_vehicle_valid_ = true;
   bool live_calibrated_ = false;
   bool engaged_ = false;
-  /* clip_curvature의 직전 출력. active와 무관하게 이어가야 재engage 때 0에서
-   * 램프업하지 않는다(openpilot controlsd도 매 틱 갱신한다). */
+  /* clip_curvature의 직전 출력. 비활성 중엔 상류 controlsd처럼 실제 곡률을 따라가
+   * 재활성 때 거기서 한계 안으로 출발한다. */
   float prev_desired_curvature_ = 0.0f;
   /* path 유효성 디바운스: 차단은 즉시, 복귀는 연속 유효 0.5s 후.
    * 정지 부근에서 plan 도달거리가 경계를 넘나들며 active가 깜빡이고

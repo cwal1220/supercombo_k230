@@ -1270,6 +1270,38 @@ void verify_steering_json_matches_defaults() {
           "pre-2026-09-24 raw gain keys are rejected, not silently defaulted");
 }
 
+/* 상류 controlsd: 비활성 중 목표 곡률은 실제 곡률을 따라가고, 재활성 때 거기서 한계 안으로 출발한다. */
+void verify_inactive_desired_tracks_actual() {
+  LateralControllerConfig config;
+  config.force_engaged = true;
+  config.steering_params.angle_offset_deg = 0.0f;
+  LateralController controller(config);
+  const float v = 60.0f / 3.6f;
+  const float step = kMaxLateralJerk / (v * v) * kCurvatureRateWindowS;
+  LateralPath blocked = replay_path();
+  blocked.usable_for_steering = false;
+  LateralControlResult r;
+  int tick = 0;
+  const auto step_once = [&](const LateralPath &path) {
+    const double t = 1.0 + 0.01 * tick;
+    VehicleCanState vehicle = ready_vehicle(t);
+    vehicle.steering_angle_deg = 10.0f;
+    r = controller.update(path, replay_target(), vehicle, t, tick++);
+  };
+  for (int i = 0; i < 100; ++i) step_once(blocked);
+  require(!r.active && std::fabs(r.desired_curvature - r.actual_curvature) < 1e-6f,
+          "while inactive the desired curvature settles on the actual one");
+  float previous = r.desired_curvature;
+  while (!r.active && tick < 300) {
+    previous = r.desired_curvature;
+    step_once(replay_path());
+  }
+  require(r.active, "the path debounce releases");
+  require(std::fabs(r.desired_curvature - previous) <= step * 1.001f &&
+              std::fabs(r.desired_curvature - replay_target().curvatures[0]) > 10.0f * step,
+          "reactivation starts from the actual curvature, not the plan");
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -1308,6 +1340,7 @@ int main(int argc, char **argv) {
     verify_curvature_limit_follows_roll();
     verify_stale_speed_keeps_curvature();
     verify_steering_json_matches_defaults();
+    verify_inactive_desired_tracks_actual();
     if (argc == 1) return;
     /* 픽스처는 60초 연속 주행 구간이어야 한다(active > 5900틱, 토크 > 0). 정차
      * 구간은 이 전제에 걸려 실패한다. tools/control/export_can_fixture.py가 녹화

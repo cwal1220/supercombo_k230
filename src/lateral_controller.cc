@@ -124,12 +124,6 @@ LateralControlResult LateralController::update(const LateralPath &path,
           static_cast<double>(control_now_ns - target.capture_timestamp_ns) * 1e-9);
     }
   }
-  result.desired_curvature = lag_adjusted_desired_curvature(
-      target, speed_mps, plan_age_s, config_.steering_params.steer_actuator_delay,
-      prev_desired_curvature_, live.use_vehicle ? live.roll_rad : 0.0f);
-  /* plan이 무효인 프레임은 0을 돌려주므로 직전 값을 보존한다. 짧은 공백 뒤에
-   * 0에서 다시 램프업하면 복귀가 느려진다. */
-  if (target.valid) prev_desired_curvature_ = result.desired_curvature;
   result.active_block = active_block_reason(gated_path, target, vehicle_state, now_s,
                                             result.seeds_ready, result.vehicle_fresh,
                                             panda_ready, panda_controls_allowed,
@@ -214,6 +208,18 @@ LateralControlResult LateralController::update(const LateralPath &path,
     road_bank_lat_accel_ += kBankAlpha * (0.0f - road_bank_lat_accel_);
     road_bank_init_ = false;
   }
+
+  /* 상류 controlsd: 활성이면 plan, 비활성이면 실제 곡률을 클립에 넣는다. 재활성 때 목표가
+   * 실제 곡률에서 한계 안으로 출발하고, 비활성 중의 잘못된 plan 값이 넘어오지 않는다. */
+  const float requested_curvature = result.active
+      ? lag_adjusted_curvature(target, speed_mps, plan_age_s, control_params.steer_actuator_delay)
+      : torque_controller_.estimate_actual_curvature(speed_mps, vehicle_state.steering_angle_deg,
+                                                     control_params, vehicle_state.yaw_rate_rad_s,
+                                                     yaw_rate_valid, live);
+  result.desired_curvature =
+      clip_curvature(speed_mps, prev_desired_curvature_, requested_curvature,
+                     live.use_vehicle ? live.roll_rad : 0.0f);
+  prev_desired_curvature_ = result.desired_curvature;
 
   if (result.active) {
     /* MDPS는 steer 요청이 켜진 채 |조향각|이 85도 위에 1초 머물면 fault를 낸다
@@ -447,12 +453,8 @@ BlockReason LateralController::active_block_reason(
   return BlockReason::None;
 }
 
-float lag_adjusted_desired_curvature(const LateralTarget &target, float speed_mps,
-                                     float plan_age_s, float steer_actuator_delay_s,
-                                     float prev_curvature, float roll_rad) {
-  if (!target.valid) return 0.0f;
-  // 바퀴 속도가 끊기면 NaN이다. 그대로 두면 clamp_float가 -kMaxCurvature를 낸다.
-  if (!std::isfinite(speed_mps)) return prev_curvature;
+float lag_adjusted_curvature(const LateralTarget &target, float speed_mps, float plan_age_s,
+                             float steer_actuator_delay_s) {
   /* plan은 카메라 캡처 시점 기준이므로 소비 시점까지의 실측 나이를 actuator
    * delay에 더해 보간한다. 부수 효과로 desired curvature가 20Hz 계단 대신
    * 매 tick plan 위를 따라 전진한다. */
@@ -464,28 +466,37 @@ float lag_adjusted_desired_curvature(const LateralTarget &target, float speed_mp
   // 부근에서 발산해 작은 plan 오차가 곡률 상한까지 증폭된다.
   const float speed = std::max(speed_mps, kMinCurvatureSpeedMps);
   const float curvature_from_psi = psi / (speed * delay);
-  float desired_curvature = current_curvature +
-      2.0f * (curvature_from_psi - current_curvature);
+  return current_curvature + 2.0f * (curvature_from_psi - current_curvature);
+}
 
+float clip_curvature(float speed_mps, float prev_curvature, float new_curvature,
+                     float roll_rad) {
+  // 바퀴 속도가 끊기면 NaN이다. 그대로 두면 clamp_float가 -kMaxCurvature를 낸다.
+  if (!std::isfinite(speed_mps) || !std::isfinite(new_curvature)) return prev_curvature;
+  const float speed = std::max(speed_mps, kMinCurvatureSpeedMps);
   /* ISO 횡저크 한계를 직전 출력 기준 틱당 변화율로 건다. 플랜 노드 기준 창이던
    * v0.9.4와 달리 틱간 계단을 실제로 막아, 변화율 제한된 와이어가 예산을
    * 노이즈에 쓰지 않는다. */
-  const float max_curvature_rate = kMaxLateralJerk /
-      (speed * speed);
-  desired_curvature = clamp_float(
-      desired_curvature,
+  const float max_curvature_rate = kMaxLateralJerk / (speed * speed);
+  float curvature = clamp_float(
+      new_curvature,
       prev_curvature - max_curvature_rate * kCurvatureRateWindowS,
       prev_curvature + max_curvature_rate * kCurvatureRateWindowS);
-
-  const float limit_speed = std::max(speed, 1.0f);
   const float roll_lat_accel = roll_rad * 9.81f;
-  desired_curvature = clamp_float(
-      desired_curvature,
-      (-kMaxLateralAccel + roll_lat_accel) / (limit_speed * limit_speed),
-      (kMaxLateralAccel + roll_lat_accel) / (limit_speed * limit_speed));
-  desired_curvature = clamp_float(desired_curvature,
-                                  -kMaxCurvature, kMaxCurvature);
-  return desired_curvature;
+  curvature = clamp_float(curvature, (-kMaxLateralAccel + roll_lat_accel) / (speed * speed),
+                          (kMaxLateralAccel + roll_lat_accel) / (speed * speed));
+  curvature = clamp_float(curvature, -kMaxCurvature, kMaxCurvature);
+  return curvature;
+}
+
+float lag_adjusted_desired_curvature(const LateralTarget &target, float speed_mps,
+                                     float plan_age_s, float steer_actuator_delay_s,
+                                     float prev_curvature, float roll_rad) {
+  if (!target.valid) return 0.0f;
+  return clip_curvature(speed_mps, prev_curvature,
+                        lag_adjusted_curvature(target, speed_mps, plan_age_s,
+                                               steer_actuator_delay_s),
+                        roll_rad);
 }
 
 // LKAS HUD state 값을 lane availability와 active 상태에서 만든다.
@@ -513,7 +524,7 @@ std::vector<CanFrame> LateralController::build_frames(
   command.left_lane = result.left_lane;
   command.right_lane = result.right_lane;
   command.lkas_msg_count = next_lkas11_counter(vehicle_state);
-  command.ldws_fix = false;  // K7 YG는 LDWS 전용차가 아니다
+  command.ldws_fix = false;  // 이 K7은 LDWS 전용이지만 LdwsOpt_USM 3은 효과가 없었다(2026-09-24)
 
   const HyundaiLkas11Values lkas_seed = decode_lkas11(vehicle_state.lkas11_seed);
   const HyundaiClu11Values clu_seed = decode_clu11(vehicle_state.clu11_seed);
