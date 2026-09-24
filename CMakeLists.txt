@@ -231,82 +231,13 @@ if(SUPERCOMBO_BUILD_RUNTIME)
 endif()
 
 if(SUPERCOMBO_BUILD_DIAGNOSTICS)
-  add_host_tool(check_model_output_parser diagnostics/check_model_output_parser.cc)
-  target_link_libraries(check_model_output_parser PRIVATE common)
-
-  add_host_tool(bench_nv12_to_yuv6 diagnostics/bench_nv12_to_yuv6.cc)
-
-  add_host_tool(check_panda_can_codec diagnostics/check_panda_can_codec.cc)
-  target_link_libraries(check_panda_can_codec PRIVATE panda_codec)
-
-  add_host_tool(check_k230_can_queue diagnostics/check_k230_can_queue.cc)
-  target_link_libraries(check_k230_can_queue PRIVATE common)
-
-  add_host_tool(check_control_replay
-    diagnostics/check_control_replay.cc
-    diagnostics/can_replay.cc
-  )
-  target_link_libraries(check_control_replay PRIVATE control_core)
-
-  add_host_tool(extract_lateral_dataset diagnostics/extract_lateral_dataset.cc)
-  target_link_libraries(extract_lateral_dataset PRIVATE control_core)
-
-  add_host_tool(check_departure_alert diagnostics/check_departure_alert.cc)
-  target_link_libraries(check_departure_alert PRIVATE control_core)
-
-  add_host_tool(check_adaptive_cruise diagnostics/check_adaptive_cruise.cc)
-  target_link_libraries(check_adaptive_cruise PRIVATE control_core)
-
-  add_host_tool(check_overlay_state diagnostics/check_overlay_state.cc)
-  target_link_libraries(check_overlay_state PRIVATE overlay_state)
-
-  add_host_tool(check_recording_writer diagnostics/check_recording_writer.cc)
-  target_link_libraries(check_recording_writer PRIVATE recording_writer)
-
-  add_host_tool(check_lateral_learners diagnostics/check_lateral_learners.cc)
-  target_link_libraries(check_lateral_learners PRIVATE control_core)
-
-  add_host_tool(check_lateral_mpc diagnostics/check_lateral_mpc.cc)
-  target_link_libraries(check_lateral_mpc PRIVATE planning)
-
-  add_host_tool(replay_planner diagnostics/replay_planner.cc)
-  target_link_libraries(replay_planner PRIVATE planning)
-
-  add_host_tool(replay_lateral_learners diagnostics/replay_lateral_learners.cc)
-  target_link_libraries(replay_lateral_learners PRIVATE control_core)
-
-  add_host_tool(replay_closed_loop diagnostics/replay_closed_loop.cc)
-  target_link_libraries(replay_closed_loop PRIVATE planning)
-
-  add_host_tool(bench_input_warp_overhead diagnostics/bench_input_warp_overhead.cc)
-  target_link_libraries(bench_input_warp_overhead PRIVATE perception)
-
-  add_host_tool(check_calibration_equivalence diagnostics/check_calibration_equivalence.cc)
-  target_link_libraries(check_calibration_equivalence PRIVATE perception)
-
-  # HUD 스냅샷·타이밍 도구. overlay 라이브러리와 같은 OpenCV 조건을 따른다.
-  if(OpenCV_FOUND)
-    add_host_tool(hud_snapshot diagnostics/hud_snapshot.cc)
-    target_include_directories(hud_snapshot SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
-    target_link_libraries(hud_snapshot PRIVATE overlay)
+  # 단위 테스트는 호스트에서만 빌드·실행한다. 교차 빌드에는 gtest를 링크할 pthread도,
+  # 테스트를 돌릴 곳도 없다. enable_testing()은 루트에 있어야 ctest가 하위 폴더를 찾는다.
+  if(NOT CMAKE_CROSSCOMPILING)
+    enable_testing()
+    add_subdirectory(gtest)
   endif()
-
-  if(SUPERCOMBO_BUILD_RUNTIME)
-    add_executable(bench_capture_nv12 diagnostics/bench_capture_nv12.cc)
-    configure_k230_target(bench_capture_nv12 mmz ${K230_SHARED_LIBS})
-
-    add_executable(bench_ai2d_resize diagnostics/bench_ai2d_resize.cc)
-    configure_k230_target(bench_ai2d_resize ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
-
-    add_executable(bench_kmodel diagnostics/bench_kmodel.cc)
-    configure_k230_target(bench_kmodel ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
-
-    add_executable(run_kmodel_sequence diagnostics/run_kmodel_sequence.cc)
-    configure_k230_target(run_kmodel_sequence ${NNCASE_STATIC_LIBS} mmz ${K230_SHARED_LIBS})
-
-    add_executable(probe_drm_planes diagnostics/probe_drm_planes.cc)
-    configure_k230_target(probe_drm_planes mmz ${K230_SHARED_LIBS})
-  endif()
+  add_subdirectory(diagnostics)
 endif()
 
 if(SUPERCOMBO_BUILD_RUNTIME)

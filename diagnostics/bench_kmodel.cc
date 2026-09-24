@@ -1,8 +1,6 @@
-// Generic kmodel NPU latency benchmark: loads any kmodel, feeds zeroed
-// inputs, and reports per-inference wall time. Used to measure a candidate
-// kmodel against the deployed supercombo on real hardware.
-//
-// Usage: bench_kmodel <model.kmodel> [iterations=100]
+/* 아무 kmodel이나 읽어 0으로 채운 입력으로 돌리고 추론 1회의 벽시계 시간을 잰다. 후보 kmodel을
+ * 배포 중인 supercombo와 실제 보드에서 비교할 때 쓴다(측정 전 파이프라인을 멈춰야 한다).
+ * 사용: bench_kmodel [--iterations N] <model.kmodel>   (기본 100회) */
 
 #include <nncase/runtime/interpreter.h>
 #include <nncase/runtime/runtime_op_utility.h>
@@ -22,12 +20,22 @@ using namespace nncase::runtime;
 
 int main(int argc, char **argv)
 {
-    if (argc < 2) {
-        std::fprintf(stderr, "usage: %s <model.kmodel> [iterations]\n", argv[0]);
-        return 1;
+    const char *model_path = nullptr;
+    int iterations = 100;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--iterations") == 0 && i + 1 < argc) {
+            iterations = std::atoi(argv[++i]);
+        } else if (std::strncmp(argv[i], "--", 2) != 0 && model_path == nullptr) {
+            model_path = argv[i];
+        } else {
+            model_path = nullptr;
+            break;
+        }
     }
-    const char *model_path = argv[1];
-    const int iterations = argc > 2 ? std::atoi(argv[2]) : 100;
+    if (model_path == nullptr) {
+        std::fprintf(stderr, "usage: %s [--iterations N] <model.kmodel>\n", argv[0]);
+        return 2;
+    }
     if (iterations <= 0) {
         std::fprintf(stderr, "iterations must be positive\n");
         return 1;

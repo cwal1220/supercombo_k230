@@ -9,6 +9,7 @@
 #   4. 실주행 캘리브레이션 npz(60 + K230 120)로 PTQ(int16 활성 / uint8 가중치) 컴파일한다.
 #
 # PTQ npz는 tools/model/make_calibration.py가 녹화 주행에서 만든다.
+# 사용: scripts/build_supercombo_model.sh   (nncase Docker 이미지와 numpy·onnx·onnxruntime이 있는 python3)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,11 +1,10 @@
 /* RecordingWriter가 디스크에 남기는 것: 60초 청크 이벤트 로그(K230LOG1), 세그먼트
  * 프레임 인덱스(K230IDX1), 매니페스트, params 스냅샷, 그리고 tmpfs 스테이징 →
- * 최종 경로 이동. 보드·인코더 없이 합성 레코드로 검사한다.
- * RECORDING_CHECK_OUT=dir 이면 완성된 route를 그 아래 route/ 로 복사한다(A/B용). */
-#include "check_harness.h"
+ * 최종 경로 이동. 보드·인코더 없이 합성 레코드로 검사한다. */
 #include "recording_format.h"
 #include "recording_writer.h"
 
+#include <gtest/gtest.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -21,7 +20,10 @@ namespace {
 
 std::vector<uint8_t> read_file(const std::string &path) {
   std::ifstream in(path, std::ios::binary);
-  require(static_cast<bool>(in), ("open " + path).c_str());
+  if (!in) {
+    ADD_FAILURE() << "열기 실패 " << path;
+    return {};
+  }
   return std::vector<uint8_t>((std::istreambuf_iterator<char>(in)),
                               std::istreambuf_iterator<char>());
 }
@@ -40,7 +42,10 @@ std::vector<std::string> list_dir(const std::string &path) {
 
 template <class T>
 T read_at(const std::vector<uint8_t> &bytes, size_t offset) {
-  require(offset + sizeof(T) <= bytes.size(), "record runs past the end of the file");
+  if (offset + sizeof(T) > bytes.size()) {
+    ADD_FAILURE() << "레코드가 파일 끝을 넘는다";
+    return T{};
+  }
   T value;
   std::memcpy(&value, bytes.data() + offset, sizeof(T));
   return value;
@@ -64,8 +69,8 @@ K230CanBatch synthetic_batch(uint64_t timestamp_ns, uint32_t count, uint32_t dro
   return batch;
 }
 
-void verify_route_on_disk() {
-  char root_template[] = "/tmp/check_recording_XXXXXX";
+TEST(RecordingWriter, RouteOnDisk) {
+  char root_template[] = "/tmp/gtest_recording_XXXXXX";
   const std::string root = mkdtemp(root_template);
   const std::string staging = root + "/staging";
   const std::string params = root + "/params";
@@ -76,7 +81,6 @@ void verify_route_on_disk() {
   setenv("K230_RECORD_STAGING", staging.c_str(), 1);
 
   const uint64_t t0 = 5'000'000'000ULL;
-  std::vector<std::string> route_dirs;
   {
     RecordingWriter writer(recordings, params, 1280, 720, 20, 8000000);
     writer.set_enabled(true, t0);
@@ -101,22 +105,25 @@ void verify_route_on_disk() {
                        panda.size());
     writer.set_enabled(false, t0 + 50'000'000ULL);
     writer.close();
-    require(!writer.active() && writer.video_frames() == 3 && writer.queue_drops() == 0,
-            "writer counters after a complete route");
+    // route를 끝낸 뒤 writer 카운터
+    ASSERT_FALSE(writer.active());
+    ASSERT_EQ(writer.video_frames(), 3);
+    ASSERT_EQ(writer.queue_drops(), 0);
   }
 
-  route_dirs = list_dir(recordings);
-  require(route_dirs.size() == 1, "exactly one route was written");
-  require(list_dir(staging).empty(), "the staging directory is drained after close");
+  const std::vector<std::string> route_dirs = list_dir(recordings);
+  ASSERT_EQ(route_dirs.size(), 1) << "route가 정확히 하나 생긴다";
+  ASSERT_TRUE(list_dir(staging).empty()) << "close 뒤 스테이징 디렉터리는 빈다";
   const std::string route = recordings + "/" + route_dirs[0];
 
   // events/000.bin: 헤더 + CanRx(3) + CanTx(256으로 잘림) + 상태 2개
   const std::vector<uint8_t> events = read_file(route + "/events/000.bin");
-  require(std::memcmp(events.data(), "K230LOG1", 8) == 0, "event log magic");
-  require(read_at<uint32_t>(events, 8) == kK230RecordingVersion, "event log version");
+  ASSERT_EQ(std::memcmp(events.data(), "K230LOG1", 8), 0) << "이벤트 로그 magic";
+  ASSERT_EQ(read_at<uint32_t>(events, 8), kK230RecordingVersion) << "이벤트 로그 버전";
   const uint32_t header_size = read_at<uint32_t>(events, 12);
-  require(header_size == sizeof(K230EventFileHeader) && read_at<uint64_t>(events, 16) == t0,
-          "event log header size and route start");
+  // 이벤트 로그 헤더 크기와 route 시작 시각
+  ASSERT_EQ(header_size, sizeof(K230EventFileHeader));
+  ASSERT_EQ(read_at<uint64_t>(events, 16), t0);
   size_t offset = header_size;
   struct Expected { uint16_t type; uint64_t ts; uint32_t payload; };
   const size_t frame_bytes = sizeof(K230RecordedCanFrame);
@@ -129,68 +136,73 @@ void verify_route_on_disk() {
   };
   for (const Expected &record : expected) {
     const auto header = read_at<K230EventRecordHeader>(events, offset);
-    require(header.type == record.type && header.timestamp_ns == record.ts &&
-                header.payload_size == record.payload,
-            "event record header sequence");
+    // 이벤트 레코드 헤더 순서
+    ASSERT_EQ(header.type, record.type);
+    ASSERT_EQ(header.timestamp_ns, record.ts);
+    ASSERT_EQ(header.payload_size, record.payload);
     offset += sizeof(header);
     if (record.type == 1) {
       const auto batch = read_at<K230RecordedCanBatchHeader>(events, offset);
-      require(batch.count == 3 && batch.dropped == 2, "CanRx batch header");
+      // CanRx 묶음 헤더
+      ASSERT_EQ(batch.count, 3);
+      ASSERT_EQ(batch.dropped, 2);
       const auto frame1 = read_at<K230RecordedCanFrame>(events, offset + batch_header + frame_bytes);
-      require(frame1.address == 0x341 && frame1.src == 1 && frame1.bus_time == 1001 &&
-                  frame1.data_len == 8 && frame1.flags == 0x2 && frame1.data[3] == 11,
-              "recorded CAN frame fields");
+      // 기록된 CAN 프레임 필드
+      ASSERT_EQ(frame1.address, 0x341);
+      ASSERT_EQ(frame1.src, 1);
+      ASSERT_EQ(frame1.bus_time, 1001);
+      ASSERT_EQ(frame1.data_len, 8);
+      ASSERT_EQ(frame1.flags, 0x2);
+      ASSERT_EQ(frame1.data[3], 11);
     } else if (record.type == 2) {
       const auto batch = read_at<K230RecordedCanBatchHeader>(events, offset);
-      require(batch.count == 256 && batch.dropped == 0,
-              "a batch over 256 frames is clamped to the wire maximum");
+      // 256프레임을 넘는 묶음은 기록 형식의 최대치로 잘린다
+      ASSERT_EQ(batch.count, 256);
+      ASSERT_EQ(batch.dropped, 0);
     } else if (record.type == 4) {
-      require(events[offset + 17] == 17, "state payload is stored verbatim");
+      ASSERT_EQ(events[offset + 17], 17) << "상태 페이로드는 그대로 저장된다";
     }
     offset += record.payload;
   }
-  require(offset == events.size(), "no trailing bytes after the last record");
+  ASSERT_EQ(offset, events.size()) << "마지막 레코드 뒤에 남는 바이트가 없다";
 
-  // segments/000: codec config + 3 packets, index offsets cumulative
+  // segments/000: 코덱 설정 + 패킷 3개, 인덱스 오프셋은 누적
   const std::vector<uint8_t> video = read_file(route + "/segments/000/road.hevc");
-  require(video.size() == 4 + 64 + 80 + 96 && std::memcmp(video.data(), "CFG", 3) == 0,
-          "video stream is codec config followed by the packets");
+  // 영상 스트림은 코덱 설정 뒤에 패킷이 이어진다
+  ASSERT_EQ(video.size(), 4 + 64 + 80 + 96);
+  ASSERT_EQ(std::memcmp(video.data(), "CFG", 3), 0);
   const std::vector<uint8_t> index = read_file(route + "/segments/000/frames.bin");
   const auto index_header = read_at<K230FrameIndexHeader>(index, 0);
-  require(std::memcmp(index_header.magic, "K230IDX1", 8) == 0 && index_header.width == 1280 &&
-              index_header.height == 720 && index_header.fps == 20 &&
-              index_header.record_size == sizeof(K230FrameIndexRecord) &&
-              index_header.segment_start_ns == t0,
-          "frame index header");
-  require(index.size() == sizeof(K230FrameIndexHeader) + 3 * sizeof(K230FrameIndexRecord),
-          "one index record per packet");
+  // 프레임 인덱스 헤더
+  ASSERT_EQ(std::memcmp(index_header.magic, "K230IDX1", 8), 0);
+  ASSERT_EQ(index_header.width, 1280);
+  ASSERT_EQ(index_header.height, 720);
+  ASSERT_EQ(index_header.fps, 20);
+  ASSERT_EQ(index_header.record_size, sizeof(K230FrameIndexRecord));
+  ASSERT_EQ(index_header.segment_start_ns, t0);
+  ASSERT_EQ(index.size(), sizeof(K230FrameIndexHeader) + 3 * sizeof(K230FrameIndexRecord))
+      << "패킷마다 인덱스 레코드 하나";
   const auto second = read_at<K230FrameIndexRecord>(
       index, sizeof(K230FrameIndexHeader) + sizeof(K230FrameIndexRecord));
-  require(second.frame_id == 101 && second.encode_index == 1 && second.file_offset == 4 + 64 &&
-              second.packet_size == 80 && second.flags == 0,
-          "frame index record offsets follow the stream");
+  // 프레임 인덱스 레코드의 오프셋이 스트림을 따른다
+  ASSERT_EQ(second.frame_id, 101);
+  ASSERT_EQ(second.encode_index, 1);
+  ASSERT_EQ(second.file_offset, 4 + 64);
+  ASSERT_EQ(second.packet_size, 80);
+  ASSERT_EQ(second.flags, 0);
 
   const std::vector<uint8_t> manifest = read_file(route + "/manifest.json");
   const std::string text(manifest.begin(), manifest.end());
-  require(text.find("\"complete\": true") != std::string::npos &&
-              text.find("\"video_frames\": 3") != std::string::npos &&
-              text.find("\"event_records\": 4") != std::string::npos,
-          "manifest counts");
+  // 매니페스트의 개수
+  ASSERT_NE(text.find("\"complete\": true"), std::string::npos);
+  ASSERT_NE(text.find("\"video_frames\": 3"), std::string::npos);
+  ASSERT_NE(text.find("\"event_records\": 4"), std::string::npos);
   const auto snapshot = list_dir(route + "/params");
-  require(snapshot.size() == 1 && snapshot[0] == "steering.json",
-          "params snapshot copies json files only");
+  // params 스냅샷은 json 파일만 복사한다
+  ASSERT_EQ(snapshot.size(), 1);
+  ASSERT_EQ(snapshot[0], "steering.json");
 
-  if (const char *out = std::getenv("RECORDING_CHECK_OUT")) {
-    const std::string command = "rm -rf '" + std::string(out) + "/route' && mkdir -p '" +
-                                std::string(out) + "' && cp -R '" + route + "' '" +
-                                std::string(out) + "/route'";
-    require(std::system(command.c_str()) == 0, "copy route for A/B");
-  }
   std::system(("rm -rf '" + root + "'").c_str());
 }
 
 }  // namespace
-
-int main() {
-  return run_checks("RECORDING_WRITER_OK", [] { verify_route_on_disk(); });
-}

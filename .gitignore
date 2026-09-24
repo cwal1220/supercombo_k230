@@ -16,13 +16,12 @@ k230_overlayd
 k230_pandad
 k230_controlsd
 k230_recordd
-check_control_replay
-check_model_output_parser
-check_panda_can_codec
+gtest_control_replay
+gtest_model_output_parser
+gtest_panda_can_codec
 hud_snapshot
 bench_input_warp_overhead
-bench_nv12_to_yuv6
-check_calibration_equivalence
+gtest_calibration_equivalence
 __pycache__/
 *.pyc
 *.raw

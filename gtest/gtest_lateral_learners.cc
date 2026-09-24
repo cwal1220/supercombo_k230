@@ -1,12 +1,12 @@
-// paramsd·torqued 이식 검사: 필터 수학, 합성 주행 수렴, 게이트, 출력 제한, 저장/복원.
-#include "check_harness.h"
-#include "control_fixtures.h"
+/* paramsd·torqued 이식 검사: 필터 수학, 합성 주행 수렴, 게이트, 출력 제한, 저장/복원. */
 #include "lateral_learners.h"
+#include "vehicle_can.h"
 
+#include <gtest/gtest.h>
+#include <array>
 #include <cmath>
-#include <cstdio>
 #include <functional>
-#include <stdexcept>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -26,7 +26,7 @@ VehicleModelConstants k7() {
   return c;
 }
 
-void verify_jacobian() {
+TEST(LateralLearners, Jacobian) {
   const CarKalman::Globals g = CarKalman::globals_from(k7());
   const CarKalman::Vec x = {1.05, 15.5, 0.01, 0.002, 15.0, 0.1, 0.05, 0.03, 0.01};
   CarKalman::Vec xn;
@@ -44,7 +44,7 @@ void verify_jacobian() {
     for (int i = 0; i < CarKalman::kN; ++i)
       worst = std::fmax(worst, std::fabs((fp[i] - fm[i]) / (2 * h) - f[i][k]));
   }
-  require(worst < 1e-7, "analytic Jacobian matches central differences");
+  ASSERT_LT(worst, 1e-7) << "해석적 야코비안이 중심차분과 같다";
 }
 
 bool positive_definite(const CarKalman::Mat &p) {
@@ -132,7 +132,7 @@ CarKalman::Mat open_p0() {
 }
 
 /* 매 틱 관측이면 필터 수학만 남는다. 빠른 영점이 조향의 일부를 흡수해 SR은 약 1% 낮다. */
-void verify_converges_and_stays_positive_definite() {
+TEST(LateralLearners, ConvergesAndStaysPositiveDefinite) {
   const CarKalman::Mat p0 = open_p0();
   VehicleParamsOptions options;
   options.p_initial = &p0;
@@ -149,20 +149,23 @@ void verify_converges_and_stays_positive_definite() {
     }
   });
   const VehicleParams &p = learner.params();
-  require(publishes > 17900 && publishes < 18100, "publishes at 20 Hz");
-  require(always_pd, "Joseph update keeps the covariance positive definite");
-  require(std::fabs(p.steer_ratio - truth.sr) < 0.3, "steer ratio converges to the truth");
-  require(std::fabs(p.stiffness_factor - truth.stiffness) < 0.1, "stiffness converges");
-  require(std::fabs(p.angle_offset_average_deg - deg(truth.offset)) < 0.15,
-          "angle offset converges");
-  require(std::fabs(p.roll_rad - truth.roll) < rad(0.3), "roll follows the lateral accelerometer");
-  require(p.valid && p.inputs_ok, "converged estimate is valid");
-  require(always_sensor_valid, "model and observed yaw rate agree");
+  // 20 Hz로 발행한다
+  ASSERT_GT(publishes, 17900);
+  ASSERT_LT(publishes, 18100);
+  ASSERT_TRUE(always_pd) << "Joseph 갱신은 공분산을 양정치로 유지한다";
+  ASSERT_NEAR(p.steer_ratio, truth.sr, 0.3) << "조향비가 참값으로 수렴한다";
+  ASSERT_NEAR(p.stiffness_factor, truth.stiffness, 0.1) << "강성이 수렴한다";
+  ASSERT_NEAR(p.angle_offset_average_deg, deg(truth.offset), 0.15) << "각도 오프셋이 수렴한다";
+  ASSERT_NEAR(p.roll_rad, truth.roll, rad(0.3)) << "롤이 횡가속도계를 따른다";
+  // 수렴한 추정은 유효하다
+  ASSERT_TRUE(p.valid);
+  ASSERT_TRUE(p.inputs_ok);
+  ASSERT_TRUE(always_sensor_valid) << "모델 요레이트와 관측 요레이트가 맞는다";
 }
 
 /* 상류 스케줄(20 Hz 관측)은 조향이 50 ms씩 멈춰 들어가 SR을 낮게 읽는다. 영점·롤은 그대로다.
  * 이 성질이 바뀌면(스케줄이 달라지면) 여기서 걸린다. */
-void verify_upstream_schedule_reads_steer_ratio_low() {
+TEST(LateralLearners, UpstreamScheduleReadsSteerRatioLow) {
   const CarKalman::Mat p0 = open_p0();
   VehicleParamsOptions options;
   options.p_initial = &p0;
@@ -171,14 +174,15 @@ void verify_upstream_schedule_reads_steer_ratio_low() {
   const Truth truth;
   synthesize(truth, 900.0, [&](const SynthSample &s) { learner.update(input_from(s)); });
   const VehicleParams &p = learner.params();
-  require(p.steer_ratio < truth.sr - 0.3 && p.steer_ratio > truth.sr - 1.5,
-          "upstream 20 Hz schedule reads the steer ratio low");
-  require(std::fabs(p.angle_offset_average_deg - deg(truth.offset)) < 0.15,
-          "upstream schedule still finds the angle offset");
-  require(std::fabs(p.roll_rad - truth.roll) < rad(0.3), "upstream schedule still finds the roll");
+  // 상류 20 Hz 스케줄은 조향비를 낮게 읽는다
+  ASSERT_LT(p.steer_ratio, truth.sr - 0.3);
+  ASSERT_GT(p.steer_ratio, truth.sr - 1.5);
+  ASSERT_NEAR(p.angle_offset_average_deg, deg(truth.offset), 0.15)
+      << "상류 스케줄로도 각도 오프셋은 찾는다";
+  ASSERT_NEAR(p.roll_rad, truth.roll, rad(0.3)) << "상류 스케줄로도 롤은 찾는다";
 }
 
-void verify_gates_hold_state() {
+TEST(LateralLearners, GatesHoldState) {
   VehicleParamsLearner learner(k7(), 16.8, 1.0, 0.0);
   const CarKalman::Vec before = learner.kf().x();
   auto feed = [&](double speed, double angle, int gear, bool fresh) {
@@ -198,10 +202,11 @@ void verify_gates_hold_state() {
   feed(10.0, 50.0, 5, true);
   feed(10.0, 5.0, 7, true);
   feed(10.0, 5.0, 5, false);
-  require(learner.kf().x() == before, "slow, large-angle, reverse and stale inputs leave the state alone");
+  ASSERT_EQ(learner.kf().x(), before)
+      << "저속·큰 조향각·후진·낡은 입력은 상태를 바꾸지 않는다";
 }
 
-void verify_output_limits_and_hysteresis() {
+TEST(LateralLearners, OutputLimitsAndHysteresis) {
   VehicleParamsLearner learner(k7(), 16.8, 1.0, 0.0);
   double t = 0.0;
   auto publish = [&]() {
@@ -217,23 +222,29 @@ void verify_output_limits_and_hysteresis() {
   publish();
   learner.kf().mutable_x()[CarKalman::kAngleOffset] = rad(12.0);
   double last = publish().angle_offset_average_deg;
-  require(near(static_cast<float>(last), 1.0f, 1e-9f), "offset output moves at most 1 deg per publish");
+  ASSERT_NEAR(static_cast<float>(last), 1.0f, 1e-9f)
+      << "오프셋 출력은 발행마다 최대 1도 움직인다";
   VehicleParams p{};
   for (int i = 0; i < 20; ++i) p = publish();
-  require(near(static_cast<float>(p.angle_offset_average_deg), 12.0f, 1e-9f), "offset output reaches the state");
-  require(!p.angle_offset_average_valid && !p.valid, "offset above 10 deg is invalid");
+  ASSERT_NEAR(static_cast<float>(p.angle_offset_average_deg), 12.0f, 1e-9f)
+      << "오프셋 출력이 상태값에 도달한다";
+  // 10도를 넘는 오프셋은 무효
+  ASSERT_FALSE(p.angle_offset_average_valid);
+  ASSERT_FALSE(p.valid);
   learner.kf().mutable_x()[CarKalman::kAngleOffset] = rad(9.0);
   for (int i = 0; i < 20; ++i) p = publish();
-  require(!p.angle_offset_average_valid, "recovery needs the lowered 8 deg threshold");
+  ASSERT_FALSE(p.angle_offset_average_valid) << "다시 유효가 되려면 낮춘 기준 8도 아래로 와야 한다";
   learner.kf().mutable_x()[CarKalman::kAngleOffset] = rad(7.5);
   for (int i = 0; i < 20; ++i) p = publish();
-  require(p.angle_offset_average_valid, "valid again below 8 deg");
+  ASSERT_TRUE(p.angle_offset_average_valid) << "8도 아래에서 다시 유효";
   learner.kf().mutable_x()[CarKalman::kSteerRatio] = 34.0;
   p = publish();
-  require(!p.steer_ratio_valid && !p.valid, "steer ratio above twice the prior is invalid");
+  // 사전값의 두 배를 넘는 조향비는 무효
+  ASSERT_FALSE(p.steer_ratio_valid);
+  ASSERT_FALSE(p.valid);
 }
 
-void verify_persistence() {
+TEST(LateralLearners, Persistence) {
   const VehicleModelConstants c = k7();
   VehicleParamsLearner learner(c, 16.8, 1.0, 0.0);
   VehicleParamsInput in;
@@ -243,13 +254,13 @@ void verify_persistence() {
     in.t_s = n * 0.01;
     if (learner.update(in)) {
       if (learner.persist_due()) {
-        require(published % 1200 == 0, "persists on publish 0, 1200, ...");
+        ASSERT_EQ(published % 1200, 0) << "발행 0, 1200, ...번째에 저장한다";
         ++due;
       }
       ++published;
     }
   }
-  require(due == 2, "persists once a minute including the first publish");
+  ASSERT_EQ(due, 2) << "첫 발행을 포함해 1분에 한 번 저장한다";
 
   VehicleParams p;
   p.steer_ratio = 15.1;
@@ -257,38 +268,44 @@ void verify_persistence() {
   p.angle_offset_average_deg = -1.62;
   const std::string saved = persist_vehicle_params(p, c, -0.0017);
   const VehicleParamsInit ok = restore_vehicle_params(saved, c);
-  require(ok.restored && near(static_cast<float>(ok.steer_ratio), 15.1f, 1e-4f) &&
-              near(static_cast<float>(ok.angle_offset_deg), -1.62f, 1e-4f) &&
-              near(static_cast<float>(ok.yaw_bias_rad_s), -0.0017f, 1e-7f),
-          "restores steer ratio, average offset and yaw bias");
-  require(ok.stiffness_factor == 1.0, "stiffness is reset every drive");
+  // 조향비·평균 오프셋·요 바이어스를 복원한다
+  ASSERT_TRUE(ok.restored);
+  ASSERT_NEAR(static_cast<float>(ok.steer_ratio), 15.1f, 1e-4f);
+  ASSERT_NEAR(static_cast<float>(ok.angle_offset_deg), -1.62f, 1e-4f);
+  ASSERT_NEAR(static_cast<float>(ok.yaw_bias_rad_s), -0.0017f, 1e-7f);
+  ASSERT_EQ(ok.stiffness_factor, 1.0) << "강성은 주행마다 초기화한다";
 
   VehicleModelConstants other = c;
   other.mass_kg += 50.0;
-  require(!restore_vehicle_params(saved, other).restored, "a different car is not restored");
+  ASSERT_FALSE(restore_vehicle_params(saved, other).restored) << "다른 차의 저장값은 복원하지 않는다";
   VehicleModelConstants prior = c;
   prior.steer_ratio = 7.0;  // 15.1 > 2×7
-  require(!restore_vehicle_params(saved, prior).restored, "an insane steer ratio is not restored");
+  ASSERT_FALSE(restore_vehicle_params(saved, prior).restored)
+      << "말이 안 되는 조향비는 복원하지 않는다";
   const VehicleParamsInit bad = restore_vehicle_params("{ nope", c);
-  require(!bad.restored && bad.steer_ratio == c.steer_ratio && bad.angle_offset_deg == 0.0,
-          "a broken file falls back to the prior");
+  // 깨진 파일이면 사전값으로 돌아간다
+  ASSERT_FALSE(bad.restored);
+  ASSERT_EQ(bad.steer_ratio, c.steer_ratio);
+  ASSERT_EQ(bad.angle_offset_deg, 0.0);
 }
 
-void verify_yaw_bias() {
+TEST(LateralLearners, YawBias) {
   YawBiasEstimator est;
   double t = 0.0;
   for (int i = 0; i < 150; ++i, t += 0.01) est.update(t, 0.0, true, -0.0019);
-  require(est.bias() == 0.0, "bias waits for two seconds of standstill");
+  ASSERT_EQ(est.bias(), 0.0) << "바이어스는 2초 정차를 기다린다";
   for (int i = 0; i < 2000; ++i, t += 0.01) est.update(t, 0.0, true, -0.0019);
-  require(near(static_cast<float>(est.bias()), -0.0019f, 1e-6f), "bias follows the standstill yaw rate");
+  ASSERT_NEAR(static_cast<float>(est.bias()), -0.0019f, 1e-6f)
+      << "바이어스는 정차 중 요레이트를 따른다";
   const double before = est.bias();
   est.update(t, 12.0, true, 0.3);
-  require(est.bias() == before, "bias does not move while driving");
-  require(near(static_cast<float>(est.update(t, 12.0, true, 0.3)), static_cast<float>(0.3 + 0.0019), 1e-6f),
-          "corrected yaw rate subtracts the bias");
+  ASSERT_EQ(est.bias(), before) << "주행 중에는 바이어스가 움직이지 않는다";
+  ASSERT_NEAR(static_cast<float>(est.update(t, 12.0, true, 0.3)),
+              static_cast<float>(0.3 + 0.0019), 1e-6f)
+      << "보정한 요레이트는 바이어스를 뺀 값이다";
   // 휠속도 0으로 기어가며 도는 동안(>0.5°/s)은 흡수하지 않는다
   for (int i = 0; i < 1000; ++i, t += 0.01) est.update(t, 0.0, true, 0.05);
-  require(est.bias() == before, "a creeping turn at zero wheel speed is not taken as bias");
+  ASSERT_EQ(est.bias(), before) << "휠 속도 0의 느린 회전은 바이어스가 아니다";
 }
 
 // ---------------------------------------------------------------- torqued
@@ -418,19 +435,20 @@ bool same_filters(const TorqueParams &a, const TorqueParams &b, double tol) {
          std::fabs(a.friction - b.friction) <= tol && std::fabs(a.decay - b.decay) <= tol;
 }
 
-void verify_torque_exact_line() {
+TEST(LateralLearners, TorqueExactLine) {
   TorqueTruth tr;
   tr.half_width = 0.0;
   TorqueEstimator est(prior(), kTorqueLag, 1);
   drive_torque(&est, tr, 0, 40000);
   const TorqueParams &p = est.params();
-  require(std::fabs(p.lat_accel_factor_raw - tr.factor) < 1e-9 &&
-              std::fabs(p.lat_accel_offset_raw - tr.offset) < 1e-9 && p.friction_raw < 1e-9,
-          "points exactly on a line give that line and zero friction");
+  // 한 직선 위의 점은 그 직선과 마찰 0을 준다
+  ASSERT_NEAR(p.lat_accel_factor_raw, tr.factor, 1e-9);
+  ASSERT_NEAR(p.lat_accel_offset_raw, tr.offset, 1e-9);
+  ASSERT_LT(p.friction_raw, 1e-9);
 }
 
 /* 긴 합성 주행: 유효 시점, 원시 추정, 필터 첫 걸음, 저장 틱의 이중 갱신, decay 상한. */
-void verify_torque_learns_parallelogram() {
+TEST(LateralLearners, TorqueLearnsParallelogram) {
   TorqueTruth tr;
   const TorqueTuning tuning = prior();
   TorqueEstimator est(tuning, kTorqueLag, 7);
@@ -445,56 +463,73 @@ void verify_torque_learns_parallelogram() {
     if (i % 5 == 0) ++frame;
     if (!published) continue;
     const TorqueParams &p = est.params();
-    require((frame % 5) == 0, "torque params publish every fifth 20 Hz frame");
-    require(p.inputs_ok && p.use_params && p.max_resets == 1.0, "envelope, useParams, resets");
+    ASSERT_EQ((frame % 5), 0) << "토크 파라미터는 20 Hz 프레임 5개마다 발행한다";
+    // 입력 범위·use_params·max_resets
+    ASSERT_TRUE(p.inputs_ok);
+    ASSERT_TRUE(p.use_params);
+    ASSERT_EQ(p.max_resets, 1.0);
     if (p.valid && first_valid_frame < 0) {
       first_valid_frame = frame;
-      require(p.cal_perc == 100 && p.total_bucket_points >= 4000, "valid means every bucket is full");
-      require(prev.cal_perc < 100 && !prev.valid, "the previous message was still calibrating");
-      require(prev.lat_accel_factor == tuning.lat_accel_factor && prev.friction == tuning.friction &&
-                  prev.lat_accel_offset == 0.0 && prev.decay == 50.0,
-              "filters hold the prior until the buckets are valid");
+      // 유효는 모든 버킷이 찼다는 뜻이다
+      ASSERT_EQ(p.cal_perc, 100);
+      ASSERT_GE(p.total_bucket_points, 4000);
+      // 직전 메시지는 아직 보정 중이었다
+      ASSERT_LT(prev.cal_perc, 100);
+      ASSERT_FALSE(prev.valid);
+      // 버킷이 유효해질 때까지 필터는 사전값을 유지한다
+      ASSERT_EQ(prev.lat_accel_factor, tuning.lat_accel_factor);
+      ASSERT_EQ(prev.friction, tuning.friction);
+      ASSERT_EQ(prev.lat_accel_offset, 0.0);
+      ASSERT_EQ(prev.decay, 50.0);
       TorqueParams want;
       expect_filter_step(prev, prev.decay, p, tuning, &want);
-      require(same_filters(p, want, 1e-12), "first valid message is one filter step from the prior");
+      ASSERT_TRUE(same_filters(p, want, 1e-12))
+          << "첫 유효 메시지는 사전값에서 필터 한 스텝 움직인 값이다";
       checked_first_step = true;
     } else if (p.valid && first_valid_frame >= 0 && prev.valid && p.decay < 250.0) {
       // 직전 발행 틱이 저장 틱이면 그 사이 필터가 두 번 돌았다
       const double step = ((frame - 5) % 240 == 0) ? 0.10 : 0.05;
-      require(std::fabs(p.decay - prev_decay - step) < 1e-9, "decay grows 0.05 per update, twice on a cache frame");
+      ASSERT_LT(std::fabs(p.decay - prev_decay - step), 1e-9)
+          << "decay는 갱신마다 0.05, 캐시 프레임에서는 두 번 늘어난다";
       if (step > 0.07) checked_double = true;
     }
     prev = p;
     prev_decay = p.decay;
   }
-  require(checked_first_step && checked_double, "the long drive reached both filter checks");
+  // 긴 주행이 두 필터 검사에 모두 닿았다
+  ASSERT_TRUE(checked_first_step);
+  ASSERT_TRUE(checked_double);
   const TorqueParams &p = est.params();
-  require(p.valid && p.decay == 250.0, "decay saturates at 250");
-  require(first_valid_frame * 0.05 > 250.0 && first_valid_frame * 0.05 < 400.0,
-          "calibration takes the inner buckets' 500 points");
+  // decay는 250에서 포화한다
+  ASSERT_TRUE(p.valid);
+  ASSERT_EQ(p.decay, 250.0);
+  // 보정 완료에는 안쪽 버킷의 500점이 걸린다
+  ASSERT_GT(first_valid_frame * 0.05, 250.0);
+  ASSERT_LT(first_valid_frame * 0.05, 400.0);
   // 마지막 발행이 쓴 점들로 독립 참조와 대조
   double slope, offset, friction;
   reference_tls(est.points(), &slope, &offset, &friction);
-  require(std::fabs(p.lat_accel_factor_raw - slope) < 1e-9 && std::fabs(p.lat_accel_offset_raw - offset) < 1e-9 &&
-              std::fabs(p.friction_raw - friction) < 1e-9,
-          "total least squares matches an independent closed-form solution");
-  require(std::fabs(p.lat_accel_factor_raw - tr.factor) < 0.005 * tr.factor &&
-              std::fabs(p.lat_accel_offset_raw - tr.offset) < 0.002 &&
-              std::fabs(p.friction_raw - 1.5 * tr.half_width) < 0.02 * 1.5 * tr.half_width,
-          "parallelogram gives its slope, offset and 1.5x half width");
-  require(p.lat_accel_factor > tuning.lat_accel_factor + 0.5 * (tr.factor - tuning.lat_accel_factor) &&
-              p.lat_accel_factor < tr.factor,
-          "filtered factor moves most of the way to the estimate");
+  // TLS 결과가 독립적인 닫힌 해와 같다
+  ASSERT_NEAR(p.lat_accel_factor_raw, slope, 1e-9);
+  ASSERT_NEAR(p.lat_accel_offset_raw, offset, 1e-9);
+  ASSERT_NEAR(p.friction_raw, friction, 1e-9);
+  // 평행사변형에서 그 기울기, 오프셋, 반폭의 1.5배가 나온다
+  ASSERT_NEAR(p.lat_accel_factor_raw, tr.factor, 0.005 * tr.factor);
+  ASSERT_NEAR(p.lat_accel_offset_raw, tr.offset, 0.002);
+  ASSERT_NEAR(p.friction_raw, 1.5 * tr.half_width, 0.02 * 1.5 * tr.half_width);
+  // 필터된 배율이 추정값 쪽으로 대부분 움직인다
+  ASSERT_GT(p.lat_accel_factor,
+            tuning.lat_accel_factor + 0.5 * (tr.factor - tuning.lat_accel_factor));
+  ASSERT_LT(p.lat_accel_factor, tr.factor);
 
   // 무작위 2000점 추출도 같은 답 근처
   TorqueEstimator sampled(tuning, kTorqueLag, 7);
   drive_torque(&sampled, tr, 0, 150000);
-  require(std::fabs(sampled.params().lat_accel_factor_raw - p.lat_accel_factor_raw) < 0.01 &&
-              std::fabs(sampled.params().friction_raw - p.friction_raw) < 0.005,
-          "a 2000 point random subset fits close to the full set");
+  ASSERT_NEAR(sampled.params().lat_accel_factor_raw, p.lat_accel_factor_raw, 0.01);
+  ASSERT_NEAR(sampled.params().friction_raw, p.friction_raw, 0.005);
 }
 
-void verify_torque_clips_to_prior_band() {
+TEST(LateralLearners, TorqueClipsToPriorBand) {
   TorqueTruth tr;
   tr.factor = 1.9;        // 사전 1.4의 +30%(1.82) 밖
   tr.half_width = 0.12;   // 마찰 0.18, 사전 0.1의 +50%(0.15) 밖
@@ -506,15 +541,17 @@ void verify_torque_clips_to_prior_band() {
     if (!est.update(torque_input(tr, i * 0.01))) continue;
     const TorqueParams &p = est.params();
     if (p.valid) {
-      require(p.lat_accel_factor_raw > 1.82 && p.friction_raw > 0.15, "raw estimates are outside the band");
+      // raw 추정이 허용 대역 밖이다
+      ASSERT_GT(p.lat_accel_factor_raw, 1.82);
+      ASSERT_GT(p.friction_raw, 0.15);
       TorqueParams want;
       expect_filter_step(prev, prev.decay, p, tuning, &want);
-      require(same_filters(p, want, 1e-12), "filters step toward the clipped values");
+      ASSERT_TRUE(same_filters(p, want, 1e-12)) << "필터는 클립한 값 쪽으로 움직인다";
       return;
     }
     prev = p;
   }
-  require(false, "clip drive never became valid");
+  FAIL() << "클립 주행이 끝내 유효해지지 않았다";
 }
 
 long count_points_added(TorqueEstimator *est, const TorqueTruth &tr, long tick0, long ticks,
@@ -524,15 +561,15 @@ long count_points_added(TorqueEstimator *est, const TorqueTruth &tr, long tick0,
   return est->total_points() - before;
 }
 
-void verify_torque_gates() {
+TEST(LateralLearners, TorqueGates) {
   TorqueTruth tr;
   const auto none = [](long, TorqueEstimatorInput *) {};
   {
     TorqueEstimator est(prior(), kTorqueLag, 1);
     drive_torque(&est, tr, 0, 495);
-    require(est.total_points() == 0, "no point before 100 history samples");
+    ASSERT_EQ(est.total_points(), 0) << "이력 100개 전에는 점을 넣지 않는다";
     drive_torque(&est, tr, 495, 1);
-    require(est.total_points() == 1, "the 100th sample adds the first point");
+    ASSERT_EQ(est.total_points(), 1) << "100번째 표본에서 첫 점이 들어간다";
   }
   struct Gate {
     const char *what;
@@ -550,12 +587,13 @@ void verify_torque_gates() {
   };
   for (const Gate &g : gates) {
     TorqueEstimator est(prior(), kTorqueLag, 1);
-    require(count_points_added(&est, tr, 0, 2000, none) > 200, "baseline adds points");
+    ASSERT_GT(count_points_added(&est, tr, 0, 2000, none), 200) << "기준 주행은 점을 넣는다";
     drive_torque(&est, tr, 2000, 40, g.edit);  // 속도·토크는 지연만큼 지난 이력에서 읽는다
-    if (count_points_added(&est, tr, 2040, 1000, g.edit) != 0) throw std::runtime_error(g.what);
+    EXPECT_EQ(count_points_added(&est, tr, 2040, 1000, g.edit), 0) << g.what;
   }
   // 0.5초 개입·해제는 2초 창 + 지연이 지날 때까지 막는다. 낡은 입력은 이력을 지우지 않는다.
   for (int which = 0; which < 3; ++which) {
+    SCOPED_TRACE(which);
     TorqueEstimator est(prior(), kTorqueLag, 1);
     drive_torque(&est, tr, 0, 2000);
     const auto edit = [which](long, TorqueEstimatorInput *in) {
@@ -567,8 +605,8 @@ void verify_torque_gates() {
     count_points_added(&est, tr, 2000, 50, edit);
     const long soon = count_points_added(&est, tr, 2050, which == 2 ? 5 : 230, none);
     const long later = count_points_added(&est, tr, which == 2 ? 2055 : 2290, 100, none);
-    if (which < 2) require(soon == 0 && later > 10, "a short disengagement blocks for the 2 s window plus lag");
-    else require(soon == 1 && later > 10, "points resume on the first fresh sample after stale inputs");
+    ASSERT_EQ(soon, which < 2 ? 0 : 1);
+    ASSERT_GT(later, 10);
   }
   // 상류 성질: 활성은 보간 후 0이 아니면 참이라 한 표본짜리 해제는 걸러지지 않고, 두 표본이면 걸린다
   for (int samples = 1; samples <= 2; ++samples) {
@@ -578,12 +616,14 @@ void verify_torque_gates() {
       if (i < 2500 + 5 * samples) in->lat_active = false;
     });
     const long added = count_points_added(&est, tr, 2510, 220, none);  // 두 표본이면 막히는 구간
-    if (samples == 1) require(added > 40, "a single inactive sample interpolates to nonzero and passes");
-    else require(added == 0, "two inactive samples interpolate to zero between them and block");
+    if (samples == 1)
+      ASSERT_GT(added, 40) << "비활성 표본 하나는 보간하면 0이 아니라 통과한다";
+    else
+      ASSERT_EQ(added, 0) << "비활성 표본 둘은 그 사이가 0으로 보간돼 막힌다";
   }
 }
 
-void verify_torque_schedule_and_cache() {
+TEST(LateralLearners, TorqueScheduleAndCache) {
   TorqueTruth tr;
   const TorqueTuning tuning = prior();
   TorqueEstimator est(tuning, kTorqueLag, 5);
@@ -596,8 +636,9 @@ void verify_torque_schedule_and_cache() {
     const bool published = est.update(torque_input(tr, i * 0.01));
     if (i % 5 != 0) continue;
     ++frame;
-    require(est.persist_due() == (frame % 240 == 0), "cache every 240 frames, starting at the first");
-    require(published == (frame % 5 == 0), "publish every 5 frames");
+    ASSERT_EQ(est.persist_due(), (frame % 240 == 0))
+        << "첫 프레임부터 240프레임마다 캐시한다";
+    ASSERT_EQ(published, (frame % 5 == 0)) << "5프레임마다 발행한다";
     if (!est.persist_due()) continue;
     if (frame == 2400) calibrating_cache = est.cache();  // 120초: 계산 가능, 아직 무효
     if (est.params().valid && valid_cache.empty()) {
@@ -606,62 +647,90 @@ void verify_torque_schedule_and_cache() {
       at_valid_persist = est.params();
     }
   }
-  require(!calibrating_cache.empty() && !valid_cache.empty(), "both caches were taken");
+  // 캐시가 두 번 다 만들어졌다
+  ASSERT_FALSE(calibrating_cache.empty());
+  ASSERT_FALSE(valid_cache.empty());
 
   // 유효 캐시: 저장 get_msg는 발행값에서 필터를 한 번 더 돌린 값이다
   TorqueParams cached;
   expect_filter_step(at_valid_persist, at_valid_persist.decay, at_valid_persist, tuning, &cached);
   TorqueEstimator restored(tuning, kTorqueLag, 5, valid_cache);
   restored.set_fit_all_points(true);
-  require(restored.restore_status() == TorqueRestore::Restored, "valid cache restores");
+  ASSERT_EQ(restored.restore_status(), TorqueRestore::Restored) << "유효한 캐시를 복원한다";
   const std::vector<std::array<double, 2>> pts = restored.points();
-  require(pts.size() == valid_points.size(), "all cached points come back");
+  ASSERT_EQ(pts.size(), valid_points.size()) << "캐시한 점이 모두 돌아온다";
   for (size_t k = 0; k < pts.size(); ++k)
-    require(pts[k][0] == static_cast<float>(valid_points[k][0]) &&
-                pts[k][1] == static_cast<float>(valid_points[k][1]),
-            "points round-trip at float precision in order");
+    {
+      // 점이 float 정밀도로 순서대로 왕복한다
+      ASSERT_EQ(pts[k][0], static_cast<float>(valid_points[k][0]));
+      ASSERT_EQ(pts[k][1], static_cast<float>(valid_points[k][1]));
+    }
   TorqueEstimatorInput stale = torque_input(tr, 0.0);
   stale.inputs_fresh = false;
-  require(restored.update(stale), "restored estimator publishes on its first frame");
+  ASSERT_TRUE(restored.update(stale)) << "복원한 추정기는 첫 프레임에 발행한다";
   const TorqueParams &r = restored.params();
-  require(!r.inputs_ok && r.valid && r.max_resets == 1.0, "restored buckets are valid, envelope follows inputs");
+  // 복원한 버킷은 유효하고 입력 범위 판정은 입력을 따른다
+  ASSERT_FALSE(r.inputs_ok);
+  ASSERT_TRUE(r.valid);
+  ASSERT_EQ(r.max_resets, 1.0);
   TorqueParams start;
   start.lat_accel_factor = static_cast<float>(cached.lat_accel_factor);
   start.lat_accel_offset = static_cast<float>(cached.lat_accel_offset);
   start.friction = static_cast<float>(cached.friction);
   TorqueParams want;
   expect_filter_step(start, static_cast<float>(cached.decay), r, tuning, &want);
-  require(same_filters(r, want, 1e-12), "restored filters and decay continue from the cached message");
+  ASSERT_TRUE(same_filters(r, want, 1e-12))
+      << "복원한 필터와 decay는 캐시된 메시지에서 이어진다";
 
   // 무효 캐시: 점과 decay만, 필터는 사전값
   TorqueEstimator partial(tuning, kTorqueLag, 5, calibrating_cache);
-  require(partial.restore_status() == TorqueRestore::Restored && partial.total_points() > 0,
-          "a calibrating cache restores its points");
+  // 보정 중인 캐시도 점은 복원한다
+  ASSERT_EQ(partial.restore_status(), TorqueRestore::Restored);
+  ASSERT_GT(partial.total_points(), 0);
   partial.update(stale);
-  require(!partial.params().valid && partial.params().lat_accel_factor == tuning.lat_accel_factor &&
-              partial.params().friction == tuning.friction && partial.params().decay == 50.0,
-          "a calibrating cache keeps the prior filters");
+  // 보정 중인 캐시는 필터를 사전값으로 둔다
+  ASSERT_FALSE(partial.params().valid);
+  ASSERT_EQ(partial.params().lat_accel_factor, tuning.lat_accel_factor);
+  ASSERT_EQ(partial.params().friction, tuning.friction);
+  ASSERT_EQ(partial.params().decay, 50.0);
 
   // 튜닝이 바뀌면 무시(지우지 않음), 깨졌으면 지움
   TorqueEstimator other(prior(1.5), kTorqueLag, 5, valid_cache);
-  require(other.restore_status() == TorqueRestore::KeyMismatch && other.total_points() == 0,
-          "a cache from another tuning is ignored");
+  // 다른 튜닝의 캐시는 무시한다
+  ASSERT_EQ(other.restore_status(), TorqueRestore::KeyMismatch);
+  ASSERT_EQ(other.total_points(), 0);
   other.update(stale);
-  require(other.params().lat_accel_factor == 1.5 && other.params().decay == 50.0, "ignored cache leaves the prior");
+  // 무시한 캐시는 사전값을 남긴다
+  ASSERT_EQ(other.params().lat_accel_factor, 1.5);
+  ASSERT_EQ(other.params().decay, 50.0);
   const std::string truncated = valid_cache.substr(0, valid_cache.size() - 1);
   std::string bad_magic = valid_cache;
   bad_magic[0] = 'X';
-  require(TorqueEstimator(tuning, kTorqueLag, 5, truncated).restore_status() == TorqueRestore::Corrupt &&
-              TorqueEstimator(tuning, kTorqueLag, 5, bad_magic).restore_status() == TorqueRestore::Corrupt &&
-              TorqueEstimator(tuning, kTorqueLag, 5, "").restore_status() == TorqueRestore::None,
-          "corrupt caches are reported for removal");
+  // 깨진 캐시는 지우도록 알린다
+  ASSERT_EQ(TorqueEstimator(tuning, kTorqueLag, 5, truncated).restore_status(),
+            TorqueRestore::Corrupt);
+  ASSERT_EQ(TorqueEstimator(tuning, kTorqueLag, 5, bad_magic).restore_status(),
+            TorqueRestore::Corrupt);
+  ASSERT_EQ(TorqueEstimator(tuning, kTorqueLag, 5, "").restore_status(), TorqueRestore::None);
 }
 
 // ---------------------------------------------------------------- controlsd 연결
 
-void verify_learners_glue() {
+/* 모든 수신 메시지가 방금 들어온 60 km/h 주행 상태. */
+VehicleCanState driving_vehicle(double t) {
+  VehicleCanState v;
+  for (double *time : {&v.lkas11_time_s, &v.clu11_time_s, &v.sas11_time_s, &v.esp12_time_s,
+                       &v.mdps12_time_s, &v.tcs13_time_s, &v.tcs15_time_s, &v.e_ems11_time_s,
+                       &v.elect_gear_time_s, &v.whl_spd11_time_s, &v.cgw1_time_s, &v.cgw2_time_s})
+    *time = t;
+  v.wheel_speed_fl_kph = v.wheel_speed_fr_kph = v.wheel_speed_rl_kph = v.wheel_speed_rr_kph = 60.0f;
+  v.gear = 5;
+  return v;
+}
+
+TEST(LateralLearners, LearnersGlue) {
   const SteeringParams sp;
-  VehicleCanState vehicle = ready_vehicle(1.0);
+  VehicleCanState vehicle = driving_vehicle(1.0);
   vehicle.steering_angle_deg = 3.0f;
   vehicle.yaw_rate_valid = true;
   vehicle.yaw_rate_rad_s = 0.02f;
@@ -669,62 +738,56 @@ void verify_learners_glue() {
   vehicle.lat_accel_mps2 = -0.4f;  // 반전 저장: 좌측 비력 +0.4
   {
     LateralLearners l(sp, "", "", 1);
-    require(!l.vehicle_restored() && !l.vehicle_restore_rejected() &&
-                l.torque_restore_status() == TorqueRestore::None && !l.live().use_vehicle &&
-                !l.live().use_torque,
-            "fresh learners have nothing to offer yet");
+    // 새 학습기는 아직 내줄 값이 없다
+    ASSERT_FALSE(l.vehicle_restored());
+    ASSERT_FALSE(l.vehicle_restore_rejected());
+    ASSERT_EQ(l.torque_restore_status(), TorqueRestore::None);
+    ASSERT_FALSE(l.live().use_vehicle);
+    ASSERT_FALSE(l.live().use_torque);
     l.update(vehicle, 1.0, 0.5, true, 100, false);
-    require(l.last_vehicle_input().inputs_fresh &&
-                std::fabs(l.last_vehicle_input().lat_accel_mps2 - 0.4) < 1e-6 &&
-                l.last_torque_input().lat_active,
-            "paramsd inputs map sign and scale as the replay tool does");
+    // paramsd 입력의 부호·배율은 재생 도구와 같다
+    ASSERT_TRUE(l.last_vehicle_input().inputs_fresh);
+    ASSERT_NEAR(l.last_vehicle_input().lat_accel_mps2, 0.4, 1e-6);
+    ASSERT_TRUE(l.last_torque_input().lat_active);
     // 좌회전(보낸 토크 +, ESP12 요레이트 +)은 torqued에서 둘 다 음수다(우측 양수 관례)
-    require(std::fabs(l.last_torque_input().steer_torque + 100.0 / sp.steer_max) < 1e-12 &&
-                l.last_torque_input().yaw_rate_rad_s == -l.last_vehicle_input().yaw_rate_rad_s &&
-                l.last_vehicle_input().yaw_rate_rad_s > 0.0,
-            "torqued runs in the controller frame, so its offset matches torque_lat_accel_offset");
-    require(l.vehicle_published() && l.torque_published() && l.vehicle_persist_due() &&
-                l.torque_persist_due(),
-            "the first tick publishes and persists both (upstream frame 0)");
+    {
+      // torqued는 컨트롤러 좌표계라 오프셋이 torque_lat_accel_offset과 같은 방향이다
+      ASSERT_LT(std::fabs(l.last_torque_input().steer_torque + 100.0 / sp.steer_max), 1e-12);
+      ASSERT_EQ(l.last_torque_input().yaw_rate_rad_s, -l.last_vehicle_input().yaw_rate_rad_s);
+      ASSERT_GT(l.last_vehicle_input().yaw_rate_rad_s, 0.0);
+    }
+    // 첫 틱에 둘 다 발행·저장한다(상류 frame 0)
+    ASSERT_TRUE(l.vehicle_published());
+    ASSERT_TRUE(l.torque_published());
+    ASSERT_TRUE(l.vehicle_persist_due());
+    ASSERT_TRUE(l.torque_persist_due());
     const LiveLateralParams live = l.live();
-    require(live.use_vehicle && live.steer_ratio == sp.steer_ratio && live.use_torque &&
-                live.lat_accel_factor == sp.torque_lat_accel_factor &&
-                live.friction == sp.torque_friction && live.lat_accel_offset == 0.0f,
-            "first messages carry the priors");
+    // 첫 메시지는 사전값을 싣는다
+    ASSERT_TRUE(live.use_vehicle);
+    ASSERT_EQ(live.steer_ratio, sp.steer_ratio);
+    ASSERT_TRUE(live.use_torque);
+    ASSERT_EQ(live.lat_accel_factor, sp.torque_lat_accel_factor);
+    ASSERT_EQ(live.friction, sp.torque_friction);
+    ASSERT_EQ(live.lat_accel_offset, 0.0f);
     // 봉투가 무효인 torqued 메시지는 토크 값을 바꾸지 않는다
     VehicleCanState stale = vehicle;
     for (long i = 1; i <= 40; ++i) l.update(stale, 1.0 + 0.01 * i + 5.0, 0.5, true, 100, false);
-    require(!l.torque_params().inputs_ok && l.live().lat_accel_factor == live.lat_accel_factor,
-            "stale torqued messages leave the applied values");
+    // 낡은 torqued 메시지는 적용 값을 바꾸지 않는다
+    ASSERT_FALSE(l.torque_params().inputs_ok);
+    ASSERT_EQ(l.live().lat_accel_factor, live.lat_accel_factor);
 
     // 저장 → 복원
     const std::string json = l.vehicle_persist_json();
     LateralLearners restored(sp, json, l.torque_cache(), 2);
-    require(restored.vehicle_restored() && restored.torque_restore_status() == TorqueRestore::Restored,
-            "both learners restore their own saves");
+    // 두 학습기가 각자 저장값을 복원한다
+    ASSERT_TRUE(restored.vehicle_restored());
+    ASSERT_EQ(restored.torque_restore_status(), TorqueRestore::Restored);
   }
   LateralLearners bad(sp, "{ not json", std::string("junk"), 3);
-  require(bad.vehicle_restore_rejected() && !bad.vehicle_restored() &&
-              bad.torque_restore_status() == TorqueRestore::Corrupt,
-          "rejected saves are reported so controlsd removes them");
+  // 거부된 저장값은 controlsd가 지우도록 알린다
+  ASSERT_TRUE(bad.vehicle_restore_rejected());
+  ASSERT_FALSE(bad.vehicle_restored());
+  ASSERT_EQ(bad.torque_restore_status(), TorqueRestore::Corrupt);
 }
 
 }  // namespace
-
-int main() {
-  return run_checks("lateral learners: ok", [] {
-    verify_jacobian();
-    verify_converges_and_stays_positive_definite();
-    verify_upstream_schedule_reads_steer_ratio_low();
-    verify_gates_hold_state();
-    verify_output_limits_and_hysteresis();
-    verify_persistence();
-    verify_yaw_bias();
-    verify_torque_exact_line();
-    verify_torque_learns_parallelogram();
-    verify_torque_clips_to_prior_band();
-    verify_torque_gates();
-    verify_torque_schedule_and_cache();
-    verify_learners_glue();
-  });
-}

@@ -1,15 +1,11 @@
-// Runs a kmodel over a recorded input sequence and dumps every output frame,
-// so host fp32 references and board quantized results can be compared tick by
-// tick. Input tensors are fully specified per tick, so no temporal state is
-// kept here: quantization error cannot accumulate through this harness and the
-// comparison stays open-loop and exact.
-//
-// Sequence file (little endian):
-//   magic "K230MSQ1", u32 n_ticks, u32 n_inputs,
-//   per input: u8 name_len, name, u32 dtype (0=uint8, 1=float32), u32 bytes,
-//   then n_ticks x (all inputs, in header order).
-//
-// Usage: run_kmodel_sequence <model.kmodel> <seq.k230msq> <out.bin>
+/* 녹화한 입력 시퀀스를 kmodel에 틱마다 넣고 모든 출력 프레임을 덤프한다. 호스트 FP32 기준과
+ * 보드 양자화 결과를 틱 단위로 대조하려는 것이다. 입력 텐서를 틱마다 전부 주므로 여기엔 시간 상태가
+ * 없고, 양자화 오차가 이 하네스를 거치며 누적되지 않는다(개루프·정확 대조). 실행마다 CMA가
+ * 새므로 강제 종료하지 말고 평가 뒤 보드를 재부팅한다.
+ * 시퀀스 파일(리틀 엔디언): magic "K230MSQ1", u32 n_ticks, u32 n_inputs,
+ *   입력마다 u8 name_len, name, u32 dtype(0=uint8, 1=float32), u32 bytes,
+ *   이어서 n_ticks × (모든 입력, 헤더 순서).
+ * 사용: run_kmodel_sequence <model.kmodel> <seq.k230msq> <out.bin> */
 
 #include <nncase/runtime/interpreter.h>
 #include <nncase/runtime/runtime_op_utility.h>
@@ -44,13 +40,12 @@ bool read_pod(std::ifstream &file, T *value)
 
 int main(int argc, char **argv)
 {
-    if (argc < 4) {
+    if (argc != 4) {
         std::fprintf(stderr, "usage: %s <model.kmodel> <seq.k230msq> <out.bin>\n",
                      argv[0]);
-        return 1;
+        return 2;
     }
 
-    std::fprintf(stderr, "[dbg] start\n");
     std::ifstream seq(argv[2], std::ios::binary);
     if (!seq) {
         std::fprintf(stderr, "cannot open %s\n", argv[2]);
@@ -62,7 +57,6 @@ int main(int argc, char **argv)
         std::fprintf(stderr, "bad sequence magic\n");
         return 1;
     }
-    std::fprintf(stderr, "[dbg] magic ok\n");
     uint32_t tick_count = 0;
     uint32_t input_count = 0;
     read_pod(seq, &tick_count);
@@ -84,9 +78,7 @@ int main(int argc, char **argv)
         std::fprintf(stderr, "cannot open %s\n", argv[1]);
         return 1;
     }
-    std::fprintf(stderr, "[dbg] header: ticks=%u inputs=%u\n", tick_count, input_count);
     interp.load_model(model_file).expect("invalid kmodel");
-    std::fprintf(stderr, "[dbg] model loaded, inputs=%zu outputs=%zu\n", interp.inputs_size(), interp.outputs_size());
 
     if (interp.inputs_size() != input_count) {
         std::fprintf(stderr, "model has %zu inputs, sequence has %u\n",

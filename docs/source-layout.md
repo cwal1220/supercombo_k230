@@ -19,7 +19,7 @@
 - `src/model_temporal.h`
   - the supercombo temporal inputs (desire pulse history, feature buffer, the
     constant traffic-convention and nav inputs) without any nncase dependency,
-    so `check_model_output_parser` can pin the v0.9.4 convention on the host.
+    so `gtest_model_output_parser` can pin the v0.9.4 convention on the host.
 - `src/model_input_transform.*`
   - direct `NV12 -> calibrated warped YUV6` input transform. It fuses homography
     sampling and openpilot-compatible YUV6 packing without creating an
@@ -73,13 +73,13 @@
     and kind (reject / hard disengage / transient Panda handshake /
     availability). The controller decides in `BlockReason`, `K230ControlState`
     carries the wire name so recordings and the Python readers stay text, and
-    `overlay_state` labels it from the same rows. `check_overlay_state` proves
+    `overlay_state` labels it from the same rows. `gtest_overlay_state` proves
     every reason has a label.
 
 ### Control safety holds
 
 `src/control_holds.*` implements both holds as `PandaHealthGate` and
-`PathHoldGate`; `check_control_replay` exercises their boundaries.
+`PathHoldGate`; `gtest_control_replay` exercises their boundaries.
 `k230_controlsd` tolerates a single malformed plan frame by holding the last
 usable path for at most 150 ms; the normal 250 ms model freshness timeout remains
 a hard safety gate, so a stale or invalid model still removes control. A
@@ -115,7 +115,7 @@ released after that short hold if they persist.
     `OverlayAlertEvents`, which turns the controlsd event counters into the one
     piezo/toast alert a frame may play (baseline on first sight, rebaseline on a
     controlsd restart, reject > engage > disengage > departure). No OpenCV, so
-    `check_overlay_state` pins all of it on the host.
+    `gtest_overlay_state` pins all of it on the host.
 - `src/system_monitor.*`
   - `/proc`, thermal-zone, and network sampling into `OverlayHudState`, called
     at 1 Hz by `k230_overlayd`.
@@ -126,7 +126,7 @@ released after that short hold if they persist.
     `RecordingWriter` serializes every record before it enters the write queue
     (a queue entry is the packet or record bytes, not a 21 KB CAN batch), and
     `StagingMover` is the thread that moves closed files from tmpfs to the SD
-    card. `check_recording_writer` pins the on-disk layout on the host.
+    card. `gtest_recording_writer` pins the on-disk layout on the host.
     `recording_format.h` is the on-disk contract (`kK230RecordingVersion`,
     the `K230LOG1` / `K230IDX1` headers, record types) that
     `tools/model/recording_reader.py` mirrors.
@@ -155,11 +155,11 @@ released after that short hold if they persist.
 ## Scripts and tools
 
 - `scripts/configure_k230_macos.sh`, `scripts/fetch_nncase_runtime.sh`,
-  `scripts/upload_to_board.sh`, `scripts/run_host_checks.sh`,
+  `scripts/upload_to_board.sh`, `scripts/run_host_tests.sh`,
   `scripts/build_supercombo_model.sh`
   - cross-build configuration, pinned nncase runtime download, deploy, host
-    self-checks, and the ONNX → kmodel pipeline. See
-    [Build and deploy](build-and-deploy.md) and [Verification](verification.md).
+    tests, and the ONNX → kmodel pipeline. See `scripts/README.md` and
+    [Build and deploy](build-and-deploy.md).
 - `tools/model/`
   - the kmodel pipeline scripts plus the recording readers:
     `recording_reader.py` decodes `recordd` routes (frame index, event log,
@@ -168,12 +168,18 @@ released after that short hold if they persist.
     `make_calibration.py` build on it. See `tools/model/README.md`.
 - `tools/control/`
   - `fit_lateral_params.py` (torque regression and actuator-lag estimate from
-    drives) and `export_can_fixture.py` (recorded CAN → `check_control_replay`
+    drives) and `export_can_fixture.py` (recorded CAN → `gtest_control_replay`
     fixture).
 - `tools/ui/hud_tools.py`
   - extracts `hud_snapshot` inputs from a route and composes its frames.
+- `gtest/`
+  - host unit tests (`gtest_*.cc`, googletest + CTest), one self-contained file
+    per target, each registered by one `add_host_test(<name> <libraries>)` line in
+    `gtest/CMakeLists.txt`; `scripts/run_host_tests.sh` runs them. See
+    `gtest/README.md`.
 - `diagnostics/`
-  - host self-checks, benchmarks, and replay tools; see `diagnostics/README.md`.
+  - benchmarks, replay tools (built by `diagnostics/CMakeLists.txt`), and the
+    Python `check_param_server.py`; see `diagnostics/README.md`.
 
 ## Shared helpers
 

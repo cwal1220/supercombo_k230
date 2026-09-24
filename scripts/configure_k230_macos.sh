@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# macOS 호스트에서 K230 런타임 교차 빌드를 구성한다. Homebrew의 CMake·LLVM(Clang)과 작업공간의
+# Xuantie sysroot·보드 라이브러리·RISC-V 링커를 쓴다. 경로는 K230_* 환경 변수로 바꿀 수 있다.
+# 사용: scripts/configure_k230_macos.sh [빌드 디렉터리]   (기본 build/, 이후 cd build && make -j2)
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -58,8 +61,9 @@ for required in \
 done
 
 cmake_flags="-march=rv64gcv -mabi=lp64d -B${gcc_lib_dir} -I${drm_include_dir}"
-cxx_flags="${cmake_flags} -nostdinc++ -isystem ${cxx_include_dir} -isystem ${cxx_target_include_dir} -stdlib=libstdc++"
-linker_flags="-B${gcc_lib_dir} -fuse-ld=${riscv_ld} -rtlib=libgcc -unwindlib=libgcc"
+cxx_flags="${cmake_flags} -nostdinc++ -isystem ${cxx_include_dir} -isystem ${cxx_target_include_dir}"
+# -stdlib는 링크에만 준다. 헤더는 위 -isystem으로 고정돼 컴파일에 주면 unused 경고만 난다.
+linker_flags="-B${gcc_lib_dir} -fuse-ld=${riscv_ld} -stdlib=libstdc++ -rtlib=libgcc -unwindlib=libgcc"
 linker_flags+=" -Wl,--dynamic-linker,/lib/ld-linux-riscv64-lp64d.so.1 -Wl,--no-relax"
 linker_flags+=" -L${gcc_lib_dir} -L${toolchain_dir}/riscv64-unknown-linux-gnu/lib64xthead/lp64d"
 linker_flags+=" -L${sysroot_base_lib_dir} -L${sysroot_usr_lib_dir} -L${board_lib_dir}"

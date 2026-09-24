@@ -44,8 +44,8 @@ float interp_plan(float t, const float *grid, const float *values) {
 
 int main(int argc, char **argv) {
   if (argc < 3) {
-    std::fprintf(stderr, "usage: %s <out.csv> <events...>\n", argv[0]);
-    return 1;
+    std::fprintf(stderr, "usage: %s <out.csv> <events.bin...>\n", argv[0]);
+    return 2;
   }
 
   std::FILE *out = std::fopen(argv[1], "w");

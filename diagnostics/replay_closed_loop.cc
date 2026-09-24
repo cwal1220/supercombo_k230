@@ -2,11 +2,14 @@
  * 개루프 재생(replay_planner)은 차 응답이 녹화에 고정돼 토크를 바꿔도 오차가
  * 안 움직인다. 여기서는 시뮬 차가 녹화 차와 벌어진 만큼(dy, dpsi) 차선 기하를
  * 차체 좌표로 다시 돌려, 제어 변경이 거동에 반영된다.
- * 사용: replay_closed_loop <out.csv> <events.bin...>
  * 운전자가 개입했거나 비활성인 틱은 실측 상태로 재동기화한다. 시뮬은 hands-off
  * 구간만 자유 주행하고 각 구간은 실제 자세에서 출발한다(seg 열이 구간 번호).
- * 환경변수: SIM_OPEN_LOOP=1(자세 보정 고정, 플랜트 검증), SIM_WN/ZETA/DELAY/GAIN,
- *           SIM_SAD, SIM_KP, SIM_KI, SIM_LAF, SIM_DRIVER_QUIET */
+ * 사용: replay_closed_loop [옵션] <out.csv|-> <events.bin...>   (-는 CSV 없이 점수만)
+ *   --open-loop                자세 보정을 고정해 플랜트 재현도만 본다
+ *   --wn/--zeta/--delay N      플랜트 고유진동수·감쇠·지연 틱
+ *   --gain G, --gain-pts a,b,c,d  플랜트 이득(속도 노드 전부 G, 또는 노드별)
+ *   --sad S, --kp, --ki, --laf  컨트롤러 steer_actuator_delay·토크 이득
+ *   --driver-high/--driver-low T, --driver-release N  운전자 개입 히스테리시스 */
 #include "control_params.h"
 #include "hyundai_can.h"
 #include "ipc_messages.h"
@@ -24,6 +27,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace {
@@ -34,15 +39,51 @@ constexpr int kGearDriveSim = 5;
 constexpr float kMaxDeviationY = 2.0f;
 constexpr float kMaxDeviationPsi = 0.15f;
 
-// 빈 문자열은 미설정으로 본다. 셸이 분할에 실패하면 조용히 0이 들어간다.
-float envf(const char *key, float fallback) {
-  const char *v = std::getenv(key);
-  return v != nullptr && v[0] != '\0' ? static_cast<float>(std::atof(v)) : fallback;
+// 비워 둔 값은 코드 기본값을 쓴다.
+struct Options {
+  bool open_loop = false;
+  std::optional<float> sad, kp, ki, laf, gain;
+  const char *gain_pts = nullptr;
+  float wn = 10.0f, zeta = 4.0f;
+  int delay = 0, driver_high = 150, driver_low = 60, driver_release = 50;
+  std::vector<const char *> positional;
+};
+
+[[noreturn]] void usage(const char *argv0) {
+  std::fprintf(stderr,
+               "usage: %s [--open-loop] [--wn W] [--zeta Z] [--delay N] [--gain G | --gain-pts a,b,c,d]\n"
+               "       [--sad S] [--kp KP] [--ki KI] [--laf LAF] [--driver-high T] [--driver-low T]\n"
+               "       [--driver-release N] <out.csv|-> <events.bin...>\n",
+               argv0);
+  std::exit(2);
 }
 
-int envi(const char *key, int fallback) {
-  const char *v = std::getenv(key);
-  return v != nullptr && v[0] != '\0' ? std::atoi(v) : fallback;
+Options parse_options(int argc, char **argv) {
+  Options o;
+  for (int i = 1; i < argc; ++i) {
+    const std::string arg = argv[i];
+    const auto value = [&]() -> const char * {
+      if (i + 1 >= argc) usage(argv[0]);
+      return argv[++i];
+    };
+    if (arg == "--open-loop") o.open_loop = true;
+    else if (arg == "--wn") o.wn = static_cast<float>(std::atof(value()));
+    else if (arg == "--zeta") o.zeta = static_cast<float>(std::atof(value()));
+    else if (arg == "--delay") o.delay = std::atoi(value());
+    else if (arg == "--gain") o.gain = static_cast<float>(std::atof(value()));
+    else if (arg == "--gain-pts") o.gain_pts = value();
+    else if (arg == "--sad") o.sad = static_cast<float>(std::atof(value()));
+    else if (arg == "--kp") o.kp = static_cast<float>(std::atof(value()));
+    else if (arg == "--ki") o.ki = static_cast<float>(std::atof(value()));
+    else if (arg == "--laf") o.laf = static_cast<float>(std::atof(value()));
+    else if (arg == "--driver-high") o.driver_high = std::atoi(value());
+    else if (arg == "--driver-low") o.driver_low = std::atoi(value());
+    else if (arg == "--driver-release") o.driver_release = std::atoi(value());
+    else if (arg.rfind("--", 0) == 0) usage(argv[0]);
+    else o.positional.push_back(argv[i]);
+  }
+  if (o.positional.size() < 2) usage(argv[0]);
+  return o;
 }
 
 // 이득 곡선의 속도 노드(m/s). 일정한 kf 가정이 저속에서 깨져 노드가 필요하다.
@@ -151,33 +192,29 @@ struct Exogenous {
 }  // namespace
 
 int main(int argc, char **argv) {
-  if (argc < 3) {
-    std::fprintf(stderr, "usage: %s <out.csv> <events...>\n", argv[0]);
-    return 1;
-  }
-  const bool open_loop = envi("SIM_OPEN_LOOP", 0) != 0;
+  const Options opt = parse_options(argc, argv);
+  const bool open_loop = opt.open_loop;
 
   SteeringParams steering;
   DrivingParams driving;
-  steering.steer_actuator_delay = envf("SIM_SAD", steering.steer_actuator_delay);
-  steering.torque_kp = envf("SIM_KP", steering.torque_kp);
-  steering.torque_ki = envf("SIM_KI", steering.torque_ki);
-  steering.torque_lat_accel_factor = envf("SIM_LAF", steering.torque_lat_accel_factor);
+  steering.steer_actuator_delay = opt.sad.value_or(steering.steer_actuator_delay);
+  steering.torque_kp = opt.kp.value_or(steering.torque_kp);
+  steering.torque_ki = opt.ki.value_or(steering.torque_ki);
+  steering.torque_lat_accel_factor = opt.laf.value_or(steering.torque_lat_accel_factor);
   /* 편경사 추정은 ESP12 실측이 필요한데 ControlState에 없다. 꺼서 0으로 고정하고
    * 그만큼을 플랜트 이득이 아니라 미모델 외란으로 남긴다. */
   steering.live_bank_compensation = false;
 
   /* route_711에서 폐루프 재현으로 식별한 값(홀드아웃 route_829 R2 0.96).
-   * docs/closed_loop_replay.md */
+   * docs/closed-loop-replay.md */
   const float default_gain[kGainNodes] = {0.70f, 0.35f, 0.70f, 1.20f};
   float gain_curve[kGainNodes];
-  for (int i = 0; i < kGainNodes; ++i) gain_curve[i] = envf("SIM_GAIN", default_gain[i]);
-  if (const char *pts = std::getenv("SIM_GAIN_PTS"); pts != nullptr && pts[0] != '\0') {
-    std::sscanf(pts, "%f,%f,%f,%f", &gain_curve[0], &gain_curve[1], &gain_curve[2],
+  for (int i = 0; i < kGainNodes; ++i) gain_curve[i] = opt.gain.value_or(default_gain[i]);
+  if (opt.gain_pts != nullptr) {
+    std::sscanf(opt.gain_pts, "%f,%f,%f,%f", &gain_curve[0], &gain_curve[1], &gain_curve[2],
                 &gain_curve[3]);
   }
-  Plant plant(envf("SIM_WN", 10.0f), envf("SIM_ZETA", 4.0f), gain_curve,
-              envi("SIM_DELAY", 0));
+  Plant plant(opt.wn, opt.zeta, gain_curve, opt.delay);
 
   LateralPlanner planner(steering, driving);
   LateralControllerConfig cfg;
@@ -189,10 +226,11 @@ int main(int argc, char **argv) {
   SteeringParams angle_params = steering;
   angle_params.torque_use_angle = true;
 
-  const bool want_csv = std::strcmp(argv[1], "-") != 0;
-  std::FILE *out = std::fopen(want_csv ? argv[1] : "/dev/null", "w");
+  const char *out_path = opt.positional[0];
+  const bool want_csv = std::strcmp(out_path, "-") != 0;
+  std::FILE *out = std::fopen(want_csv ? out_path : "/dev/null", "w");
   if (out == nullptr) {
-    std::fprintf(stderr, "cannot open %s\n", argv[1]);
+    std::fprintf(stderr, "cannot open %s\n", out_path);
     return 1;
   }
   /* lane_y는 시뮬 차체 기준 차선 중앙 오프셋이다. dy와 달리 녹화 주행을
@@ -229,9 +267,9 @@ int main(int argc, char **argv) {
   /* 운전자 토크는 hands-off에서도 노이즈가 크다(활성 중 p50 14, p90 156).
    * 단일 임계로 자르면 구간이 0.06초로 부서진다. 컨트롤러처럼 히스테리시스와
    * 해제 지연을 둔다. */
-  const int driver_high = envi("SIM_DRIVER_HIGH", 150);
-  const int driver_low = envi("SIM_DRIVER_LOW", 60);
-  const int driver_release = envi("SIM_DRIVER_RELEASE", 50);
+  const int driver_high = opt.driver_high;
+  const int driver_low = opt.driver_low;
+  const int driver_release = opt.driver_release;
   bool driver_engaged = true;
   int driver_quiet_frames = 0;
 
@@ -351,8 +389,8 @@ int main(int argc, char **argv) {
     clamped = 0;
   };
 
-  for (int a = 2; a < argc; ++a) {
-    std::ifstream f(argv[a], std::ios::binary);
+  for (size_t a = 1; a < opt.positional.size(); ++a) {
+    std::ifstream f(opt.positional[a], std::ios::binary);
     K230EventFileHeader hdr{};
     f.read(reinterpret_cast<char *>(&hdr), sizeof(hdr));
     if (std::memcmp(hdr.magic, "K230LOG1", 8) != 0) continue;

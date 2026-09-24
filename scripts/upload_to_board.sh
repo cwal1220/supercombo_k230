@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# 빌드한 런타임을 보드에 올린다: 실행 파일, 보드용 Python, 모델, UI 스프라이트, 파라미터 기본값.
+# 보드의 params/는 덮어쓰지 않고, 기본값은 params.defaults/에 두어 없는 파일만 채운다.
+# 사용: scripts/upload_to_board.sh [root@보드]   (기본 root@192.168.219.111, 바이너리는 K230_BUILD_DIR/bin)
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -25,6 +28,7 @@ runtime_files=(
   scripts/requirements-param-server.txt
 )
 model="models/supercombo.kmodel"
+param_files=(calibration.json adaptive_cruise.json steering.json driving.json recording.json display.json)
 ui_assets=(
   assets/ui/traffic_wait_red_retro-270x155-v3.png
   assets/ui/traffic_go_green_retro-270x155-v3.png
@@ -48,7 +52,7 @@ for ui_asset in "${ui_assets[@]}"; do
 done
 
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
-  "test -x /etc/init.d/S35supercombo_k230 || { echo 'Missing image-provided /etc/init.d/S35supercombo_k230' >&2; exit 1; }; rm -f /etc/init.d/S95supercombo_k230; rm -rf '$DEST/.upload'; mkdir -p '$DEST/.upload' '$DEST/models' '$DEST/params' '$DEST/params.defaults'"
+  "test -x /etc/init.d/S35supercombo_k230 || { echo 'Missing image-provided /etc/init.d/S35supercombo_k230' >&2; exit 1; }; rm -rf '$DEST/.upload'; mkdir -p '$DEST/.upload' '$DEST/models' '$DEST/params' '$DEST/params.defaults'"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "${runtime_files[@]}" "$BOARD:$DEST/.upload/"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "for source in '$DEST/.upload/'*; do mv \"\$source\" '$DEST/'; done"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mkdir -p '$DEST/.upload/assets/ui' '$DEST/assets/ui'"
@@ -57,21 +61,8 @@ done
   "rm -f '$DEST/assets/ui/'*.png; for source in '$DEST/.upload/assets/ui/'*; do mv \"\$source\" '$DEST/assets/ui/'; done"
 "${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "$model" "$BOARD:$DEST/.upload/supercombo.kmodel"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "mv '$DEST/.upload/supercombo.kmodel' '$DEST/models/supercombo.kmodel'"
-"${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" \
-  params/calibration.json \
-  params/adaptive_cruise.json \
-  params/steering.json \
-  params/driving.json \
-  params/recording.json \
-  params/display.json \
-  "$BOARD:$DEST/params.defaults/"
+"${SCP_CMD[@]}" "${SSH_OPTIONS[@]}" "${param_files[@]/#/params/}" "$BOARD:$DEST/params.defaults/"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
-  "for name in calibration.json adaptive_cruise.json steering.json driving.json recording.json display.json; do test -e '$DEST/params/'\"\$name\" || cp '$DEST/params.defaults/'\"\$name\" '$DEST/params/'\"\$name\"; done"
-# 2026-09-18 개명 전 이름. 매니저는 새 이름을 띄우므로 남아 있어도 무해하지만 지운다.
-"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
-  "rm -f '$DEST/param_server.py' '$DEST/k230_display_control.py'"
+  "for name in ${param_files[*]}; do test -e '$DEST/params/'\"\$name\" || cp '$DEST/params.defaults/'\"\$name\" '$DEST/params/'\"\$name\"; done"
 "${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" "rm -rf '$DEST/.upload'; sync"
-# 예전 배포는 model/ 에 넣었다. 매니저는 이제 models/ 만 본다.
-"${SSH_CMD[@]}" "${SSH_OPTIONS[@]}" "$BOARD" \
-  "test ! -e '$DEST/model' || echo 'note: legacy $DEST/model is unused, remove it manually'"
 echo "Uploaded runtime files to $BOARD:$DEST"

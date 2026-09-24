@@ -2,23 +2,10 @@
 
 [← Documentation index](../README.md)
 
-The host self-checks build and run in one step, from the repository root:
-
-```sh
-./scripts/run_host_checks.sh
-```
-
-That covers every `check_*` target. The remaining benchmark and
-diagnostic utilities under `diagnostics/` are not built by default; build them
-explicitly with:
-
-```sh
-cmake -S . -B build-host \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DSUPERCOMBO_BUILD_RUNTIME=OFF \
-  -DSUPERCOMBO_BUILD_DIAGNOSTICS=ON
-cmake --build build-host -j2
-```
+Procedures and measured results for the diagnostic tools. The tools themselves,
+their options, and how to build them are listed in
+[diagnostics/README.md](../diagnostics/README.md); the host unit tests are in
+[gtest/README.md](../gtest/README.md).
 
 ## HUD snapshots
 
@@ -42,11 +29,17 @@ composites it the way the panel shows it.
 
 ## NV12 replay
 
-To run an existing `SCNV12R1` replay through the split model process on the
-board:
+`k230_modeld` can run headless from a recorded route: replay mode opens neither
+the camera nor the display and feeds the same NV12 path as live capture, so it
+validates model execution and online calibration from stored segments.
 
 ```sh
-SUPERCOMBO_REPLAY_NV12=/root/supercombo_k230/replay_120.scnv12 \
+# host: cut 120 frames of a route into an SCNV12R1 replay
+python3 tools/model/make_replay.py --route recordings/<route> --out /tmp/replay_nv12 --frames 120
+scp /tmp/replay_nv12/replay.scnv12 root@192.168.219.111:/root/supercombo_k230/
+
+# board
+SUPERCOMBO_REPLAY_NV12=/root/supercombo_k230/replay.scnv12 \
   ./k230_modeld models/supercombo.kmodel 0
 ```
 
@@ -121,31 +114,6 @@ Measured on the two logged drives (no lane-line offset was applied on either):
 The rotation term is under 1 mrad on both, so the left-hugging on those drives
 was a lateral offset, not a camera-matrix error.
 
-## Recording format
-
-`k230_recordd` writes the event log as 60 s chunks in `events/NNN.bin`, each
-starting with an 8-byte `K230LOG1` magic, a version word, and fixed 16-byte
-record headers. The current version is `5`.
-
-| Record type | Payload |
-| --- | ---: |
-| `CanRx` / `CanTx` | variable CAN batch |
-| `ModelState` | 3256 B |
-| `ControlState` | 240 B |
-| `PandaState` | 96 B |
-
-Older recordings are not `ModelState`-compatible: version 1 carried 4384 B
-including unused lateral draft fields, versions 2–3 carried 4080 B including the
-stop-line block that openpilot v0.9.4 does not emit, and version 4 carried
-4048 B including plan position stds and orientations that nothing read.
-Version 2 also kept a
-single route-level `events.bin`; CAN logging alone (~0.5 MB/s) filled the 988 MB
-tmpfs staging in about 30 minutes on long drives and silently killed the rest of
-the recording, which is why version 3 rotates event chunks alongside video
-segments. `tools/model/recording_reader.py` reads the v3, v4, and v5 layouts;
-`lane_bias.py`, `hud_tools.py`, `fit_lateral_params.py lag`, and
-`export_can_fixture.py` all walk the event log through its `iter_event_records`.
-
 ## Lateral dataset extraction
 
 `extract_lateral_dataset` replays a recording and writes one CSV row per
@@ -196,6 +164,5 @@ without touching `params/driving.json`.
 
 ## Related documents
 
-- [Recovery procedures](recovery.md)
-- [Departure alerts](departure_alerts.md)
-- [YG panda port notes](yg_panda_port.md)
+- [Departure alerts](departure-alerts.md)
+- [K7 Panda port](k7-panda-port.md)

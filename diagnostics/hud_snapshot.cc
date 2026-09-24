@@ -1,11 +1,9 @@
-// HUD 스냅샷·타이밍 도구. 렌더러만 떼어 480x800 ARGB 버퍼에 그리고 시나리오별
-// 프레임을 K230ARGB 파일로 저장한다. 호스트와 보드에서 같은 소스로 빌드한다.
-//
-//   hud_snapshot [--assets DIR] [--model model.bin] [--control control.bin]
-//                [--iterations N] [--out PREFIX] [--landscape]
-//
-// model.bin / control.bin은 녹화 이벤트의 K230ModelState / K230ControlState
-// 원본 바이트다(tools/ui/hud_tools.py inputs가 만든다). 없으면 합성 장면을 쓴다.
+/* HUD 스냅샷·타이밍 도구. 렌더러만 떼어 480x800 ARGB 버퍼에 그리고 시나리오별 프레임을
+ * K230ARGB 파일로 저장한다. model.bin / control.bin은 녹화 이벤트의 K230ModelState /
+ * K230ControlState 원본 바이트다(tools/ui/hud_tools.py inputs가 만든다). 없으면 합성 장면을 쓴다.
+ * 호스트와 보드에서 같은 소스로 빌드한다.
+ * 사용: hud_snapshot [--assets DIR] [--model model.bin] [--control control.bin]
+ *       [--iterations N] [--out PREFIX] [--landscape] */
 #include "overlay_state.h"
 #include "ipc_messages.h"
 #include "overlay_renderer.h"
@@ -122,7 +120,10 @@ int main(int argc, char **argv)
         else if (arg == "--out") out_prefix = next();
         else if (arg == "--landscape") landscape = true;
         else {
-            std::fprintf(stderr, "unknown argument %s\n", arg.c_str());
+            std::fprintf(stderr,
+                         "usage: %s [--assets DIR] [--model model.bin] [--control control.bin]\n"
+                         "          [--iterations N] [--out PREFIX] [--landscape]\n",
+                         argv[0]);
             return 2;
         }
     }

@@ -54,13 +54,18 @@ int main(int argc, char **argv) {
     else if (arg == "--torque-outputs" && i + 1 < argc) torque_outputs_path = argv[++i];
     else if (arg == "--torque-cache" && i + 1 < argc) torque_cache_path = argv[++i];
     else if (arg == "--steering" && i + 1 < argc) steering_path = argv[++i];
-    else events.push_back(arg);
+    else if (arg.rfind("--", 0) == 0) {
+      events.clear();
+      break;
+    } else {
+      events.push_back(arg);
+    }
   }
   if (events.empty()) {
     std::fprintf(stderr, "usage: %s [--upstream-schedule] [--fit-all] [--inputs in.bin] [--outputs out.csv] "
                          "[--torque-inputs tin.bin] [--torque-outputs tout.csv] [--torque-cache c.bin] "
                          "[--steering steering.json] <events.bin...>\n", argv[0]);
-    return 1;
+    return 2;
   }
 
   SteeringParams sp;

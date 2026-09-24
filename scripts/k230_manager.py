@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""보드 런타임 감시자. 프로세스를 시작 순서대로 띄우고(camerad는 overlayd의 display-ready를
+기다린다) 죽으면 1초 뒤 다시 띄우며, 1초마다 managerState를 /dev/shm에 낸다. 어떤 프로세스를
+띄울지는 K230_ENABLE_CONTROL·K230_ENABLE_PANDA·K230_ENABLE_PARAM_SERVER가 정한다.
+
+사용: ./k230_manager.py [supercombo.kmodel] [debug_mode]   (보드의 설치 디렉터리에서)
+"""
 import mmap
 import os
 import signal

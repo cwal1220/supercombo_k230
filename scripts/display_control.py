@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+"""LCD 백라이트 제어. IO25 한 핀을 끄기·100%는 GPIO로, 그 사이 밝기는 PWM으로 IOMUX를 바꿔
+가며 구동한다. k230_param_server가 display.json을 적용할 때 쓴다."""
 from __future__ import annotations
 
 import ctypes

@@ -2,7 +2,8 @@
 
 [← Documentation index](../README.md)
 
-For a freshly flashed board, install the build/runtime helper packages first:
+For a freshly flashed or reflashed board, install the build/runtime helper packages
+first:
 
 ```sh
 apt-get update
@@ -42,12 +43,15 @@ not needed for building. It is only needed for a fresh repository checkout.
 
 ## Required image contents
 
-The flashed image must already include the K230 camera/display devices and these
-target runtime libraries:
+The flashed image must already include the K230 camera/display devices, `/dev/mmz`,
+and these runtime libraries in `/usr/lib/riscv64-linux-gnu/`:
 
 - `libdisplay.so`
 - `libv4l2-drm.so`
 - `libdrm.so.2`
+
+After that, [Build and deploy](build-and-deploy.md) builds the runtime on the board or
+cross-builds and uploads it.
 
 ## Physical mounting
 

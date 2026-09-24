@@ -1,6 +1,6 @@
-// 녹화된 ModelState/ControlState로 LateralPlanner를 재실행한다.
-// 녹화된 인지 결과에 대해 플래너가 무엇을 요구했는지 오프라인으로 재현한다.
-// 사용: replay_planner <out.csv> [--laneless] <events.bin...>
+/* 녹화된 ModelState/ControlState로 LateralPlanner를 재실행한다.
+ * 녹화된 인지 결과에 대해 플래너가 무엇을 요구했는지 오프라인으로 재현한다.
+ * 사용: replay_planner [--laneless] <out.csv> <events.bin...> */
 #include "ipc_messages.h"
 #include "lateral_controller.h"
 #include "lateral_planner.h"
@@ -18,26 +18,36 @@
 int main(int argc, char **argv) {
   SteeringParams steering;
   DrivingParams driving;
-  int first_event = 2;
-  if (argc > 2 && std::strcmp(argv[2], "--laneless") == 0) {
-    driving.laneless_mode = true;
-    first_event = 3;
+  std::vector<const char *> positional;
+  for (int i = 1; i < argc; ++i) {
+    if (std::strcmp(argv[i], "--laneless") == 0) {
+      driving.laneless_mode = true;
+    } else if (std::strncmp(argv[i], "--", 2) == 0) {
+      positional.clear();
+      break;
+    } else {
+      positional.push_back(argv[i]);
+    }
   }
-  if (argc <= first_event) {
-    std::fprintf(stderr, "usage: %s <out.csv> [--laneless] <events...>\n", argv[0]);
-    return 1;
+  if (positional.size() < 2) {
+    std::fprintf(stderr, "usage: %s [--laneless] <out.csv> <events.bin...>\n", argv[0]);
+    return 2;
   }
   LateralPlanner planner(steering, driving);
 
   VehicleCanState vehicle{};   // 블링커/개입 없음
-  std::FILE *out = std::fopen(argv[1], "w");
+  std::FILE *out = std::fopen(positional[0], "w");
+  if (out == nullptr) {
+    std::fprintf(stderr, "cannot open %s\n", positional[0]);
+    return 1;
+  }
   std::fprintf(out, "t,v_kph,measured,des_rec,des_replay,target_curv,target_y,"
                     "lane_l,lane_r,prob_l,prob_r,d_prob,laneless,lane_w,mpc_valid,heading0,heading_target\n");
 
   float v_kph = 0.0f, measured = 0.0f, des_rec = 0.0f, prev_des = 0.0f;
   bool have_cs = false;
-  for (int a = first_event; a < argc; ++a) {
-    std::ifstream f(argv[a], std::ios::binary);
+  for (size_t a = 1; a < positional.size(); ++a) {
+    std::ifstream f(positional[a], std::ios::binary);
     K230EventFileHeader hdr{};
     f.read(reinterpret_cast<char *>(&hdr), sizeof(hdr));
     if (std::memcmp(hdr.magic, "K230LOG1", 8) != 0) continue;

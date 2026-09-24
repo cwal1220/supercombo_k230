@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""녹화 events/NNN.bin(K230LOG1) 하나를 check_control_replay의 K230CAN1 픽스처로 내보낸다.
+"""녹화 events/NNN.bin(K230LOG1) 하나를 gtest_control_replay의 K230CAN1 픽스처로 내보낸다.
 
 수신 CAN(CanRx) 레코드만 담고, 타임스탬프는 첫 프레임을 0으로 다시 잰다.
 사용: export_can_fixture.py <events/NNN.bin> <out.k230can>

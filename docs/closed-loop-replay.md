@@ -48,7 +48,7 @@ gain is `1/kf` — the assumption the feedforward is already built on — times 
 speed-scheduled correction for the error in that assumption.
 
 The plant is accepted on **closed-loop reproduction**, not on an open-loop fit.
-Run with `SIM_OPEN_LOOP=1`, the perception is exactly what the car saw and the
+Run with `--open-loop`, the perception is exactly what the car saw and the
 controller feeds back the simulated angle; if the plant is right, the simulated
 lateral acceleration tracks the recorded one. An earlier attempt to identify the
 plant by fitting recorded torque against recorded angle gave `tau = 2210 ms` at

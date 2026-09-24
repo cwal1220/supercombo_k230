@@ -4,21 +4,13 @@
 #include "lateral_mpc.h"
 #include "model_output.h"
 
-#include <array>
-#include <chrono>
-#include <cmath>
-#include <cstdio>
+#include <gtest/gtest.h>
+
 #include <algorithm>
-#include <vector>
+#include <array>
+#include <cmath>
 
 namespace {
-
-int failures = 0;
-
-void expect(bool ok, const char *what, double value, double limit) {
-    std::printf("%-46s %12.3e (한계 %.0e) %s\n", what, value, limit, ok ? "ok" : "FAIL");
-    if (!ok) ++failures;
-}
 
 struct Scenario {
     const char *name;
@@ -83,7 +75,7 @@ double objective(const std::array<double, kLatMpcN> &u, const Scenario &s,
     for (int i = 0; i < kLatMpcNodes; ++i) {
         const bool terminal = i == kLatMpcN;
         const double scale = terminal ? w.terminal : LateralMpc::time_step(i);
-            const double e_y = z[0] - ref.y[i];
+        const double e_y = z[0] - ref.y[i];
         const double e_psi = speed * (z[1] - ref.heading[i]);
         double stage = w.path * e_y * e_y + w.heading * e_psi * e_psi;
         if (!terminal) {
@@ -103,9 +95,6 @@ double objective(const std::array<double, kLatMpcN> &u, const Scenario &s,
 }
 
 void check_scenario(const Scenario &s) {
-    std::printf("\n[%s] v=%.1f m/s rr=%.2f k0=%.4f hw=%.2f steer=%.4g\n", s.name,
-                s.v_ego, s.rotation_radius, s.curvature0, s.weights.heading,
-                s.weights.steering_rate);
     const Reference ref = build_reference(s);
 
     LateralMpc mpc;
@@ -113,13 +102,13 @@ void check_scenario(const Scenario &s) {
     for (int iter = 0; iter < 60; ++iter)
         mpc.run(s.curvature0, s.v_ego, s.rotation_radius, ref.y, ref.heading,
                 s.weights);
-    expect(mpc.status() == 0, "status", mpc.status(), 0);
+    EXPECT_EQ(mpc.status(), 0);
 
     // 초기 상태 등식 제약.
     const auto &nodes = mpc.nodes();
     double init_err = std::fabs(nodes[0].y) + std::fabs(nodes[0].psi) +
                       std::fabs(nodes[0].curvature - s.curvature0);
-    expect(init_err < 1e-12, "초기 상태 제약 오차", init_err, 1e-12);
+    EXPECT_LT(init_err, 1e-12) << "초기 상태 제약 오차";
 
     // 다중슈팅 결손: 수렴점에서 궤적이 동역학적으로 타당해야 한다.
     double max_defect = 0.0;
@@ -132,7 +121,7 @@ void check_scenario(const Scenario &s) {
         max_defect = std::max(max_defect, std::fabs(next[1] - nodes[i + 1].psi));
         max_defect = std::max(max_defect, std::fabs(next[2] - nodes[i + 1].curvature));
     }
-    expect(max_defect < 1e-10, "결손 최대값", max_defect, 1e-10);
+    EXPECT_LT(max_defect, 1e-10) << "결손 최대값";
 
     /* 참 목적함수의 기울기. 스케일이 커서 절대값 대신 코스트에 대한
      * 상대 기울기를 본다(입력 1e-6 변화당 코스트 변화 비율). */
@@ -150,43 +139,13 @@ void check_scenario(const Scenario &s) {
         max_grad = std::max(max_grad, std::fabs(grad));
     }
     const double relative = max_grad / std::max(1.0, base);
-    expect(relative < 1e-6, "상대 기울기 최대값", relative, 1e-6);
+    EXPECT_LT(relative, 1e-6) << "상대 기울기 최대값";
     // 솔버가 보고하는 코스트가 독립 계산과 같아야 한다.
     const double cost_err = std::fabs(mpc.cost() - base) / std::max(1.0, base);
-    expect(cost_err < 1e-12, "코스트 상대 오차", cost_err, 1e-12);
-    std::printf("%-46s %12.6f\n", "코스트", base);
-    std::printf("%-46s %12.6f %12.6f\n", "curvature[0], rate[0]",
-                nodes[0].curvature, mpc.rates()[0]);
+    EXPECT_LT(cost_err, 1e-12) << "코스트 상대 오차";
 }
 
-/* 보드는 1코어라 다른 프로세스에 선점된다. 평균은 그 꼬리를 먹으니 회당
- * 시간을 모아 최소값과 백분위를 본다. */
-double percentile(std::vector<double> &samples, double q) {
-    std::sort(samples.begin(), samples.end());
-    return samples[static_cast<size_t>(q * (samples.size() - 1))];
-}
-
-void check_timing(const char *label, const Scenario &s) {
-    const Reference ref = build_reference(s);
-    LateralMpc mpc;
-    constexpr int kRuns = 2000;
-    std::vector<double> us;
-    us.reserve(kRuns);
-    for (int i = 0; i < kRuns; ++i) {
-        const auto start = std::chrono::steady_clock::now();
-        mpc.run(s.curvature0, s.v_ego, s.rotation_radius, ref.y, ref.heading,
-                s.weights);
-        us.push_back(std::chrono::duration<double, std::micro>(
-                         std::chrono::steady_clock::now() - start)
-                         .count());
-    }
-    std::printf("  %-18s min %8.2f  p50 %8.2f  p90 %8.2f us\n", label,
-                percentile(us, 0.0), percentile(us, 0.5), percentile(us, 0.9));
-}
-
-}  // namespace
-
-int main() {
+TEST(LateralMpc, OptimizesTheOcp) {
     // 저속은 heading 1.0, 10 m/s 이상은 0.15. 플래너 스케줄과 같다.
     LateralMpcWeights slow;
     LateralMpcWeights fast;
@@ -211,14 +170,10 @@ int main() {
             return w;
         }()},
     };
-    for (const auto &s : scenarios) check_scenario(s);
-
-    std::printf("\nsolve 1회 (2000회)\n");
-    Scenario base{"타이밍", 20.0, 0.5, 0.01, 0.5, fast};
-    Scenario without{"타이밍", 20.0, 0.5, 0.01, 0.5, bare};
-    check_timing("steering_rate 700", base);
-    check_timing("steering_rate 0", without);
-
-    std::printf("\n%s\n", failures == 0 ? "전부 통과" : "실패 있음");
-    return failures == 0 ? 0 : 1;
+    for (const auto &s : scenarios) {
+        SCOPED_TRACE(s.name);
+        check_scenario(s);
+    }
 }
+
+}  // namespace

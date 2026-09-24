@@ -20,10 +20,11 @@ true.
     draw/present timing.
 - `SUPERCOMBO_CALIB_ROLL_DEG`, `SUPERCOMBO_CALIB_PITCH_DEG`,
   `SUPERCOMBO_CALIB_YAW_DEG`
-  - override the overlay projection calibration in degrees. If any value is set,
-    manual projection calibration wins and online calibration is not applied to
-    the overlay. Otherwise the saved calibration is restored and automatic
-    calibration remains active.
+  - manual calibration in degrees for both the overlay projection and the model
+    input warp. If any value is set, it wins and online calibration is applied to
+    neither. Otherwise the saved calibration is restored and pose-based online
+    calibration feeds the next frame's input warp, matching openpilot's
+    `cameraOdometry -> liveCalibration -> modeld` loop.
 - `SUPERCOMBO_CALIB_AUTO=0`
   - disables pose-based online overlay calibration and keeps the restored or
     manually supplied projection.
@@ -33,10 +34,6 @@ true.
 
 ## Input warp
 
-- `SUPERCOMBO_CALIB_ROLL_DEG`, `SUPERCOMBO_CALIB_PITCH_DEG`, `SUPERCOMBO_CALIB_YAW_DEG`
-  - optional model-input warp calibration in degrees. Without a manual override,
-    pose-based online calibration feeds back into the next frame's model input
-    warp, matching openpilot's `cameraOdometry -> liveCalibration -> modeld` loop.
 - `SUPERCOMBO_WARP_SCALAR=1`
   - disables the C908 RVV input-warp kernel for diagnostics and uses the
     bit-exact scalar fallback.
@@ -73,7 +70,7 @@ true.
   - stops after `N` inferred frames. This is mainly useful with replay mode.
 - `SUPERCOMBO_RAW_DUMP=/path/to/dump.bin`
   - during replay, writes every raw model output to an `SCODMP1` file that
-    `check_model_output_parser` reads. Pair it with a host run over the same
+    `gtest_model_output_parser` reads. Pair it with a host run over the same
     replay to verify a model swap end to end (warp, temporal inputs, kmodel);
     see [diagnostics](diagnostics.md#model-swap-verification).
 
@@ -147,11 +144,7 @@ the board-provided `devmem` utility (normally `/sbin/devmem`). If that utility o
 the PWM sysfs interface is unavailable, the pipeline continues with LCD alerts
 only.
 
-The piezo module also provides distinct `engage`, `disengage`, and `unable`
-(engage refused) tones. Engagement uses a fixed-duty ascending sequence and
-disengagement a descending sequence so passive-piezo playback remains clean. A
-refused engage request shows its gate reason on the HUD and plays the `unable`
-tone once.
+Which events play which tone is described in [Departure alerts](departure-alerts.md).
 
 ## Parameter files
 
@@ -191,5 +184,5 @@ python3 scripts/k230_param_server.py --host 0.0.0.0 --port 8080
   `overlayd=10`, `recordd=15`, optional `pandad=-10`, optional `controlsd=-8`,
   and `param_server=10`.
 - The front-vehicle marker is always enabled with probability threshold `0.5`.
-- Final desired curvature is clamped to `0.3 1/m`; it is intentionally not a
-  runtime tuning option.
+- Desired curvature is clamped to openpilot's `0.2 1/m`; it is intentionally not
+  a runtime tuning option.

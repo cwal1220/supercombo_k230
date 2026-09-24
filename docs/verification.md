@@ -4,7 +4,7 @@
 
 ## Calibration and input-warp equivalence
 
-- `diagnostics/check_calibration_equivalence.cc` is a host-only verifier for the
+- `gtest/gtest_calibration_equivalence.cc` is a host-only verifier for the
   openpilot-derived calibration and input-warp math. It checks the pose-based
   calibration state machine, manual-vs-online feedback policy,
   medmodel/sbigmodel homography matrices, UV `transform_scale_buffer(0.5)`
@@ -16,10 +16,7 @@
   but that roll is not fed into `modeld`.
 - The verifier checks the ISP-normalized medmodel defaults and compares its
   matrix with the original openpilot formula.
-- The verifier compares every output byte from the compact lookup tables with the
-  previous 24-byte/sample lookup format across 12 medmodel/sbigmodel pose cases.
-  It also checks two-frame direct tensor history against the previous pack path
-  with a full-buffer `memcmp`.
+- With zero rpy, the warped YUV6 must equal a direct (unwarped) pack byte for byte.
 - Against openpilot's OpenCL interpolation on the actual `640x360` K230 source,
   the worst 12-case mean absolute pixel difference is `0.314/255` and the worst
   absolute difference is `7/255`. The paths use the same projection and YUV6
@@ -31,7 +28,7 @@
   910-pixel-focal medmodel virtual camera and `big_input_imgs` uses the
   455-pixel-focal sbigmodel virtual camera, matching the single-camera C2 path.
 
-`scripts/run_host_checks.sh` already runs this verifier. To run it alone,
+`scripts/run_host_tests.sh` already runs this verifier. To run it alone,
 together with the warp benchmark:
 
 ```sh
@@ -40,9 +37,9 @@ cmake -S . -B build-host \
   -DSUPERCOMBO_BUILD_RUNTIME=OFF \
   -DSUPERCOMBO_BUILD_DIAGNOSTICS=ON
 cmake --build build-host \
-  --target check_calibration_equivalence bench_input_warp_overhead -j2
-build-host/bin/check_calibration_equivalence
-build-host/bin/bench_input_warp_overhead 3000
+  --target gtest_calibration_equivalence bench_input_warp_overhead -j2
+build-host/bin/gtest_calibration_equivalence
+build-host/bin/bench_input_warp_overhead --runs 3000
 ```
 
 ## Lateral MPC solver
@@ -66,10 +63,10 @@ Two deliberate reductions:
 
 ### Optimality (host, no second solver)
 
-`diagnostics/check_lateral_mpc.cc` reimplements the dynamics and cost
-independently and checks the warm-started fixed point across five scenarios
-(standstill through 27 m/s): multiple-shooting defects stay below `1e-15` and the
-central-difference gradient of the true objective below `1e-9` relative to the
+`gtest/gtest_lateral_mpc.cc` reimplements the dynamics and cost
+independently and checks the warm-started fixed point across eight scenarios
+(standstill through 27 m/s): multiple-shooting defects stay below `2e-15` and the
+central-difference gradient of the true objective below `2e-9` relative to the
 cost. A wrong sensitivity in the RK4 forward VDE fails this check, since the
 iteration would then settle where the linearized KKT holds but the true gradient
 does not.
@@ -198,22 +195,9 @@ which needs `K230ModelState` to grow and the recording version to be bumped.
 
 ## Host self-tests
 
-The same benchmark build produces self-checking binaries that need no board:
+The googletest binaries under `gtest/` need no board; `scripts/run_host_tests.sh`
+runs them all through `ctest`. What each one covers is listed in
+[gtest/README.md](../gtest/README.md).
 
-| Target | Covers |
-| --- | --- |
-| `check_control_replay` | K7 engage gates, torque limits, CAN frame build; learned-parameter consumers (switch off is bit-identical, live vehicle model = opendbc `calc_curvature`, live torque = lat-accel-space PID ÷ latAccelFactor, `paramsd_invalid` gate, roll-shifted curvature limit) |
-| `check_lateral_learners` | paramsd EKF (Jacobian, Joseph PD, convergence, gates, output limits, persistence, gyro bias) and torqued (TLS vs a closed-form reference, buckets, gates, filter/decay, 4 Hz/12 s schedule, cache) and the controlsd glue |
-| `check_departure_alert` | departure alert state machine |
-| `check_adaptive_cruise` | vision cruise button pacing and limits |
-| `check_model_output_parser` | supercombo raw-output layout and temporal-input convention |
-| `check_recording_writer` | route layout on disk: K230LOG1 chunk records, K230IDX1 frame index, manifest, params snapshot, staging drained |
-| `check_overlay_state` | `K230*State` → HUD mapping, a HUD label for every `BlockReason`, and the piezo/toast alert selection (baseline, counter reset, priority) |
-| `check_k230_can_queue` | shared-memory CAN queue |
-| `check_panda_can_codec` | panda USB CAN packing/unpacking |
-| `check_lateral_mpc` | lateral MPC optimality and solve time |
-| `check_calibration_equivalence` | online calibration state machine, model-input homography and YUV6 packing against openpilot references |
-| `check_param_server.py` | parameter store, runtime schema sync, UI metadata coverage of `params/*.json`, UI min/max equal to the C++ `Json*Field` clamp tables |
-
-See [Diagnostics](diagnostics.md) for the build command and additional
-on-board tools.
+The standalone tools, host and on-board, are listed in
+[diagnostics/README.md](../diagnostics/README.md).

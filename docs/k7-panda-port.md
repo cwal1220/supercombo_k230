@@ -1,5 +1,7 @@
 # KIA K7 YG HEV Panda Port
 
+[← Documentation index](../README.md)
+
 ## Runtime
 
 - `k230_pandad` owns Panda USB through `libusb` and publishes CAN batches to
@@ -29,46 +31,29 @@ While steering is active below the MDPS threshold, the bus-1 `CLU11` helper
 reports 60 kph (38 mph) and preserves the source decimal-speed field. This
 matches the K7 branch in the reference openpilot controller.
 
-Runtime parameters are stored in:
-
-- `params/steering.json`: torque PID, steering limits, vehicle geometry,
-  angle offset, and low-speed steering settings.
-- `params/driving.json`: model/CAN freshness, inactive release duration,
-  MDPS speed spoof, and lateral motion limits.
-- `params/calibration.json`: generated camera calibration state. This file is
-  preserved across application and board restarts.
+Runtime parameters live in `params/`; see [params/README.md](../params/README.md).
 
 ## Build
 
-Use the K230 Linux SDK host-toolchain cross-build procedure in the repository
-`README.md`, then deploy with `scripts/upload_to_board.sh`.
-
-The Buildroot SDK configuration must include `BR2_PACKAGE_LIBUSB=y`.
+Build and upload as in [Build and deploy](build-and-deploy.md). The board image's
+Buildroot configuration must include `BR2_PACKAGE_LIBUSB=y` for `k230_pandad`.
 
 ## Offline Validation
 
-Export one 60 s chunk of a recording to the `K230CAN1` fixture format, then run
-the checker on it. The chunk must be a continuous driving segment: the checker
-expects the controller to be active for almost the whole minute and to apply
-torque, so a parked or stop-and-go chunk fails those assertions by design.
+Export one 60 s chunk of a continuous drive to a `K230CAN1` fixture and replay it
+through the controller (see [gtest/README.md](../gtest/README.md) for why a parked
+chunk fails):
 
 ```sh
 python3 tools/control/export_can_fixture.py <route>/events/003.bin drive.k230can
-```
-
-```sh
-cmake -S . -B build-host \
-  -DSUPERCOMBO_BUILD_RUNTIME=OFF \
-  -DSUPERCOMBO_BUILD_DIAGNOSTICS=ON
-cmake --build build-host --target check_control_replay
-./build-host/bin/check_control_replay drive.k230can
+./build-host/bin/gtest_control_replay drive.k230can
 ```
 
 The 60.001 second K7 YG HEV fixture contains 43,273 CAN records. The expected
 result is 5,970 messages each for bus-0 `LKAS11`, bus-1 `LKAS11`, and bus-2
-`MDPS12`, plus 2,985 bus-1 `CLU11` messages. The checker also validates the
-60 kph helper, model-path coordinate conversion, frame lengths, active ticks,
-and torque bounds.
+`MDPS12`, plus 2,985 bus-1 `CLU11` messages. The replay also checks frame
+lengths, active ticks, torque bounds, and the desired curvature against the
+openpilot reference.
 
 ## Shadow Run
 

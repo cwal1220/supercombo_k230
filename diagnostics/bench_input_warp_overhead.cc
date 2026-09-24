@@ -1,3 +1,6 @@
+/* 모델 입력 경로(NV12 → YUV6)의 CPU 시간을 잰다. 워프 없는 직접 패킹과 캘리브레이션 호모그래피
+ * 워프(스칼라·RVV, float·u8)를 비교하고, 경로끼리 결과가 비트까지 같은지 본다(다르면 종료 코드 1).
+ * 사용: bench_input_warp_overhead [--runs N]   (기본 2000회) */
 #include "app_config.h"
 #include "model_input_transform.h"
 #include "utils_math.h"
@@ -107,7 +110,15 @@ double bench_ms(int runs, Fn fn)
 
 int main(int argc, char **argv)
 {
-    const int runs = argc > 1 ? std::max(1, std::atoi(argv[1])) : 2000;
+    int runs = 2000;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--runs") == 0 && i + 1 < argc) {
+            runs = std::max(1, std::atoi(argv[++i]));
+        } else {
+            std::fprintf(stderr, "usage: %s [--runs N]\n", argv[0]);
+            return 2;
+        }
+    }
     std::vector<uint8_t> nv12(kModelW * kModelH * 3 / 2);
     std::vector<float> direct(kYuv6Floats, 0.0f);
     std::vector<float> warped(kYuv6Floats, 0.0f);

@@ -16,9 +16,8 @@ still be overridden with its environment variable; the model and debug mode can
 also be passed as command-line arguments.
 
 On the board, the image-provided `/etc/init.d/S35supercombo_k230` starts the
-same command automatically. `scripts/upload_to_board.sh` verifies that service
-and removes the legacy `S95supercombo_k230` script if present. Manual service
-controls are:
+same command automatically, and `scripts/upload_to_board.sh` refuses to deploy
+without it. Manual service controls are:
 
 ```sh
 /etc/init.d/S35supercombo_k230 start
@@ -48,8 +47,8 @@ minimal passive overlay subscriber.
 - opens `/dev/video1` through the verified `v4l2_drm` preview path
 - uses the ChanLKAS landscape layout: preview and ARGB overlay are both rendered
   at logical `800x480` and rotated together for the native `480x800` panel
-- subscribes to compact `modelState` and draws only plan/lane/road-edge/lead on a
-  double-buffered ARGB8888 overlay plane
+- subscribes to compact `modelState` and draws on a double-buffered ARGB8888
+  overlay plane
 - renders the K230 driving HUD adapted from `openpilot_c2_k230/previewd`, using
   the full `800x480` composition: center speed, left-side
   `OPENPILOT`/`CONTROL`/`DRIVE`/`TPMS` panels, right-side
@@ -71,6 +70,8 @@ minimal passive overlay subscriber.
 - captures `/dev/video2` as `NV12 1280x720`
 - copies frames into `/dev/shm/k230_road_ai`, an 8-slot shared NV12 ring
 - publishes only frame metadata as `roadAiFrame`
+- the crop is set only through this path; standalone `v4l2-ctl` / `v4l2-drm`
+  crop tests can leave the camera device in a bad state
 
 ### `k230_modeld`
 
@@ -120,6 +121,31 @@ minimal passive overlay subscriber.
 - publishes generated raw `sendcan` batches for `k230_pandad`
 - publishes compact `controlState` diagnostics for the display HUD
 - does not transmit by itself; actual TX still requires `K230_PANDA_TX=1`
+
+## Recording format
+
+`k230_recordd` writes the event log as 60 s chunks in `events/NNN.bin`, each
+starting with an 8-byte `K230LOG1` magic, a version word, and fixed 16-byte
+record headers. The current version is `5`.
+
+| Record type | Payload |
+| --- | ---: |
+| `CanRx` / `CanTx` | variable CAN batch |
+| `ModelState` | 3256 B |
+| `ControlState` | 240 B |
+| `PandaState` | 96 B |
+
+Older recordings are not `ModelState`-compatible: version 1 carried 4384 B
+including unused lateral draft fields, versions 2–3 carried 4080 B including the
+stop-line block that openpilot v0.9.4 does not emit, and version 4 carried
+4048 B including plan position stds and orientations that nothing read.
+Version 2 also kept a
+single route-level `events.bin`; CAN logging alone (~0.5 MB/s) filled the 988 MB
+tmpfs staging in about 30 minutes on long drives and silently killed the rest of
+the recording, which is why version 3 rotates event chunks alongside video
+segments. `tools/model/recording_reader.py` reads the v3, v4, and v5 layouts;
+`lane_bias.py`, `hud_tools.py`, `fit_lateral_params.py lag`, and
+`export_can_fixture.py` all walk the event log through its `iter_event_records`.
 
 ## IPC boundaries
 

@@ -1,4 +1,7 @@
 #!/bin/sh
+# 빌드에 필요한 deps/를 만든다: Kendryte nncase K230 런타임과 gsl-lite 헤더를 SHA256을 확인해
+# 받아 .cache/에 두고 deps/를 새로 푼다. 보드와 호스트 모두에서 돈다(POSIX sh).
+# 사용: scripts/fetch_nncase_runtime.sh
 set -eu
 
 VERSION="2.11.0"
